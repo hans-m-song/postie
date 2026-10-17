@@ -1,0 +1,135 @@
+# Postie roadmap
+
+Recorded 2026-10-17. M1 and M2 are complete locally under explicit user authorisation. M3–M5 remain not started. IDs are stable; do not reuse deleted IDs. Paste cURL is deferred beyond this implementation slice.
+
+This document records the approved high-level breakdown. User agreed on 2026-10-17 to keep local planning for now; TaskView records have not been created. Revisit TaskView migration only when project tracking is requested again.
+
+## Shared task contract
+
+## Initial Git baseline — complete locally, 2026-10-17
+
+T-47: independent security, architecture/performance and UI/specification reviews; correct substantiated findings, verify main functional requirements, audit repository contents and publish the initial baseline to configured origin. See baseline-review.md for roles, findings and verification checklist. No comprehensive test expansion or deferred product work.
+
+T-48 (complete): explicit Rename request… sidebar context-menu action, reusing the existing name dialog and autosave. Native rename/Cancel and persistence after restart passed. Depends on existing M2 saving; bounded UI-only change.
+
+T-49 (complete): removed project Python dependency per user clarification. Makefile packages/signs the app; a dependency-free Swift loopback fixture replaces the Python test server. Independent source review, all 46 existing functional tests, release packaging/signature and isolated launch gates passed. No comprehensive test expansion. Git history/upstream record publication state for T-47.
+
+## Approved usability follow-up — complete locally, 2026-10-17
+
+User approved this bounded slice after M1/M2: T-36 trailing empty query/header rows with focus retained; T-37 whole-heading disclosure hit targets and response headers collapsed by default; T-38 one-hop manual redirect from captured exchange without mutating saved settings; T-39 default configuration at ~/.config/postie without silently migrating/merging existing stores; T-40 literal :name path-segment parameters, encoded substitution and missing-value diagnostics; T-41 full-width method/URL/Send toolbar above both panes. Existing directory overrides remain. Verification uses synthetic isolated paths only. Main owns integration and durable docs; bounded workers own core path/storage, HTTP/model continuation and native views. Independent test/review required before completion.
+
+T-42 is deferred: session request log with expandable request headers, response headers and body. It does not authorise persisted history. M3–M5 otherwise remain deferred.
+
+Additional user steering during validation: T-43 (complete) Request/Settings tabs, moving redirect/time/size options to Settings; T-44 (complete) remove unexplained response right-side unused band by fixing container width. T-41 also addresses compact-window clipping. No deferred feature expansion.
+
+T-45/T-46 (complete): expand response/request bodies vertically under each pane's single outer vertical scrollbar, retaining bounded response previews and normal request editing/undo.
+
+Each task inherits its milestone goal, constraints, acceptance gate, and dependencies below. Main agent owns integration/handoff; bounded executors implement and independent tester/reviewer verify. User authorised M1/M2 on 2026-10-17 and delegated remaining implementation decisions. See implementation.md for concrete boundaries, ownership and evidence checklist. No M3–M5 work is authorised by this slice.
+
+## M1 — Make an HTTP request (complete)
+
+Goal: enter a URL, send a request, inspect its result.
+
+| ID | Deliverable | Dependency |
+|---|---|---|
+| T-01 | macOS shell with side-by-side request-left/response-right panes | Minimum macOS version decision |
+| T-02 | HTTP model and request preparation interface | None |
+| T-03 | Method, URL, query and header editors | T-01, T-02 |
+| T-04 | Text/JSON request bodies | T-02, T-03 |
+| T-05 | Concurrent per-request execution, cancellation, configurable timeouts/redirects, errors | T-02 |
+| T-06 | Visible running state, duration/progress, expandable per-hop headers and raw response | T-01, T-05 |
+| T-33 | File-backed response bodies, bounded previews and per-run cleanup | T-02, T-05 |
+| T-34 | Ongoing Requests view with live state/count, per-run Cancel and Open Request | T-01, T-05 |
+
+Gate: GET and POST to a local fixture; run different request identities concurrently, reject repeated sends of the same identity and cancel one without affecting another. Indicators/cancel remain accessible across navigation. Associate results/files with immutable run IDs; verify edits, repeated sends and late cancellation callbacks cannot overwrite/misattribute results. Verify Follow redirects on/off and expandable observed hop headers. Resolve cache, redirect loops/cross-origin handling and duplicate parameter/header representation; automatic cookie storage is deferred. Establish relaxed configurable time/transfer limits and bounded previews over file-backed bodies; numerical defaults are approved below, while disabled-limit semantics remain to be verified. Verify delayed/large/unknown-length responses, disk failures and cleanup. Agree fixture depth before implementation. See execution.md. UI and execution may proceed separately after T-02's interface is agreed; M1 completes only after T-33.
+
+## M2 — Save and organise requests (complete)
+
+Goal: resume saved work after restart. Depends on M1.
+
+| ID | Deliverable | Dependency |
+|---|---|---|
+| T-07 | Versioned JSON storage format in Application Support | T-02 |
+| T-08 | Collection creation, rename and deletion | T-07 |
+| T-09 | Named request creation, duplication and deletion | T-08 |
+| T-10 | Automatic save and restore | T-07, T-09 |
+| T-11 | Visible save/read failure handling; no silent overwrite | T-10 |
+| T-29 | Ordered collection index, per-request files and partial-operation recovery | T-07, T-09, T-10, T-11 |
+
+Gate: create multiple collections/requests, restart, and recover saved configuration. Verify malformed-file and failed-write handling. No folders, Git integration, automatic history, or response persistence in M2; explicit snapshots arrive in M5. Agree format, literal-field plaintext boundaries and deletion/recovery behaviour before parallel persistence/UI work. A version newer than supported must not be silently rewritten. M2 does not provide structured authentication/secret variables; ordinary literal configuration is persisted as entered.
+
+Storage proposal: one directory per collection, collection.json with ordered request IDs, one file per request identified by UUID filename, and separate globals.json. T-29 owns recovery between multi-file writes; see storage.md. Physical collection directories do not introduce product folders. Resolve multiple-app-instance writes and safe collection deletion before implementation.
+
+## M3 — Variables and authentication
+
+Goal: reuse configuration with predictable substitution. Depends on M2.
+
+| ID | Deliverable | Dependency |
+|---|---|---|
+| T-12 | Global, collection, request variable editors | T-07 |
+| T-13 | Request > collection > global resolution | T-12 |
+| T-14 | Substitution in URL/query/header/auth/text body | T-13 |
+| T-15 | Missing-reference diagnostics and resolved-value source | T-14 |
+| T-16 | None, Basic and Bearer authentication | T-14 |
+| T-17 | Encrypted auth/secret variables and Keychain-held key integration | T-07, T-16, T-32 |
+| T-32 | Simple at-rest encryption envelope, app key and failure handling | T-07 |
+
+Gate: override a name at all three scopes and inspect outgoing values; unresolved variables block sending/copying once cURL exists; encrypted values survive restart using the Keychain-held application key. No recursion or dynamic values. Resolve parsing, encoding, literal delimiters, secret visibility and Authorization conflict rules before implementation. Structured auth/secret saving must ship with encryption, never through a temporary plaintext path. Cover missing/denied Keychain, literal-to-secret conversion and independent duplicate/delete behaviour without app-key removal. No record/field binding or rename-dependent re-encryption is required initially. T-32 covers modified ciphertext rejection, unknown envelopes, no plaintext fallback and actual built-app Keychain access; see encryption.md.
+
+## M4 — Highlighting and editing
+
+Goal: comfortable editing and response inspection. Depends on M3; editor feasibility can be investigated earlier.
+
+| ID | Deliverable | Dependency |
+|---|---|---|
+| T-18 | Validate AppKit/SwiftUI editor approach | T-01 |
+| T-19 | None/JSON body syntax selector with independent template cues | T-18, T-14 |
+| T-20 | URL/header template and missing-reference highlighting | T-15 |
+| T-21 | Stacked response headers/body, collapsed redirect hops, None/JSON and Raw/Pretty | T-06, T-18 |
+| T-22 | Stable selection, cursor, undo and responsive editing | T-19, T-21 |
+| T-23 | Essential shortcuts and loading/error states | T-01 through T-22 as relevant |
+| T-30 | Native request search palette: name and stored URL/path across collections | T-09, T-10, T-29 |
+
+Gate: edit incomplete JSON containing templates without cursor disruption; inspect JSON/non-JSON; preserve original response data. Apply bounded reads/highlighting and full-body formatting thresholds over M1's file-backed bodies without blocking UI. Clearly mark partial previews without truncating stored bodies. Request editor and response renderer can be separate surfaces. Editor feasibility is an unresolved technical risk.
+
+T-30 gate: Command-K/menu invocation, case-insensitive name/URL/path matching, duplicate-name context, keyboard/pointer selection, empty/no-match handling and preserved edits on navigation. Search updates with saved-request changes, uses stable identities and opens without sending. No template resolution, persistent search index or generic command framework. See navigation.md. Can proceed independently of highlighting once persistence interfaces are stable.
+
+## M5 — cURL, saved snapshots and personal-use release
+
+Goal: routine personal use. Depends on M4.
+
+| ID | Deliverable | Dependency |
+|---|---|---|
+| T-24 | cURL generation from shared prepared request | T-02, T-16 |
+| T-25 | Shell quoting, bodies, headers and auth | T-24 |
+| T-26 | User-accessible credentials in deliberate cURL copying | T-17, T-25 |
+| T-27 | Focused verification of representative workflows | T-01 through T-26 |
+| T-28 | Locally installable build and storage/recovery documentation | T-27 |
+| T-31 | Explicit immutable request/response snapshots, view and deletion | T-05, T-06, T-11, T-17, T-21 |
+| T-35 | Paste cURL: bounded parser, request preview, edit and save without execution | T-02, T-09, T-17, T-25 |
+
+Gate: compare app/cURL request intent using an approved local fixture, including quotes, Unicode, JSON and authentication; restart and verify encrypted storage/Keychain access. Agree target shell and credential-copy interaction. Signing/distribution requirements are unresolved; no App Store release is assumed.
+
+Credential policy clarified 2026-10-17: allow the local user to view/edit sensitive values and deliberately copy executable commands containing them. Proposed ciphertext lives in JSON with the key in Keychain. No mandatory redaction or extra app-level approval flow is required; reveal/masking presentation remains a UI choice.
+
+T-27 also depends on T-29 through T-33 and verifies persistence recovery, search, encrypted values, concurrent result/cancellation ownership, redirect headers and large-response snapshots. New tasks are appended as stable IDs rather than renumbering T-01–T-28.
+
+T-27 also depends on T-34. Verify live activity navigation returns to the correct request without sending, cancellation is isolated, completion during row selection is safe, and the empty state/count are accurate.
+
+T-31 gate: manually save a completed exchange, restart and reconstruct request intent/view the original response despite source edits/deletion and live credential changes. Use metadata plus full body sidecar, staged before publication; retain the source body through concurrent save/rerun. Support non-2xx and non-text responses; no automatic history. Capture send-time templates, frozen encrypted inputs/settings and observed redirect chain. Resolve preparation compatibility and publication/recovery before implementation. See snapshots.md/encryption.md/execution.md. T-31 also depends on T-33; snapshot work can proceed separately from cURL after interfaces are agreed.
+
+## Verification and completion
+
+Latest baseline gates, 2026-10-17: independent reviews and bounded fixes complete; `make test` passes 46 tests (Core 38/AppModel 8), and `make app` produces the verified release bundle. See baseline-review.md. Earlier milestone counts below are historical.
+
+M1/M2 completion, 2026-10-17: T-01–T-11, T-29, T-33 and T-34 are complete locally. Independent verification passed 36 tests with zero failures; final source review found no blocking findings. The final app bundle was rebuilt/signature-verified and real UI flows checked, including concurrency, redirects, cancellation and restart persistence. See implementation.md for precise evidence and residual gaps. T-04 supports text/JSON bytes in a raw editor; T-19 owns syntax selection/highlighting. T-28 remains later release readiness despite the current local bundle.
+
+Decisions approved 2026-10-17: target the primary Mac initially (its intended OS/signing identity still needs verification); configurable 5-minute inactivity/30-minute overall/1 GiB transfer defaults; 10 followed redirects maximum without automatic cross-origin authentication; dimmed source placeholders preserve snapshot navigation after source deletion; general configuration import/export deferred but Paste cURL is in scope. Local roadmap remains the tracker. These decisions supersede older pending/default wording above. A host version check reported macOS 27.0.1; do not equate that observation with verified primary-Mac compatibility or signing setup.
+
+T-35 gate: supported quoted/multiline curl input becomes a previewable draft, never shell execution, automatic file access or network sending. Preserve documented supported flag semantics and reject unsupported constructs visibly. Verify supported cURL export/import round trips, raw body preservation, auth encryption and no original-command persistence. See curl-import.md. T-27 also depends on T-35.
+
+Latest UI clarification: T-03/T-04 stack query/header/body in one Request tab, with Auth/Variables separate. T-06/T-21 stack response exchange sections with redirect hops initially collapsed and final response expanded. No separate response Body/Headers/Redirects tabs. T-19/T-21 offer only None/JSON syntax; switching changes presentation, not bytes or Content-Type, and None preserves template cues. Verify defaults, independent scrolling and explicit formatting; XML/other languages remain deferred.
+
+UI clarification, 2026-10-17: side-by-side request/response initially; layout toggle deferred. T-31 groups snapshots beneath originating requests in the sidebar and must preserve discoverability after source deletion. Physical snapshot storage stays separate for simpler deletion independence. Current visual concepts and exact image-generation prompts are in docs/mockups/README.md; concepts are not an implemented or approved interface.
+
+Focused checks: resolver precedence/errors, prepared-request construction, JSON round trips/failure recovery, shell quoting. Manually assess the runnable editor and primary workflow. Add no broad UI suite without an agreed purpose. Each completed task requires evidence, an updated status, and any remaining limitations. M2 is the first useful stopping point; M5 completes the current initial scope.

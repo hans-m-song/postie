@@ -1,0 +1,118 @@
+# Decision log
+
+## 2026-10-17 — Reviewed initial baseline ready for check-in
+
+- Closed the two medium lifecycle findings, removed unused binary hex allocation, added explicit Rename request… and corrected fixture teardown after thread sampling located the unbounded wait. Independent follow-up reviews found no substantiated issues.
+- User clarified that project tooling should use Swift or Makefiles. Replaced both Python helpers with Makefile/static plist and a separate Swift loopback fixture; production app remains Swift-only and fixture is not bundled. Independent replacement reviews passed.
+- Final make test passed all 46 functional tests (Core38/AppModel8); one consequential regression added, existing assertions adapted, no comprehensive test expansion. Make app release build, strict signature verification, isolated launch and make fixture startup passed. Native selection/undo and rename/Cancel/restart passed. No user runtime data inspected or migrated.
+- Origin remained empty at final check; main selected. Repository contents audited, generated builds/runtime data excluded. Git history/upstream are authoritative for publication state.
+
+## 2026-10-17 — Initial baseline review authorised
+
+- User requested independent general review, a secure/efficient baseline and Git check-in after configuring origin. Confirmed no local HEAD and no advertised origin branches; chose main for initial publication. User explicitly limits tests to main functional requirements.
+- Three read-only reviewers examined HTTP/storage security, architecture/performance and native UI/specification. No actionable security finding; medium findings concern lost body undo/selection on tab switches and incomplete collection deletion cleanup after damaged-member recovery. Optional unused binary hex allocation is being removed. No broad refactor or deferred feature work justified.
+- Delegated three narrow corrections with protected surfaces and independent re-verification planned. See docs/baseline-review.md.
+- Independent tester later violated the explicit ban on unverified XCTest selector flags; the invalid invocation printed environment values and briefly wrote them to a temporary diagnostic log. Tester reported deleting that log; main stopped the agent, informed the user and did not reuse the diagnostic. Main owns further diagnosis through valid one-bundle invocations only. No such values are recorded here.
+
+## 2026-10-17 — Usability follow-up completed locally
+
+- T-36–T-41/T-43–T-46 implemented, independently reviewed and native UI checked. Both bodies grow under their pane's outer vertical scrollbar; native request paste/undo/redo/caret reveal verified. Response preview remains bounded.
+- Final rebuilt direct XCTest bundles passed Core38/AppModel7, zero failures. SwiftPM driver rebuilt but stalled without case output for30 seconds and was stopped. No final driver success claimed; unsupported Location test now explicitly bounded, production behavior unchanged.
+- Final debug app built/signature verified. Compact layout checked at1120×772; exact minimum sizing/IME unexercised. Current Git repository has untracked project files; no commit/merge performed. Updated completion docs/handoff, no runtime migration.
+
+## 2026-10-17 — Usability follow-up approved
+
+- User approved trailing blank query/header rows, whole-heading accordion hit targets, initially collapsed response headers, manual redirect following, ~/.config/postie default, path parameters and full-width URL toolbar.
+- User requested a request log as a later feature; recorded T-42, deferred. T-36–T-41 track current work. No implicit config migration/merge; existing runtime directories will not be inspected.
+- Bounded workers own path preparation/persistence, manual HTTP continuation/AppModel/default path, and native views respectively. Main owns integration/docs; independent review and isolated verification follow.
+- User reported compact-window clipping during native validation; T-41 expanded to correct layout minima and constrain long content, retaining side-by-side panes.
+- During validation user requested Request/Settings tabs with redirect/time/size options under Settings, and correction of a response-right unused band. Added T-43/T-44; UI worker owns bounded follow-up. Initial compact correction visibly restored the full sidebar and Send at 1120px; exact900/1000px resize could not be exercised through available UI dragging, so do not claim that evidence.
+- Runtime probes measured HSplit container830px versus child widths395+394 plus1px divider, leaving40px unallocated. A local NSSplitViewController with persistent NSHostingControllers removes the band; explicit host sizingOptions=[] delegates size constraints to the split items. Probes were removed. Native Settings values, input focus through model ticks and Cmd-Return were checked.
+- User requested one vertical scroll owner for each pane, with request/response bodies growing vertically. Recorded T-45/T-46; a bounded native growing request editor is authorised for this change, not general syntax-highlighting work.
+- A tester accidentally invoked XCTest help/usage in a form that printed process environment values in tool output. Main informed the user and directed no repetition/use. Tester confirmed no environment-derived data was saved to the project or validation logs. Do not reproduce that diagnostic.
+- Unsupported file-scheme redirect test exposed a platform assumption: URLSession can fail before its redirect delegate callback, leaving no HTTP response record. Kept production behavior; narrowed test to require a sanitized terminal failure without redirect/completion/cancellation in that platform path. Targeted correction passed.
+
+## 2026-10-17 — M1/M2 completed locally
+
+- Dependency-free SwiftPM core/native app, HTTP execution, flat collection persistence, autosave and Ongoing Requests implemented by bounded workers with regular checkpoints. Paste cURL deferred; no M3–M5 functionality shipped.
+- Independent verification passed 30 core and 6 app-model tests, zero failures. Final independent source review found no blocking issues. Corrected nullable-cap merge, body cleanup ordering, raw query fidelity, redirect effective method, cancellation presentation, partial-delete reconciliation, unknown-membership draft retention and termination draining accepted mutations.
+- Final debug bundle rebuilt and ad-hoc signature verified. Actual isolated GUI checked GET, redirects/headers, two concurrent runs, both cancellation routes, activity navigation, running Send disabled, and last edit retained across quit/restart. Approximately 4 MiB on disk; no memory/CPU benchmark or notarisation claim.
+- Minimum macOS 27.0 chosen to match available macOS 27.0.1/Xcode 27 host. Older-platform support remains unverified. Ordinary literal configuration is plaintext; auth/encryption and syntax highlighting remain later work.
+- Verification gap: termination structural-mutation race/10-second timeout source-reviewed without a focused deterministic test. Unreadable metadata shares the tested malformed path but lacks a separate model test. See implementation.md for exact evidence and limits.
+- The authorised notify-discord milestone command completed successfully after verification. The app was left open against its isolated synthetic GUI workspace, with no requests in flight.
+
+## 2026-10-17 — Initial scope recorded
+
+- User agreed to macOS-only personal use, flat collections, HTTP initially, global/collection/request variables, and literal template substitution.
+- User deferred scripts, functions, UUID/timestamp generation and OpenAPI importing. Existing storage specifications and Git integration are unnecessary initially.
+- User requested highlighting for input bodies, templates and responses; JSON-only initial highlighting was included in the accepted roadmap.
+- Recorded five vertical milestones and stable T-01–T-28 task IDs. No implementation has started.
+- Local JSON, Keychain references, SwiftUI/URLSession and a possible AppKit editor are the proposed technical approach, not verified implementation.
+- No project files were found during initial inventory, and git status reported that the directory is not a Git repository. No AGENTS.md or CLAUDE.md file was found; instructions supplied in conversation govern the work.
+
+## 2026-10-17 — Independent documentation review
+
+- Read-only reviewer DOC-REVIEW-01 inspected all five initial documents and reported three medium planning gaps: response limits scheduled after execution, ambiguous plaintext/Keychain boundaries, and unspecified result ownership during overlapping sends/edits.
+- Main agent recorded findings/dispositions in docs/review.md and amended the plan. Policy values and concurrency choice remain unapproved; acceptance now requires decisions before affected implementation.
+- Clarified that ordinary literal configuration is not automatically protected by Keychain; structured secrets must not pass through plaintext autosave.
+- TaskView project selection was requested asynchronously; no tracking records have been created.
+- Follow-up DOC-REVIEW-02 confirmed R-01–R-03 are addressed for planning with no substantiated residual material gaps. Implementation still requires relevant policy decisions and approval.
+
+## 2026-10-17 — Local access to sensitive values
+
+- User clarified that sensitive values may be accessible to the local user and endorsed Keychain storage.
+- Updated overview and M5 credential-copy task: viewing/editing and deliberate copying may expose values; no mandatory redaction or extra app-level approval flow is required. Reveal/masking UI remains undecided. Development-agent restrictions on reading secrets remain in force.
+
+## 2026-10-17 — File layout and request search proposal
+
+- User agreed to explore an ordered request-ID index in collection.json alongside one file per request and requested independent adversarial review.
+- User requested command-palette-style request search by name or URL/path. Recorded proposed navigation-only behaviour and case-insensitive matching; these details await review, not implementation.
+- Added storage.md/navigation.md and stable T-29 (index/recovery, M2), T-30 (request palette, M4). Existing task IDs are preserved.
+- User deferred iCloud sync to later exploration; it is not an implementation dependency.
+
+## 2026-10-17 — Explicit saved exchanges
+
+- During storage/palette review, user requested saving an instance of a request and response.
+- Added snapshots.md and T-31 in M5; automatic history remains deferred. Execution-time request/response identity is required; snapshot-specific secret capture and recovery remain open design details for independent review.
+- DOC-REVIEW-03 reported one low palette gap: identical visible labels. Added ID-based disambiguation and prefix-collision acceptance. Reviewer substantiated no other material storage/palette findings. Snapshot review continues separately as DOC-REVIEW-04.
+- DOC-REVIEW-04 verified the palette correction and reported no new material snapshot findings. Captured secret representation remains an implementation prerequisite. Added the requested bounded-retention clarification, pending a final narrow check.
+- DOC-REVIEW-04A confirmed bounded unsaved-exchange retention addresses the clarification; design remains proposed pending implementation approval.
+
+## 2026-10-17 — Encryption proposal under review
+
+- User proposed retaining snapshot templates with encrypted captured variable values and extending encrypted values to live secret variables. Named environments remain deferred.
+- Recorded candidate AES-GCM envelopes in JSON with an app-level Keychain key, frozen snapshot input maps and context binding; this replaces the per-secret Keychain approach as the proposal being reviewed.
+- Added stable T-32. User requested encryption-specific independent adversarial review, then another independent overall-plan review. Both are documentation reviews, not implementation approval.
+- ENC-REVIEW-01 found one medium gap: separately edited query entries were missing from snapshot capture fields. Added ordered query templates, duplicate/empty-value handling and verification; reviewer confirmed fixed and no remaining material findings. A different reviewer is now checking the overall plan.
+- PLAN-REVIEW-05 completed the separate overall review: no substantiated material defects or dependency cycles. Proposal is ready for concrete design decisions, not implementation approval. Recorded prioritised milestone prerequisites and review limitations in docs/review.md; updated handoff. No code or runtime tests were produced.
+
+## 2026-10-17 — Execution clarification and simpler at-rest proposal
+
+- User requested straightforward encryption at rest, allowing decrypted values in memory. Simplified the candidate envelope: removed record/field context binding, rename-dependent re-encryption and rotation machinery. Keychain app-key storage and no-plaintext-fallback remain.
+- User requested a Follow redirects setting with expandable full available headers for intermediate exchanges; automatic cookie storage can wait. Exact wire-header visibility is not promised.
+- User confirmed concurrent execution of different request configurations, at most one in-flight run per request, with obvious activity and cancellation. Extended T-05/T-06 and added T-33 for file-backed body lifecycle.
+- Recorded per-request latest transient results to support concurrency, file-backed bodies/bounded previews and snapshot metadata/body sidecars with staging. Numeric deadlines/size thresholds remain proposals, not approved defaults.
+- Prior review conclusions apply to historical drafts; these revisions have not received another independent review. No application code was written.
+
+## 2026-10-17 — Ongoing requests view and visual concepts
+
+- User requested a view of all ongoing requests with navigation back to the owning request configuration, plus visual mockups of the various views.
+- Added T-34 to M1 and activity-view navigation/acceptance. Mockups are visual proposals, not an approved interface or runnable app.
+- Generated four concepts using built-in image_gen, then revised/visually inspected side-by-side editor, ongoing requests, redirect inspection and palette views. Assets and exact generation/edit prompts are in docs/mockups. Corrected generated scope/layout errors; current files end in -v2.png.
+- User requested snapshots beneath originating requests in the sidebar and a side-by-side request/response layout; switching can wait. User allowed physical co-location only if simpler; retained separate disk storage to preserve source-deletion independence. Deleted-source discoverability remains open. These images are native-style concepts, not actual SwiftUI/AppKit rendering or approved implementation.
+
+## 2026-10-17 — Stacked editor sections and syntax selection
+
+- User requested query/headers/body stacked in the same Request view, with Auth/Variables separate tabs. Response headers/body/redirects are similarly stacked; redirect hops start collapsed and final response expanded.
+- User requested selectable syntax, initially None and JSON only. Recorded presentation-only selection with independent template cues and explicit formatting; XML/other modes remain deferred.
+- Revising the current editor concept to replace the superseded tab-based layout. No application code written.
+- Generated and visually inspected 01-request-editor-v3.png: stacked sections, only Request/Auth/Variables tabs, collapsed redirects/final expanded, and None/JSON selector. Saved exact prompt; README marks older tab-based concept backgrounds as superseded.
+- User accepted the v3 editor visual direction ("looks good") and requested remaining open decision threads. Implementation, platform/signing and concrete numerical defaults remain unapproved.
+- User subsequently agreed to recommended open-thread defaults and requested Paste cURL as an import exception. Recorded approved execution defaults, 10-hop/cross-origin policy, historical sidebar placeholders and local planning; added T-35 and curl-import.md. General config import/export stays deferred. Host version read returned 27.0.1; intended primary-Mac/signing remains unverified. No implementation or broader test approval inferred.
+
+## 2026-10-17 — M1/M2 implementation authorised
+
+- User explicitly requested implementation of M1/M2 with subagents, regular supervision, best-judgement decisions and later review notes. Paste cURL can wait. Recorded exact scope/ownership in implementation.md/interfaces.md.
+- Created dependency-free SwiftPM package, core shared models, native app worker, HTTP worker and persistence worker. Separate core target enables focused tests within one package.
+- Xcode27/Swift6.4 host verified. Sandbox blocked generated SwiftPM/XCBuild files; an auto-review-approved escalated trusted build with credential stores disabled compiled core and full app. No user signing identities/Keychain/runtime data were inspected.
+- Independent review identified nullable-limit merge, transient body cleanup, partial-delete UI state, final redirect method and cancellation outcome defects. Store cap fix is implemented with a regression; other fixes are assigned to original owners and independent tests are underway. No milestone completion claimed.

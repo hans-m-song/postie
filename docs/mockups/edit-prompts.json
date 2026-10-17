@@ -1,0 +1,54 @@
+{
+  "mode": "built-in image_gen",
+  "initialCorrections": [
+    {
+      "key": "activity",
+      "path": "/Users/axatol/Workspace/hans-m-song/postie/docs/mockups/02-ongoing-requests-draft.png",
+      "prompt": "Edit this native macOS Postie ongoing requests mockup. Preserve every layout element, label, row, sidebar, typography, button and all content exactly. Change ONLY the horizontal partially-filled progress bar below '24.6 MB received · Total size unknown': remove that bar entirely, leaving the text and existing blue circular spinner to indicate indeterminate progress. No new elements. Do not change Open Request or Cancel actions. Keep sharp light native appearance."
+    },
+    {
+      "key": "search",
+      "path": "/Users/axatol/Workspace/hans-m-song/postie/docs/mockups/04-request-search-draft.png",
+      "prompt": "Edit this native macOS Postie command palette mockup. Preserve the centered search panel completely unchanged: search field, results, selected row, all names, URLs, keyboard footer. Preserve all other layout and styling. Only correct out-of-scope labels in the dimmed background: replace the request tab 'Scripts' with 'Variables'; replace the response tab 'Cookies' with 'Redirects (2)'; replace response tab 'Timeline' with 'Raw'. No scripting or cookie management features exist in this app. Keep native light gray appearance. Do not add any new features or alter the palette."
+    }
+  ],
+  "sideBySideRevisions": [
+    {
+      "key": "editor",
+      "path": "/Users/axatol/Workspace/hans-m-song/postie/docs/mockups/01-request-editor.png",
+      "prompt": "Keep the light native macOS SwiftUI/AppKit visual direction, restrained blue accent, traffic lights, legible SF-like text. Static UI concept only. Change the sidebar: remove the top-level Snapshots navigation item. Show snapshots beneath their originating request using an expandable request row: under Shop API, POST Create order has an indented child with a small camera icon and label '17 Oct, 14:32 · 201'. This is a snapshot child, not a user-created folder. Keep Requests, Ongoing Requests badge 2 and Global Variables. All sidebar content must fit without clipping. No scripts, named environments or cookie management controls. Revise this screenshot to a SIDE-BY-SIDE request and response layout. Sidebar stays at left around 240px. Main content has two equally sized vertical columns separated by a thin draggable vertical divider. Left column heading 'Request · Create order', POST method plus '{{base_url}}/orders' URL field and Send button; Follow redirects checkbox; Query/Headers/Body/Auth/Variables tabs with Body selected; JSON body with purple {{status}} token and variable source helper. Right column heading 'Response', green '201 Created · 143 ms · 1.2 KB', Save Snapshot button, Body/Headers/Redirects tabs, Pretty JSON/Raw segmented control and syntax-highlighted JSON. Request body and response body both fill their respective columns to near bottom. No top-bottom request/response split anywhere. Preserve sample JSON semantics and no duplicate request or response sections. Keep Copy cURL on request side. Wider landscape composition is fine, but all labels must be readable."
+    },
+    {
+      "key": "activity",
+      "path": "/Users/axatol/Workspace/hans-m-song/postie/docs/mockups/02-ongoing-requests.png",
+      "prompt": "Keep the light native macOS SwiftUI/AppKit visual direction, restrained blue accent, traffic lights, legible SF-like text. Static UI concept only. Change the sidebar: remove the top-level Snapshots navigation item. Show snapshots beneath their originating request using an expandable request row: under Shop API, POST Create order has an indented child with a small camera icon and label '17 Oct, 14:32 · 201'. This is a snapshot child, not a user-created folder. Keep Requests, Ongoing Requests badge 2 and Global Variables. All sidebar content must fit without clipping. No scripts, named environments or cookie management controls. Keep the entire Ongoing Requests main view exactly: two running rows with elapsed time/received size, Open Request and Cancel actions, unknown total text, no filled progress bar. Only change the sidebar as instructed. Preserve typography and button sizing; no other changes."
+    },
+    {
+      "key": "redirects",
+      "path": "/Users/axatol/Workspace/hans-m-song/postie/docs/mockups/03-redirect-headers.png",
+      "prompt": "Keep the light native macOS SwiftUI/AppKit visual direction, restrained blue accent, traffic lights, legible SF-like text. Static UI concept only. Change the sidebar: remove the top-level Snapshots navigation item. Show snapshots beneath their originating request using an expandable request row: under Shop API, POST Create order has an indented child with a small camera icon and label '17 Oct, 14:32 · 201'. This is a snapshot child, not a user-created folder. Keep Requests, Ongoing Requests badge 2 and Global Variables. All sidebar content must fit without clipping. No scripts, named environments or cookie management controls. Revise main content into SIDE-BY-SIDE Request (left half) and Response (right half) columns with a vertical divider. Left Request panel: GET '{{base_url}}/legacy/orders', Send button, Follow redirects checked, tabs Query/Headers/Body/Auth/Variables and compact request headers table. Right Response panel: '200 OK · 312 ms · 1.2 KB', Save Snapshot button, tabs Body/Headers/Redirects (2), Redirects selected. Below, three vertical accordion sections: 302 GET /legacy/orders collapsed; 301 GET /v1/orders expanded; 200 GET /v2/orders collapsed. Inside expanded hop place Request headers and Response headers tables STACKED vertically to fit the narrower RESPONSE column; this is not a request/response main layout split. Preserve header values from original reference, readable at normal size. Keep footer caveat about URLSession header visibility. No main request-on-top/response-on-bottom layout."
+    },
+    {
+      "key": "search",
+      "path": "/Users/axatol/Workspace/hans-m-song/postie/docs/mockups/04-request-search.png",
+      "prompt": "Keep the light native macOS SwiftUI/AppKit visual direction, restrained blue accent, traffic lights, legible SF-like text. Static UI concept only. Change the sidebar: remove the top-level Snapshots navigation item. Show snapshots beneath their originating request using an expandable request row: under Shop API, POST Create order has an indented child with a small camera icon and label '17 Oct, 14:32 · 201'. This is a snapshot child, not a user-created folder. Keep Requests, Ongoing Requests badge 2 and Global Variables. All sidebar content must fit without clipping. No scripts, named environments or cookie management controls. Preserve the foreground command palette completely, including all results, selected row, text, keyboard hints and search term orders. Only revise the dimmed background main editor into a side-by-side layout, with Request editor on left and Response editor on right separated by vertical divider. Remove its old top-bottom split. Preserve the palette placement near upper center and legibility. Do not introduce scripts/cookies. Sidebar follows shared instruction. Main task remains request search."
+    }
+  ],
+  "finalCorrections": [
+    {
+      "key": "redirects",
+      "paths": [
+        "/Users/axatol/Workspace/hans-m-song/postie/docs/mockups/03-redirect-headers-v2-draft.png"
+      ],
+      "prompt": "Make a precisely localized correction to this Postie screenshot. Preserve all layout, side-by-side panels, controls, redirect header tables, and sidebar contents. Change only the breadcrumb text at top of request panel from 'Shop API / Create order' to 'Shop API / List orders'. Move sidebar selected highlight from POST Create order to GET List orders. Keep Create order and its snapshot child visible but unselected. The request is GET /legacy/orders, so List orders is the selected request. Do not change anything else."
+    },
+    {
+      "key": "search",
+      "paths": [
+        "/Users/axatol/Workspace/hans-m-song/postie/docs/mockups/01-request-editor-v2.png",
+        "/Users/axatol/Workspace/hans-m-song/postie/docs/mockups/04-request-search.png"
+      ],
+      "prompt": "Image 1 is the BASE EDIT TARGET: Postie native macOS side-by-side request and response editor. Preserve its entire layout, panel sizes, sidebar with snapshot under Create order, all labels, code and controls exactly. Image 2 is ONLY a REFERENCE for the foreground search palette. Add that search palette as a floating modal over Image 1, with dimming of the base screenshot. The modal should show search term orders, four request results with method/name/collection/templated URL, selected first result, and footer keyboard navigation. Use the same panel design as Image 2 but do NOT copy any of Image 2's background or sidebar. Critical: main app behind the modal must remain Image 1 exactly, with ONE Request column on left and ONE Response column on right. No extra response pane at bottom, no extra tabs or controls. No scripts, cookies or timelines. Flat light native macOS mockup, legible."
+    }
+  ]
+}
