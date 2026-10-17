@@ -6,6 +6,12 @@ This document records the approved high-level breakdown. User agreed on 2026-10-
 
 ## Shared task contract
 
+## T-50 — Table alignment and input typography (complete locally)
+
+Align query/header headings, saved rows and trailing entry rows using matching rail widths/padding. Use monospace for method, URL, parameter/header names and values, and numeric settings inputs. Preserve focus/promotion and current storage behavior. Bounded presentation-only change; release build and isolated native visual/editing check, no new automated tests. Main owns verification/docs; table_alignment_typography owns RequestEditorView.swift.
+
+Verified 2026-10-17: release build and strict signature check passed; native 900×652 window shows aligned query/header/path dividers and monospaced inputs. Continuous Tab entry promoted two query and header rows without losing focus. Widened response-limit field to120pt so the default grouped byte count fits. Independent scoped source review found no findings. No automated tests added or rerun for presentation-only changes.
+
 ## Initial Git baseline — complete locally, 2026-10-17
 
 T-47: independent security, architecture/performance and UI/specification reviews; correct substantiated findings, verify main functional requirements, audit repository contents and publish the initial baseline to configured origin. See baseline-review.md for roles, findings and verification checklist. No comprehensive test expansion or deferred product work.

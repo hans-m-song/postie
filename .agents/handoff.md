@@ -1,5 +1,7 @@
 # Handoff
 
+Latest follow-up: T-50 table alignment/input typography completed locally. Query/header headings, saved/empty rows share dimensions; protocol and numeric inputs are monospaced. Release rebuild5.45seconds and isolated native alignment/Tab/path/settings checks passed; default response-size field widened to120pt. Scoped independent review found no findings. No automated tests added/rerun for presentation-only changes. Validation app closed. Keep commits local; no push authorised.
+
 Updated 2026-10-17. M1/M2, usability T-36–T-41/T-43–T-46, baseline review T-47, rename T-48 and Swift/Makefile tooling T-49 are complete locally. No worker remains incomplete. Baseline commit: a3aa26ba7c2cfc8b813f4b6a6cc85e5b12ae239f, branch main. User explicitly chose to keep the commit local; do not push without a new request. Origin is configured but no project content was pushed. Automatic review rejected the initial push attempt before execution because external-upload authorisation was unclear.
 
 ## Read first
@@ -8,7 +10,7 @@ docs/baseline-review.md records current reviews, findings, verification and limi
 
 ## Current deliverable and verification
 
-dist/Postie.app is the release bundle, macOS27.0+, ad-hoc signature verified. Final make test passed all46 tests (Core38/AppModel8), zero failures, using the Swift fixture. Make app built in13.06seconds; strict signature and isolated launch passed. Make fixture emitted its loopback port, then was intentionally stopped.
+dist/Postie.app is the release bundle, macOS27.0+, ad-hoc signature verified. Baseline make test passed all46 tests (Core38/AppModel8), zero failures, using the Swift fixture. Baseline make app built in13.06seconds; T-50's latest incremental release build passed in5.45seconds. Strict signature and isolated launch passed. Make fixture emitted its loopback port, then was intentionally stopped.
 
 Independent security, architecture/performance and UI/specification reviews closed substantiated findings. Corrected retained-request collection deletion, body selection/undo across Settings, unused binary formatting and fixture teardown. Explicit Rename request… works through the sidebar context menu; native Save/Cancel/restart and editor selection/undo/redo passed.
 

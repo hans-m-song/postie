@@ -1,5 +1,11 @@
 # Decision log
 
+## 2026-10-17 — T-50 table alignment and typography
+
+- User reported misaligned header columns and requested monospaced inputs. Matched query/header heading/row horizontalpadding8pt and checkbox/placeholder rails26pt, with equal flexible column constraints. Path headings match their row constraints.
+- Method/URL, query/header names/values, path values and numeric settings inputs now use monospace. Body was already monospace; human-facing names/labels retain native fonts. Widened response-size input to120pt after native check caught default-number clipping.
+- Release rebuild and strict signature check passed. Isolated900×652 native window verified aligned populated/blank rows, path columns, fonts, continuous Tab entry/focus and complete default byte count. Scoped independent source review found no findings. No automated tests added/rerun for presentation-only changes. Synthetic validation app closed, user config untouched; local-only Git preference retained.
+
 ## 2026-10-17 — Baseline committed locally
 
 - Created baseline commit a3aa26ba7c2cfc8b813f4b6a6cc85e5b12ae239f on main, containing reviewed Swift/Makefile sources, focused functional tests and project documentation/mockups. Generated bundles/runtime data excluded.
