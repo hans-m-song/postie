@@ -6,6 +6,12 @@ This document records the approved high-level breakdown. User agreed on 2026-10-
 
 ## Shared task contract
 
+## T-56 — Referenced variable value actions (complete locally)
+
+Authorised2026-10-17: View full ordinary values, Reveal/Hide secrets and Copy full values directly from the referenced-variable summary. Decrypt only on explicit Reveal/Copy; clear revealed buffers on dismissal/navigation and reject stale async results. Reuse existing variable resolution and Keychain-backed decryption. Main owns integration/docs; referenced_value_actions owns the row/view; independent review and isolated synthetic native check. No comprehensive tests or deferred feature expansion.
+
+Verified2026-10-17: release build and82 existing functional tests passed; independent review closed a captured-tab-state timing gap using a live activity binding. Native synthetic checks passed full-value viewing, full ordinary Copy, secret Copy without Reveal, Reveal/Hide and tab dismissal. Narrow-pane label wrapping corrected. Async stale-result guards are source-reviewed, without delayed-Keychain fault injection. No new automated tests. Copy intentionally places plaintext on the system clipboard; hiding the popover does not clear the clipboard.
+
 ## Approved collection settings follow-up — complete locally
 
 T-52 Collection Variables/Headers/Auth page and shared defaults; T-53 variable tables/trailing rows/reversible Secret checkbox; T-54 URL variable autocomplete; T-55 collection context menu without overflow icon and tighter request-method inset. Authorised2026-10-17. Inheritance, compatibility, ownership and acceptance: collection-settings.md. Depends on M3/M4. No M5 expansion.

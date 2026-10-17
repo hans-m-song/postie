@@ -268,27 +268,16 @@ struct RequestEditorView: View {
                 Text("Up to 128 names from the first 1 MiB of input templates. Secret auth inputs resolve when sending.")
                     .font(.caption).foregroundStyle(.secondary)
                 ForEach(referencedVariableNames, id: \.self) { name in
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text("{{\(name)}}")
-                            .font(.system(.caption, design: .monospaced))
-                            .foregroundStyle(variableDetails(name) == nil ? Color.red : Color.teal)
-                        Spacer(minLength: 0)
-                        if let (scope, value) = variableDetails(name) {
-                            Text(scope).foregroundStyle(.secondary)
-                            switch value {
-                            case .encrypted:
-                                Label("Secret", systemImage: "lock.fill").foregroundStyle(.secondary)
-                            case let .plain(value):
-                                Text(value.isEmpty ? "(empty)" : value)
-                                    .font(.system(.caption, design: .monospaced))
-                                    .lineLimit(1).truncationMode(.middle)
-                                    .frame(maxWidth: 140, alignment: .trailing)
-                            }
-                        } else {
-                            Text("Missing").foregroundStyle(.red)
-                        }
-                    }
-                    .font(.caption)
+                    ReferencedVariableRow(
+                        identity: identity,
+                        name: name,
+                        details: variableDetails(name),
+                        isActive: Binding(
+                            get: { selectedSection == .request },
+                            set: { _ in }
+                        )
+                    )
+                    .id(ReferencedVariableRowIdentity(identity: identity, name: name))
                 }
             }
             .padding(10)
@@ -312,12 +301,9 @@ struct RequestEditorView: View {
         return sources
     }
 
-    private func variableDetails(_ name: String) -> (String, VariableValue)? {
+    private func variableDetails(_ name: String) -> ReferencedVariableDetails? {
         let context = model.variableContext(for: identity)
-        if let value = context.request[name] { return ("Request", value) }
-        if let value = context.collection[name] { return ("Collection", value) }
-        if let value = context.global[name] { return ("Global", value) }
-        return nil
+        return ReferencedVariableDetails.resolve(name: name, identity: identity, context: context)
     }
 
     private func retainedSection<Content: View>(_ content: Content, isActive: Bool) -> some View {

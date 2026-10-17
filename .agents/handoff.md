@@ -1,23 +1,25 @@
 # Handoff
 
-Updated 2026-10-17. M1–M4 and collection follow-up T-52–T-55 are complete locally. Keep commits local, never push without a new request. Prior baseline commit96624aa; final local commit records the follow-up. Canonical decisions/reviews/limits: docs/collection-settings.md. Main alone edits .agents documents.
+Updated 2026-10-17. M1–M4 and follow-ups T-52–T-56 are complete locally. Keep commits local; never push without a new request. Prior collection follow-up commitbc4eb54, baseline96624aa. Main alone edits .agents documents. No incomplete worker or worktree.
 
-## Delivered
+## Latest delivery: T-56
 
-Collection Variables/Headers/Auth page; name opens page, arrow expands requests, right-click actions and no ellipsis. Request method inset tightened. Shared headers with case-insensitive request override and disabled-row suppression. Request auth Inherit/None/Basic/Bearer; old requests explicit, newly created inherit. Name/Value/Secret tables with trailing entry rows and reversible checkboxes. Native URL autocomplete with scope/secret metadata, keyboard acceptance and undo.
+Referenced-variable summary now has View for full ordinary values, Reveal/Hide for secrets, and full-value Copy for both without requiring Reveal. Decryption only occurs on explicit action. Revealed text and pending operations clear/invalidate on dismissal, tab/navigation/value/scope/request change. Copy intentionally writes plaintext to the system clipboard; hiding does not clear the clipboard. Uses existing AppModel reveal API and unchanged persistence.
 
-## Verification
+Independent review closed captured-tab-state timing using a live Binding and live model selection/value guards; no remaining finding. Independent make test passed82 (Core58/App24), zero failures. Release build passed. Native synthetic checks passed full ordinary View/Copy, secret Copy without Reveal, Reveal/Hide, tab dismissal and compact layout. No new automated tests; no delayed-Keychain fault injection or clipboard-contention test.
 
-Independent final make test passed82 (Core58/App24), zero failures. Release build passed. Source reviews repaired URL-tail deletion, unstable trailing-row promotion and failed-secret target cleanup on rename/retry/plain conversion/navigation; final narrow recheck found no substantiated blocker. Repository audit found no unrelated feature changes/artifacts. Native passed collection page/right-click; variable full-name promotion/Tab/value; collection header entry; inherited request scope, request override and disabled suppression; autocomplete labels/Down/Tab/Escape/undo/request-switch dismissal; Secret check/uncheck; shared Bearer execution and same-binary restart decryption; legacy explicit None retained.
+## Earlier delivery
 
-## Artifacts
+Collection Variables/Headers/Auth page; name opens page, arrow expands requests, right-click actions without ellipsis; tighter method inset. Shared headers with request override/disabled suppression; old auth explicit, new requests inherit. Name/Value/Secret trailing-row tables and reversible checkbox. Native URL completion. Evidence/limits: docs/collection-settings.md; roadmap T-56 contains latest verification. M5/cURL/snapshots/T-42 request log/sync remain deferred. Approved local roadmap; no TaskView project.
 
-Normal output dist/Postie.app, release/ad-hoc signed. Build root /Volumes/Data/cache/postie-m34; logs /Volumes/Data/tmp/postie-m34/collection-functional-final.log and collection-dist-final.log. make app/test/fixture use Swift/Makefile/plist, no Python. Use verified make test only, never XCTest help/unverified flags.
+## Build and isolated artifacts
 
-Synthetic .build/collection-validation/Postie.app uses ID dev.postie.validation.collections.20261017b, matching new Keychain service suffix .workspace-encryption. Data/bodies are only under that ignored collection-validation folder; app closed. Fixture session12258 at127.0.0.1:54611 stopped intentionally. Do not delete synthetic Keychain items automatically. Any future launch must use explicit synthetic --data-directory/--body-directory; never default config.
+Normal output dist/Postie.app release/ad-hoc signed. Build root /Volumes/Data/cache/postie-m34; logs /Volumes/Data/tmp/postie-m34/referenced-tests.log, referenced-layout-final.log, referenced-dist-final.log. Swift/Makefile/plist only. Use verified make test; never XCTest help/unverified flags.
 
-## Limits and next scope
+New synthetic app .build/referenced-validation/Postie.app, ID dev.postie.validation.references.20261017a, same service suffix .workspace-encryption. Data/bodies only beneath that ignored validation folder; app closed. Prior .build/collection-validation app also closed; fixture12258 stopped. Do not delete synthetic Keychain items automatically. Future validation must launch with explicit --data-directory/--body-directory, never user defaults. No existing user data/keys inspected.
 
-M5/cURL/snapshots/T-42 request log/sync remain deferred. No TaskView project authorised; approved local roadmap. No worktree. IME/light-mode runtime/performance/distribution/TLS/proxy behavior not claimed. Completion matching is capped but effective metadata list construction still scales with configured names. Failed-secret UI fault paths were source-reviewed, not native fault-injected. Stable signing needed before promising Keychain continuity across changed binaries.
+## Constraints and residual limits
 
-Never inspect environment, PII, existing runtime configuration/credentials, .env/.config/.aws/.ssh, or existing Keychain items. Only synthetic directories/fakekeys/loopback/exact new services. OS protected dialogs/passwords require user handoff. No comprehensive test expansion.
+Never inspect environment, PII, existing runtime configuration/credentials, .env/.config/.aws/.ssh or existing Keychain items. Only synthetic directories/fakekeys/loopback/exact new services. OS protected dialogs/passwords require user. No comprehensive tests.
+
+IME/light-mode runtime/performance/distribution/TLS/proxy behavior unclaimed. Stable signing needed before promising Keychain continuity across changed binaries. Completion matcher capped, but effective metadata construction scales with configured names. Failed-secret UI fault paths independently source-reviewed rather than native fault-injected.

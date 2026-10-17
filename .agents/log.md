@@ -1,5 +1,12 @@
 # Decision log
 
+## 2026-10-17 — T-56 referenced variable value actions completed locally
+
+- User approved View full ordinary values, Reveal/Hide encrypted values, and full-value Copy without prior Reveal. ReferencedVariableRow resolves request > collection > global and reuses existing on-demand Keychain decryption; it does not change persisted configuration.
+- Revealed buffers clear and pending operations invalidate on dismissal, tab/navigation/value/scope/request changes. Independent review identified captured tab-state timing; a live activity Binding plus model selection/value checks closes it. Final source review found no remaining issue.
+- Independent existing82 tests passed, zero failures; no automated tests added for the UI-only change. Release builds passed. Synthetic native checks verified full ordinary viewing/copy, secret Copy without Reveal, explicit Reveal/Hide and tab dismissal. Compact label wrapping repaired and visually rechecked. Delayed-Keychain fault injection was not performed.
+- Copy intentionally writes plaintext to the system clipboard; hiding does not erase the clipboard. Existing user configuration/keys were not inspected. New isolated service dev.postie.validation.references.20261017a.workspace-encryption only; validation app closed. Local-only commit; no push.
+
 ## 2026-10-17 — T-52–T-55 collection settings follow-up completed locally
 
 - User approved collection page, shared headers/auth, reversible variable table, URL autocomplete and tighter request-method inset; additionally requested collection context-menu actions with no ellipsis. Name opens settings; arrow expands/collapses requests.
