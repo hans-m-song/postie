@@ -157,3 +157,9 @@
 - Native validation caught promoted-row focus loss and doubled URL drawing. State-backed native focus, queued transition guards and editing-cell drawing fix passed full header entry/Tab, hidden-tab input isolation and single-render missing cues. None/JSON preserved body undo; palette Escape restored selection. Compact response-control labels were corrected against minimum-size screenshots.
 - Final independent make test passed66 (Core53/App13), release build and strict signature passed. Actual new synthetic Keychain key creation, secret conversion/Bearer and same-binary restart passed. Resigned rebuild prompted for access; user approved, unattended rebuild continuity remains unverified. Do not weaken ACLs. OS removable-volume dialogs require user action because Computer Use blocks UserNotificationCenter.
 - Only isolated synthetic paths/new services/loopback were used, never existing runtime config or keys. Owned validation apps closed and fixture stopped. Local commit only, no push. Details and residual IME/light/performance/signing limits: docs/implementation-m3-m4.md.
+
+## 2026-10-17 — Memory capacity assessment, no implementation
+
+- User clarified increased footprint across feature builds rather than an observed session leak. Used synthetic current-release UI and loopback responses, RSS counters only. Measurements and independent source audit recorded in docs/memory-baseline.md.
+- RSS was99–113MiB empty,142MiB empty editor,162MiB smallJSON,210–216MiB for8/32MiB body with1MiB preview. No historical matched-build comparison or allocation attribution; no leak conclusion. App/fixture closed.
+- Proposed selected-request-only preview retention and100 request-body undo groups; implementation awaits approval. No source changes or tests/builds for assessment.

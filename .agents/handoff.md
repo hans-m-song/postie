@@ -23,3 +23,7 @@ New synthetic app .build/referenced-validation/Postie.app, ID dev.postie.validat
 Never inspect environment, PII, existing runtime configuration/credentials, .env/.config/.aws/.ssh or existing Keychain items. Only synthetic directories/fakekeys/loopback/exact new services. OS protected dialogs/passwords require user. No comprehensive tests.
 
 IME/light-mode runtime/performance/distribution/TLS/proxy behavior unclaimed. Stable signing needed before promising Keychain continuity across changed binaries. Completion matcher capped, but effective metadata construction scales with configured names. Failed-secret UI fault paths independently source-reviewed rather than native fault-injected.
+
+## Pending memory-budget follow-up
+
+User clarified feature footprint growth rather than a session leak. Current8e0a6eb synthetic RSS measured99–113MiB empty,142MiB editor,162MiB smallJSON,210–216MiB large file-backed response/1MiB preview. No matched older build or allocation profile; no leak conclusion. Independent audits confirm no aggregate retained-preview budget and no explicit body undo depth. See docs/memory-baseline.md for exact observations and proposed selected-request-only preview plus100 undo groups. Code changes await user approval. No code/test/build/commit for this assessment. Isolated empty workspace .build/memory-validation used existing reference-validation binary; process84572 and fixture7812 at63825 closed intentionally. No user configuration/process contents accessed.
