@@ -13,6 +13,8 @@ Started 2026-10-17. User authorised independent general review, correction of su
 - [x] Replace Python tooling with Makefile packaging and Swift HTTP fixture; review and re-run existing functional gates.
 - [x] Audit repository contents, record limitations and prepare the initial baseline. Git history/upstream record the publication state.
 
+Git outcome: baseline committed locally as `a3aa26b` on `main`. User explicitly chose local-only tracking after automatic review rejected the unapproved upload. Nothing was pushed to origin.
+
 Testing constraint: user explicitly prefers tests of main functional requirements, not comprehensive testing. Add regression cases only for concrete consequential findings. Avoid speculative abstractions, benchmarks, CI infrastructure or deferred product features.
 
 ## Findings and disposition

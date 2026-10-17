@@ -14,6 +14,8 @@ T-48 (complete): explicit Rename request… sidebar context-menu action, reusing
 
 T-49 (complete): removed project Python dependency per user clarification. Makefile packages/signs the app; a dependency-free Swift loopback fixture replaces the Python test server. Independent source review, all 46 existing functional tests, release packaging/signature and isolated launch gates passed. No comprehensive test expansion. Git history/upstream record publication state for T-47.
 
+T-47 Git outcome: local baseline `a3aa26b` on main. User explicitly chose to keep commits local; no push is authorised or pending.
+
 ## Approved usability follow-up — complete locally, 2026-10-17
 
 User approved this bounded slice after M1/M2: T-36 trailing empty query/header rows with focus retained; T-37 whole-heading disclosure hit targets and response headers collapsed by default; T-38 one-hop manual redirect from captured exchange without mutating saved settings; T-39 default configuration at ~/.config/postie without silently migrating/merging existing stores; T-40 literal :name path-segment parameters, encoded substitution and missing-value diagnostics; T-41 full-width method/URL/Send toolbar above both panes. Existing directory overrides remain. Verification uses synthetic isolated paths only. Main owns integration and durable docs; bounded workers own core path/storage, HTTP/model continuation and native views. Independent test/review required before completion.

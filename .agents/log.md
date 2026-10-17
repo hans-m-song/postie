@@ -1,5 +1,10 @@
 # Decision log
 
+## 2026-10-17 — Baseline committed locally
+
+- Created baseline commit a3aa26ba7c2cfc8b813f4b6a6cc85e5b12ae239f on main, containing reviewed Swift/Makefile sources, focused functional tests and project documentation/mockups. Generated bundles/runtime data excluded.
+- Automatic approval review rejected git push before execution because local check-in did not clearly authorise uploading the project to GitHub. Main reported the rejection and asked about that concrete payload/destination. User explicitly answered Keep the commit local. No push occurred; do not infer push authorisation from configured origin in future.
+
 ## 2026-10-17 — Reviewed initial baseline ready for check-in
 
 - Closed the two medium lifecycle findings, removed unused binary hex allocation, added explicit Rename request… and corrected fixture teardown after thread sampling located the unbounded wait. Independent follow-up reviews found no substantiated issues.

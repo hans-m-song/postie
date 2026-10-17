@@ -1,6 +1,6 @@
 # Handoff
 
-Updated 2026-10-17. M1/M2, usability T-36–T-41/T-43–T-46, baseline review T-47, rename T-48 and Swift/Makefile tooling T-49 are complete locally. No worker remains incomplete. Git origin is https://github.com/hans-m-song/postie.git and branch main; consult Git history/status for publication state.
+Updated 2026-10-17. M1/M2, usability T-36–T-41/T-43–T-46, baseline review T-47, rename T-48 and Swift/Makefile tooling T-49 are complete locally. No worker remains incomplete. Baseline commit: a3aa26ba7c2cfc8b813f4b6a6cc85e5b12ae239f, branch main. User explicitly chose to keep the commit local; do not push without a new request. Origin is configured but no project content was pushed. Automatic review rejected the initial push attempt before execution because external-upload authorisation was unclear.
 
 ## Read first
 
