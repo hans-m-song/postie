@@ -1,6 +1,6 @@
 # Postie overview
 
-Status: M1/M2 implemented and locally verified on 2026-10-17. Remaining product scope below is planned; see implementation.md for evidence and decisions.
+Status: M1–M4 implemented and locally verified on 2026-10-17; see implementation-m3-m4.md for current decisions, audit results and limits. M5 remains deferred.
 
 ## Goal
 
@@ -15,7 +15,7 @@ A lightweight native macOS HTTP client for personal use. Make requests, save the
 - None, Basic, and Bearer authentication.
 - Response status, elapsed time, headers, raw body, and formatted JSON where valid.
 - Initial layout: request editor left, response right, with a resizable divider. Top/bottom layout switching is deferred.
-- Current request tabs are Request and Settings. Request stacks query/path parameters, headers and a growing body editor; Settings holds redirect, timeout and size options. Auth and Variables tabs remain planned. The response column stacks exchange disclosures: redirect hops and header groups collapsed initially, final response expanded. Each pane owns one vertical scroll area; raw response lines can scroll horizontally. No separate response Body/Headers/Redirects tabs.
+- Request tabs are Request, Auth, Variables and Settings. Request stacks query/path parameters, headers and a growing body editor; Settings holds redirect, timeout and size options. The response column stacks exchange disclosures: redirect hops and header groups collapsed initially, final response expanded. Each pane owns one vertical scroll area; raw response lines can scroll horizontally. No separate response Body/Headers/Redirects tabs.
 - Request and response body syntax selectors support None and JSON initially. None disables language colouring but preserves request-template token/missing-variable cues. JSON enables JSON highlighting. Syntax selection alone does not rewrite bytes, change Content-Type, substitute variables or pretty-print; formatting remains an explicit display/action choice. XML/other syntax modes are deferred.
 - Concurrent execution across request identities, with one in-flight execution per request. Visible running state, elapsed time and per-run cancellation remain available across navigation.
 - Ongoing Requests view listing active executions with Cancel and Open Request navigation actions.
@@ -23,7 +23,7 @@ A lightweight native macOS HTTP client for personal use. Make requests, save the
 - File-backed large responses with configurable defaults: 5-minute inactivity timeout, 30-minute overall deadline and 1 GiB transfer cap. Display thresholds: 1 MiB preview and 5 MiB full JSON formatting. User approved these recommendations; disabled-limit platform semantics still need verification.
 - JSON and template highlighting in request bodies; template highlighting in URL/header values; JSON highlighting in responses. Incomplete JSON remains editable.
 - Automatic local saving and restoration using a versioned application-owned JSON format in ~/.config/postie. Existing stores are not migrated automatically; explicit directory overrides remain supported.
-- Proposed encrypted authentication secrets and marked-secret variables in JSON, with the encryption key in Keychain. See encryption.md; replaces per-secret Keychain references if adopted after review.
+- Encrypted authentication secrets and marked-secret variables in JSON, with one application encryption key in Keychain. See encryption.md and implementation-m3-m4.md. Ordinary literal values remain plaintext.
 - Copy a prepared HTTP request as cURL.
 - Paste a supported cURL command into a previewable request draft without executing it; see curl-import.md.
 - Command-palette-style navigation searching saved requests across collections by name or stored URL/path; opening a result does not send it. See navigation.md.
@@ -42,7 +42,7 @@ General configuration export/import is deferred by user agreement. Copy as cURL 
 
 ## Architecture and technology
 
-SwiftUI app with an AppKit split container and growing request-body editor, Foundation URLSession and versioned JSON persistence. The dependency-free SwiftPM package contains a core library, native executable and focused test targets. Keychain integration and syntax highlighting remain later work. A database and general protocol framework are unnecessary.
+SwiftUI app with AppKit split/text controls, Foundation URLSession, CryptoKit authenticated encryption, Keychain Services and versioned JSON persistence. The dependency-free SwiftPM package contains a core library, native executable and focused test targets. A database and general protocol framework are unnecessary.
 
 ```text
 UI -> request preparation -> HTTP execution
@@ -63,7 +63,7 @@ User clarification, 2026-10-17: sensitive values may be accessible to the local 
 
 ## Workflow and decisions still required
 
-Follow the vertical slices in roadmap.md. User explicitly authorised M1/M2 implementation and the bounded local fixture/tests on 2026-10-17. Those slices are implemented; see implementation.md for runtime evidence, review dispositions and limitations. M3–M5 remain unimplemented.
+Follow the vertical slices in roadmap.md. M1/M2 are implemented; see implementation.md for evidence and limitations. User subsequently authorised M3/M4 on 2026-10-17; implementation-m3-m4.md tracks that work. M5 remains unimplemented.
 
 Before M1, verify the primary-Mac deployment/signing target and approved execution defaults, and settle cache behaviour, duplicate headers/query representation, disabled-limit semantics, non-text handling and temporary-file lifecycle. Redirect following is configurable; automatic cookie storage is deferred. Concurrent requests with one in-flight run per identity and accessible cancellation are required. Late callbacks must not overwrite/misattribute results or another run's files. Before M2, settle literal-field persistence boundaries and save failure/recovery. Before M3, settle header/auth conflicts, template parsing/encoding and basic at-rest key lifecycle. Before M5, settle snapshot sidecar publication/reconstruction and explicit secret copying behaviour. Body types beyond text remain deferred unless specifically approved. These are unresolved design details, not implemented capabilities.
 

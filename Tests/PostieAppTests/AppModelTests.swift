@@ -303,14 +303,156 @@ final class AppModelTests: XCTestCase {
         _ = await model.prepareForTermination()
     }
 
-    private func makeModel(root: URL) throws -> AppModel {
+    func testScopedVariablesPersistRestartAndResolveRequestPrecedence() async throws {
+        let root = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let keyStore = AppModelKeyStore()
+        var savedIdentity: RequestIdentity?
+        weak var firstModel: AppModel?
+        do {
+            let model = try makeModel(root: root, secretVault: SecretVault(keyStore: keyStore))
+            firstModel = model
+            try await waitUntil { model.canEditVariables(.global) }
+            await model.createCollection(name: "Synthetic scopes")
+            let collectionID = try XCTUnwrap(model.collections.first?.id)
+            await model.createRequest(in: collectionID)
+            let request = try XCTUnwrap(model.collections.first?.requests.first)
+            let requestIdentity = identity(collectionID, request)
+            savedIdentity = requestIdentity
+            try await model.setVariable(name: "host", value: "global.test", isSecret: false, owner: .global)
+            try await model.setVariable(name: "host", value: "collection.test", isSecret: false, owner: .collection(collectionID))
+            try await model.setVariable(name: "host", value: "request.test", isSecret: false, owner: .request(requestIdentity))
+            try await model.setVariable(name: "credential", value: "synthetic protected value", isSecret: true, owner: .request(requestIdentity))
+            model.updateDraft(requestIdentity) { $0.url = "https://{{host}}/" }
+            let prepared = try await RequestPreparer.prepare(
+                try XCTUnwrap(model.request(for: requestIdentity)),
+                context: model.variableContext(for: requestIdentity),
+                decryptor: nil
+            )
+            XCTAssertEqual(prepared.request.url?.host, "request.test")
+            XCTAssertEqual(prepared.referencedInputs["host"]?.scope, .request)
+            let terminated = await model.prepareForTermination()
+            XCTAssertTrue(terminated)
+            let serialized = try String(contentsOf: requestFileURL(root: root, identity: requestIdentity), encoding: .utf8)
+            XCTAssertFalse(serialized.contains("synthetic protected value"))
+        }
+        try await waitUntil { firstModel == nil }
+
+        let reloaded = try makeModel(root: root, secretVault: SecretVault(keyStore: keyStore))
+        let requestIdentity = try XCTUnwrap(savedIdentity)
+        try await waitUntil { reloaded.request(for: requestIdentity) != nil && reloaded.canEditVariables(.global) }
+        XCTAssertEqual(reloaded.variables(for: .global)["host"], .plain("global.test"))
+        XCTAssertEqual(reloaded.variables(for: .collection(requestIdentity.collectionID))["host"], .plain("collection.test"))
+        XCTAssertEqual(reloaded.variables(for: .request(requestIdentity))["host"], .plain("request.test"))
+        let revealed = try await reloaded.revealVariable(named: "credential", owner: .request(requestIdentity))
+        XCTAssertEqual(revealed, "synthetic protected value")
+        _ = await reloaded.prepareForTermination()
+    }
+
+    func testFailedSecretCommitPreservesValueAndBlocksQuitUntilCancelled() async throws {
+        let root = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = try makeModel(root: root, secretVault: SecretVault(keyStore: AppModelKeyStore(deniesAccess: true)))
+        try await waitUntil { model.canEditVariables(.global) }
+        try await model.setVariable(name: "credential", value: "original literal", isSecret: false, owner: .global)
+        do {
+            try await model.setVariable(name: "credential", value: "synthetic failed secret", isSecret: true, owner: .global)
+            XCTFail("Denied key access must fail the accepted secret commit.")
+        } catch {
+            XCTAssertEqual(error as? SecretVaultError, .keyUnavailable)
+        }
+        XCTAssertEqual(model.globalVariables["credential"], .plain("original literal"))
+        XCTAssertNotNil(model.variableSaveErrors[.global])
+        let failedTermination = await model.prepareForTermination()
+        XCTAssertFalse(failedTermination)
+        model.discardVariableSecretEdit(named: "credential", owner: .global)
+        XCTAssertNil(model.variableSaveErrors[.global])
+        let terminated = await model.prepareForTermination()
+        XCTAssertTrue(terminated)
+        let globals = try String(contentsOf: root.appendingPathComponent("data/globals.json"), encoding: .utf8)
+        XCTAssertFalse(globals.contains("synthetic failed secret"))
+    }
+
+    func testQuitDrainsAcceptedSecretCommitAndDeletedValueCannotResurrect() async throws {
+        let root = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let keyStore = AppModelKeyStore(blocksLoad: true)
+        let model = try makeModel(root: root, secretVault: SecretVault(keyStore: keyStore))
+        try await waitUntil { model.canEditVariables(.global) }
+        let commit = Task { @MainActor in
+            try await model.setVariable(name: "removed", value: "synthetic delayed secret", isSecret: true, owner: .global)
+        }
+        try await waitUntil { keyStore.loadStarted }
+        model.removeVariable(named: "removed", owner: .global)
+        let termination = Task { @MainActor in await model.prepareForTermination() }
+        await Task.yield()
+        XCTAssertTrue(model.isTerminating)
+        keyStore.releaseLoad()
+        do {
+            try await commit.value
+            XCTFail("Removing a variable must invalidate its pending encrypted edit.")
+        } catch {
+            XCTAssertTrue(error is CancellationError)
+        }
+        let terminated = await termination.value
+        XCTAssertTrue(terminated)
+        XCTAssertNil(model.globalVariables["removed"])
+        let globals = try String(contentsOf: root.appendingPathComponent("data/globals.json"), encoding: .utf8)
+        XCTAssertFalse(globals.contains("removed"))
+        XCTAssertFalse(globals.contains("synthetic delayed secret"))
+    }
+
+    func testEncryptedPreparationCancellationAndDeletionCannotLaunchRun() async throws {
+        let root = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fixture = try AppHTTPFixture()
+        let sourceVault = SecretVault(keyStore: AppModelKeyStore())
+        let envelope = try await sourceVault.encrypt("synthetic held credential")
+        let keyStore = AppModelKeyStore(blocksLoad: true)
+        defer { keyStore.releaseLoad() }
+        let heldVault = SecretVault(keyStore: keyStore)
+        let model = try makeModel(root: root, secretVault: heldVault)
+        await model.createCollection(name: "Held preparation")
+        let collectionID = try XCTUnwrap(model.collections.first?.id)
+        await model.createRequest(in: collectionID)
+        let request = try XCTUnwrap(model.collections.first?.requests.first)
+        let requestIdentity = identity(collectionID, request)
+        model.updateDraft(requestIdentity) {
+            $0.url = fixture.baseURL + "/echo"
+            $0.headers = [HTTPField(name: "X-Synthetic-Credential", value: "{{credential}}")]
+            $0.variables = ["credential": .encrypted(envelope)]
+        }
+        model.startRequest(requestIdentity)
+        let preparationToken = try XCTUnwrap(model.activeRuns[requestIdentity]?.token)
+        try await waitUntil { keyStore.loadStarted }
+        XCTAssertEqual(model.activeRuns[requestIdentity]?.phase, .preparing)
+        XCTAssertNil(model.activeRuns[requestIdentity]?.runID)
+        model.startRequest(requestIdentity)
+        XCTAssertEqual(model.activeRuns[requestIdentity]?.token, preparationToken)
+
+        await model.cancelAndWait(for: requestIdentity)
+        XCTAssertNil(model.activeRuns[requestIdentity])
+        XCTAssertTrue(model.cancelledRequests.contains(requestIdentity))
+        await model.deleteRequest(requestIdentity)
+        XCTAssertNil(model.request(for: requestIdentity))
+        keyStore.releaseLoad()
+        _ = try await heldVault.decrypt(envelope)
+        await Task.yield()
+        XCTAssertNil(model.activeRuns[requestIdentity])
+        XCTAssertNil(model.latestResponses[requestIdentity])
+        XCTAssertNil(model.runErrors[requestIdentity])
+        let terminated = await model.prepareForTermination()
+        XCTAssertTrue(terminated)
+    }
+
+    private func makeModel(root: URL, secretVault: SecretVault? = nil) throws -> AppModel {
         let dataDirectory = root.appendingPathComponent("data", isDirectory: true)
         let bodyDirectory = root.appendingPathComponent("bodies", isDirectory: true)
         return AppModel(arguments: [
             "PostieTests",
             "--data-directory", dataDirectory.path,
             "--body-directory", bodyDirectory.path
-        ])
+        ], secretVault: secretVault)
     }
 
     private func makeTemporaryDirectory() throws -> URL {
@@ -351,6 +493,39 @@ final class AppModelTests: XCTestCase {
             try await Task.sleep(nanoseconds: 10_000_000)
         }
         XCTFail("Timed out waiting for the model to reach the expected state.")
+    }
+}
+
+private final class AppModelKeyStore: ApplicationKeyStore, @unchecked Sendable {
+    private let lock = NSLock()
+    private let loadGate = DispatchSemaphore(value: 0)
+    private let deniesAccess: Bool
+    private let blocksLoad: Bool
+    private var didStartLoad = false
+
+    init(deniesAccess: Bool = false, blocksLoad: Bool = false) {
+        self.deniesAccess = deniesAccess
+        self.blocksLoad = blocksLoad
+    }
+
+    var loadStarted: Bool { lock.withLock { didStartLoad } }
+
+    func loadKey() throws -> Data? {
+        lock.withLock { didStartLoad = true }
+        if blocksLoad { loadGate.wait() }
+        if deniesAccess { throw TestError.denied }
+        return Data(repeating: 0x42, count: 32)
+    }
+
+    func createKey(_ proposedKey: Data) throws -> Data {
+        throw TestError.unexpectedCreation
+    }
+
+    func releaseLoad() { loadGate.signal() }
+
+    private enum TestError: Error {
+        case denied
+        case unexpectedCreation
     }
 }
 

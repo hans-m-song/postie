@@ -50,6 +50,8 @@ public struct HTTPRequestConfiguration: Identifiable, Codable, Equatable, Sendab
     public var bodyEnabled: Bool
     public var bodySyntax: BodySyntax
     public var options: HTTPOptions
+    public var variables: VariableValues
+    public var authentication: RequestAuthentication
 
     public init(
         id: UUID = UUID(),
@@ -62,7 +64,9 @@ public struct HTTPRequestConfiguration: Identifiable, Codable, Equatable, Sendab
         body: String = "",
         bodyEnabled: Bool = false,
         bodySyntax: BodySyntax = .none,
-        options: HTTPOptions = HTTPOptions()
+        options: HTTPOptions = HTTPOptions(),
+        variables: VariableValues = [:],
+        authentication: RequestAuthentication = RequestAuthentication()
     ) {
         self.id = id
         self.name = name
@@ -75,6 +79,8 @@ public struct HTTPRequestConfiguration: Identifiable, Codable, Equatable, Sendab
         self.bodyEnabled = bodyEnabled
         self.bodySyntax = bodySyntax
         self.options = options
+        self.variables = variables
+        self.authentication = authentication
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -89,6 +95,8 @@ public struct HTTPRequestConfiguration: Identifiable, Codable, Equatable, Sendab
         case bodyEnabled
         case bodySyntax
         case options
+        case variables
+        case authentication
     }
 
     public init(from decoder: Decoder) throws {
@@ -104,6 +112,8 @@ public struct HTTPRequestConfiguration: Identifiable, Codable, Equatable, Sendab
         bodyEnabled = try container.decode(Bool.self, forKey: .bodyEnabled)
         bodySyntax = try container.decode(BodySyntax.self, forKey: .bodySyntax)
         options = try container.decode(HTTPOptions.self, forKey: .options)
+        variables = try container.decodeIfPresent(VariableValues.self, forKey: .variables) ?? [:]
+        authentication = try container.decodeIfPresent(RequestAuthentication.self, forKey: .authentication) ?? RequestAuthentication()
     }
 }
 
@@ -122,12 +132,14 @@ public struct RequestCollection: Identifiable, Equatable, Sendable {
     public var name: String
     public var requests: [HTTPRequestConfiguration]
     public var isReadOnly: Bool
+    public var variables: VariableValues
 
-    public init(id: UUID = UUID(), name: String, requests: [HTTPRequestConfiguration] = [], isReadOnly: Bool = false) {
+    public init(id: UUID = UUID(), name: String, requests: [HTTPRequestConfiguration] = [], isReadOnly: Bool = false, variables: VariableValues = [:]) {
         self.id = id
         self.name = name
         self.requests = requests
         self.isReadOnly = isReadOnly
+        self.variables = variables
     }
 }
 
@@ -150,10 +162,14 @@ public struct StorageIssue: Identifiable, Equatable, Sendable {
 public struct WorkspaceLoad: Sendable {
     public var collections: [RequestCollection]
     public var issues: [StorageIssue]
+    public var globalVariables: VariableValues
+    public var globalVariablesAreReadOnly: Bool
 
-    public init(collections: [RequestCollection], issues: [StorageIssue] = []) {
+    public init(collections: [RequestCollection], issues: [StorageIssue] = [], globalVariables: VariableValues = [:], globalVariablesAreReadOnly: Bool = false) {
         self.collections = collections
         self.issues = issues
+        self.globalVariables = globalVariables
+        self.globalVariablesAreReadOnly = globalVariablesAreReadOnly
     }
 }
 

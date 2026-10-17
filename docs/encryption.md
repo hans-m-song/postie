@@ -1,6 +1,6 @@
-# Encryption proposal
+# Encryption
 
-Recorded 2026-10-17. Revised proposal following the user's request for straightforward encryption at rest. Earlier independent reviews covered a more elaborate record-bound draft; they do not validate these later revisions. No implementation approval or existing data migration is implied. See review.md for history.
+Recorded 2026-10-17. User authorised the straightforward M3 at-rest design; implementation and verification are tracked in implementation-m3-m4.md. No existing-data migration is performed. Snapshot-specific sections below remain M5 design, not implemented behavior. See review.md for earlier design history.
 
 ## Purpose and limits
 
@@ -8,7 +8,7 @@ Keep marked secrets and captured snapshot inputs encrypted in local JSON, with o
 
 Request templates, ordinary variables, literal headers/bodies, snapshot response data and metadata remain plaintext. A literal secret or a server-echoed secret can therefore remain readable. No automatic secret detection, response scrubbing, whole-file confidentiality, malicious-metadata protection or rollback prevention is promised. No encryption scheme can preserve frozen values while also making them track later credential changes.
 
-## Proposed mechanism
+## Mechanism
 
 - Use CryptoKit AES-256-GCM with a randomly generated 256-bit symmetric key. No asymmetric keypair or custom cipher.
 - Generate a fresh nonce through CryptoKit for each encryption. Persist its sealed-box representation (nonce, ciphertext and authentication tag) as Base64, never deriving a nonce from timestamps, IDs or values.
@@ -31,6 +31,7 @@ The retained exchange captures URL, ordered query/header and body templates, eff
 ## Key lifecycle and failures
 
 - One app-level key initially, found using stable, narrowly scoped service/account identifiers. Exact accessibility attributes, entitlements and signing setup must be validated in T-32 on macOS. iCloud Keychain synchronisation is not enabled in this scope.
+- Current service is the bundle identifier plus `.workspace-encryption`, account `workspace-key-v1`; the SecItem implementation uses the default macOS generic-password Keychain access policy. The app has an ad-hoc signature. Rebuild continuity must be verified; do not infer it from fake-backed round trips or weaken ACLs to make it pass.
 - Provision and verify the key in Keychain before writing dependent encrypted data. Serialize first-use creation; handle duplicate-item races by retrieving the existing item, not overwriting it.
 - Distinguish a locked/denied/unavailable Keychain from an absent key. Never replace an inaccessible key. If ciphertext exists but the app key is missing, preserve records, report the failure and block operations requiring decryption. Never silently generate a replacement or erase ciphertext.
 - Authentication/decryption errors preserve original encrypted data and block affected send/copy/save operations. Unaffected ordinary requests and search can remain usable. Decide precise read-only editor behaviour before implementation; unknown fields must not disappear during unrelated saves.

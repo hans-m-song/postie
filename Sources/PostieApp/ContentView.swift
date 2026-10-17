@@ -1,10 +1,14 @@
 import SwiftUI
+import AppKit
 import PostieCore
 
 struct ContentView: View {
     @EnvironmentObject private var model: AppModel
     @State private var namePrompt: NamePrompt?
     @State private var deletionTarget: DeletionTarget?
+    @State private var searchResponder: NSResponder?
+    @State private var searchWindow: NSWindow?
+    @State private var searchOpenedRequest = false
 
     var body: some View {
         NavigationSplitView {
@@ -16,6 +20,22 @@ struct ContentView: View {
         .disabled(model.isTerminating)
         .sheet(item: $namePrompt) { prompt in
             NameInputSheet(prompt: prompt)
+        }
+        .onChange(of: model.showsRequestSearch) { _, visible in
+            if visible {
+                searchWindow = NSApp.keyWindow
+                searchResponder = searchWindow?.firstResponder
+                searchOpenedRequest = false
+            }
+        }
+        .sheet(isPresented: $model.showsRequestSearch, onDismiss: {
+            if !searchOpenedRequest, let searchResponder {
+                searchWindow?.makeFirstResponder(searchResponder)
+            }
+            searchResponder = nil
+            searchWindow = nil
+        }) {
+            RequestSearchPalette { searchOpenedRequest = true }
         }
         .confirmationDialog(
             deletionTarget?.title ?? "Delete item?",
@@ -59,6 +79,12 @@ struct ContentView: View {
             )
         } else if model.showsOngoingRequests {
             OngoingRequestsView()
+        } else if model.showsGlobalVariables {
+            VStack(alignment: .leading, spacing: 0) {
+                Text("Global Variables").font(.title3.weight(.semibold)).padding(18)
+                Divider()
+                ScrollView { VariableEditorView(owner: .global).padding(18) }
+            }
         } else if let identity = model.selectedIdentity {
             VStack(spacing: 0) {
                 RequestToolbar(identity: identity)
@@ -104,7 +130,18 @@ private struct SidebarView: View {
             .buttonStyle(.plain)
             .padding(.horizontal, 12)
             .padding(.vertical, 7)
-            .background(!model.showsOngoingRequests ? Color.accentColor.opacity(0.13) : .clear, in: RoundedRectangle(cornerRadius: 7))
+            .background(!model.showsOngoingRequests && !model.showsGlobalVariables ? Color.accentColor.opacity(0.13) : .clear, in: RoundedRectangle(cornerRadius: 7))
+
+            Button { model.showRequestSearch() } label: {
+                HStack {
+                    Label("Search Requests", systemImage: "magnifyingglass")
+                    Spacer()
+                    Text("⌘K").foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 12).padding(.vertical, 7)
 
             Button {
                 model.showOngoingRequests()
@@ -127,6 +164,14 @@ private struct SidebarView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 7)
             .background(model.showsOngoingRequests ? Color.accentColor.opacity(0.13) : .clear, in: RoundedRectangle(cornerRadius: 7))
+
+            Button { model.showGlobalVariables() } label: {
+                Label("Global Variables", systemImage: "curlybraces")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 12).padding(.vertical, 7)
+            .background(model.showsGlobalVariables ? Color.accentColor.opacity(0.13) : .clear, in: RoundedRectangle(cornerRadius: 7))
 
             Divider()
                 .padding(.vertical, 12)
@@ -216,6 +261,7 @@ private struct CollectionSidebarSection: View {
     @Binding var namePrompt: NamePrompt?
     @Binding var deletionTarget: DeletionTarget?
     @State private var isExpanded = true
+    @State private var showsVariables = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
@@ -239,6 +285,7 @@ private struct CollectionSidebarSection: View {
                 Spacer(minLength: 2)
                 if !collection.isReadOnly {
                     Menu {
+                        Button("Collection variables…") { showsVariables = true }
                         Button("New request") {
                             namePrompt = NamePrompt(
                                 title: "New Request",
@@ -297,6 +344,16 @@ private struct CollectionSidebarSection: View {
             }
         }
         .padding(.vertical, 3)
+        .sheet(isPresented: $showsVariables) {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack {
+                    Text("\(collection.name) — Variables").font(.headline)
+                    Spacer()
+                    Button("Done") { showsVariables = false }.keyboardShortcut(.cancelAction)
+                }
+                ScrollView { VariableEditorView(owner: .collection(collection.id)) }
+            }.padding(20).frame(width: 600, height: 420)
+        }
     }
 }
 
@@ -340,7 +397,7 @@ private struct RequestSidebarRow: View {
             .padding(.trailing, 7)
             .padding(.vertical, 6)
             .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-            .background(model.selectedIdentity == identity && !model.showsOngoingRequests ? Color.accentColor.opacity(0.14) : .clear, in: RoundedRectangle(cornerRadius: 6))
+            .background(model.selectedIdentity == identity && !model.showsOngoingRequests && !model.showsGlobalVariables ? Color.accentColor.opacity(0.14) : .clear, in: RoundedRectangle(cornerRadius: 6))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -365,7 +422,7 @@ private struct RequestSidebarRow: View {
                 Button("Delete request", role: .destructive) { deletionTarget = .request(identity) }
             }
         }
-        .accessibilityAddTraits(model.selectedIdentity == identity && !model.showsOngoingRequests ? .isSelected : [])
+        .accessibilityAddTraits(model.selectedIdentity == identity && !model.showsOngoingRequests && !model.showsGlobalVariables ? .isSelected : [])
     }
 
     private func methodColor(_ method: String) -> Color {

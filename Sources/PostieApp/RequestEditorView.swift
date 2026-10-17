@@ -5,6 +5,21 @@ struct RequestToolbar: View {
     @EnvironmentObject private var model: AppModel
     let identity: RequestIdentity
 
+    private var availableVariables: Set<String> {
+        let context = model.variableContext(for: identity)
+        return Set(context.global.keys)
+            .union(context.collection.keys)
+            .union(context.request.keys)
+    }
+
+    private var validPathParameters: Set<String> {
+        guard let request = model.request(for: identity) else { return [] }
+        return Set(RequestPreparer.pathParameterNames(in: request.url).filter { name in
+            let matching = request.pathParameters.filter { $0.name == name && $0.isEnabled }
+            return matching.count == 1 && matching[0].value.isEmpty == false
+        })
+    }
+
     var body: some View {
         VStack(spacing: 10) {
             HStack(spacing: 10) {
@@ -31,8 +46,14 @@ struct RequestToolbar: View {
                     .frame(width: 100)
                     .accessibilityLabel("HTTP method")
                     .disabled(!model.canEdit(identity))
-                TextField("https://example.com", text: binding(\.url))
-                    .textFieldStyle(.roundedBorder)
+                HighlightedTextField(
+                    "https://example.com",
+                    text: binding(\.url),
+                    availableVariables: availableVariables,
+                    validPathParameters: validPathParameters,
+                    isURL: true,
+                    rounded: true
+                )
                     .font(.system(.body, design: .monospaced))
                     .accessibilityLabel("Request URL")
                     .disabled(!model.canEdit(identity))
@@ -76,9 +97,12 @@ struct RequestEditorView: View {
     @EnvironmentObject private var model: AppModel
     let identity: RequestIdentity
     @State private var selectedSection: EditorSection = .request
+    @State private var referencedVariableNames: [String] = []
 
     private enum EditorSection: Hashable {
         case request
+        case authentication
+        case variables
         case settings
     }
 
@@ -92,6 +116,32 @@ struct RequestEditorView: View {
         }
         .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
         .background(.background)
+        .task(id: referenceSources) {
+            let sources = referenceSources
+            let names = await Task.detached(priority: .utility) {
+                var remaining = 1_048_576
+                var names = Set<String>()
+                for source in sources {
+                    guard remaining > 0, names.count < 128 else { break }
+                    let bytes = Array(source.utf8.prefix(remaining))
+                    remaining -= bytes.count
+                    let text = String(decoding: bytes, as: UTF8.self)
+                    for reference in TemplateEngine.scan(text).references {
+                        guard names.count < 128 else { break }
+                        names.insert(reference.name)
+                    }
+                }
+                return names.sorted()
+            }.value
+            guard !Task.isCancelled else { return }
+            referencedVariableNames = names
+        }
+        .onChange(of: identity) { oldIdentity, _ in
+            discardSecretEdits(for: oldIdentity)
+        }
+        .onDisappear {
+            discardSecretEdits(for: identity)
+        }
     }
 
     private var editor: some View {
@@ -99,6 +149,8 @@ struct RequestEditorView: View {
             VStack(spacing: 8) {
                 Picker("Request editor section", selection: $selectedSection) {
                     Text("Request").tag(EditorSection.request)
+                    Text("Auth").tag(EditorSection.authentication)
+                    Text("Variables").tag(EditorSection.variables)
                     Text("Settings").tag(EditorSection.settings)
                 }
                 .pickerStyle(.segmented)
@@ -142,6 +194,12 @@ struct RequestEditorView: View {
     private var sectionContent: some View {
         ZStack(alignment: .topLeading) {
             retainedSection(requestContent, isActive: selectedSection == .request)
+            retainedSection(AuthenticationEditor(identity: identity).id(identity), isActive: selectedSection == .authentication)
+            retainedSection(
+                VariableEditorView(owner: .request(identity), isActive: selectedSection == .variables)
+                    .id(VariableOwner.request(identity)),
+                isActive: selectedSection == .variables
+            )
             retainedSection(settingsEditor, isActive: selectedSection == .settings)
         }
     }
@@ -152,22 +210,81 @@ struct RequestEditorView: View {
                 title: "Query parameters",
                 fields: fieldsBinding(\.query),
                 keyPlaceholder: "Name",
-                valuePlaceholder: "Value"
+                valuePlaceholder: "Value",
+                availableVariables: availableVariableNames
             )
             if !pathParameterNames.isEmpty {
                 PathParameterTable(
                     names: pathParameterNames,
-                    fields: fieldsBinding(\.pathParameters)
+                    fields: fieldsBinding(\.pathParameters),
+                    availableVariables: availableVariableNames
                 )
             }
             FieldTable(
                 title: "Headers",
                 fields: fieldsBinding(\.headers),
                 keyPlaceholder: "Header",
-                valuePlaceholder: "Value"
+                valuePlaceholder: "Value",
+                availableVariables: availableVariableNames
             )
             bodyEditor
+            referencedVariables
         }
+    }
+
+    @ViewBuilder
+    private var referencedVariables: some View {
+        if !referencedVariableNames.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Referenced variables").font(.headline)
+                Text("Up to 128 names from the first 1 MiB of input templates. Secret auth inputs resolve when sending.")
+                    .font(.caption).foregroundStyle(.secondary)
+                ForEach(referencedVariableNames, id: \.self) { name in
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text("{{\(name)}}")
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundStyle(variableDetails(name) == nil ? Color.red : Color.teal)
+                        Spacer(minLength: 0)
+                        if let (scope, value) = variableDetails(name) {
+                            Text(scope).foregroundStyle(.secondary)
+                            switch value {
+                            case .encrypted:
+                                Label("Secret", systemImage: "lock.fill").foregroundStyle(.secondary)
+                            case let .plain(value):
+                                Text(value.isEmpty ? "(empty)" : value)
+                                    .font(.system(.caption, design: .monospaced))
+                                    .lineLimit(1).truncationMode(.middle)
+                                    .frame(maxWidth: 140, alignment: .trailing)
+                            }
+                        } else {
+                            Text("Missing").foregroundStyle(.red)
+                        }
+                    }
+                    .font(.caption)
+                }
+            }
+            .padding(10)
+            .background(.quaternary, in: RoundedRectangle(cornerRadius: 7))
+        }
+    }
+
+    private var referenceSources: [String] {
+        guard let request = model.request(for: identity) else { return [] }
+        let pathNames = Set(RequestPreparer.pathParameterNames(in: request.url))
+        var sources = [request.url]
+        sources += (request.query + request.headers).filter(\.isEnabled).flatMap { [$0.name, $0.value] }
+        sources += request.pathParameters.filter { $0.isEnabled && pathNames.contains($0.name) }.map(\.value)
+        if request.bodyEnabled { sources.append(request.body) }
+        if request.authentication.kind == .basic { sources.append(request.authentication.username) }
+        return sources
+    }
+
+    private func variableDetails(_ name: String) -> (String, VariableValue)? {
+        let context = model.variableContext(for: identity)
+        if let value = context.request[name] { return ("Request", value) }
+        if let value = context.collection[name] { return ("Collection", value) }
+        if let value = context.global[name] { return ("Global", value) }
+        return nil
     }
 
     private func retainedSection<Content: View>(_ content: Content, isActive: Bool) -> some View {
@@ -185,16 +302,42 @@ struct RequestEditorView: View {
         return RequestPreparer.pathParameterNames(in: request.url)
     }
 
+    private var availableVariableNames: Set<String> {
+        let context = model.variableContext(for: identity)
+        return Set(context.global.keys)
+            .union(context.collection.keys)
+            .union(context.request.keys)
+    }
+
+    private func discardSecretEdits(for identity: RequestIdentity) {
+        model.discardAuthenticationSecretEdit(field: .password, for: identity)
+        model.discardAuthenticationSecretEdit(field: .token, for: identity)
+        for name in model.variables(for: .request(identity)).keys {
+            model.discardVariableSecretEdit(named: name, owner: .request(identity))
+        }
+    }
+
     private var bodyEditor: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Toggle("Body", isOn: binding(\.bodyEnabled))
                     .font(.headline)
+                Spacer()
+                Picker("Body syntax", selection: binding(\.bodySyntax)) {
+                    Text("None").tag(BodySyntax.none)
+                    Text("JSON").tag(BodySyntax.json)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 150)
+                .disabled(!model.canEdit(identity))
             }
             GrowingBodyEditor(
                 text: binding(\.body),
                 isEditable: model.canEdit(identity) && (model.request(for: identity)?.bodyEnabled ?? false),
-                isActive: selectedSection == .request
+                isActive: selectedSection == .request,
+                syntax: model.request(for: identity)?.bodySyntax ?? .none,
+                availableVariables: availableVariableNames
             )
                 .id(identity)
                 .padding(8)
@@ -381,8 +524,9 @@ private struct FieldTable: View {
     @Binding var fields: [HTTPField]
     let keyPlaceholder: String
     let valuePlaceholder: String
+    let availableVariables: Set<String>
     @State private var trailingField = HTTPField()
-    @FocusState private var focusedField: FieldFocus?
+    @State private var focusedField: FieldFocus?
 
     private enum FieldFocus: Hashable {
         case name(UUID)
@@ -424,17 +568,23 @@ private struct FieldTable: View {
                                 .frame(width: 26)
                                 .help("Enable this row")
                         }
-                        TextField(keyPlaceholder, text: textBinding(for: field.id, keyPath: \.name))
-                            .textFieldStyle(.plain)
+                        HighlightedTextField(
+                            keyPlaceholder,
+                            text: textBinding(for: field.id, keyPath: \.name),
+                            availableVariables: availableVariables,
+                            focused: focusBinding(for: .name(field.id))
+                        )
                             .font(.system(.body, design: .monospaced))
                             .frame(minWidth: 0, maxWidth: .infinity)
-                            .focused($focusedField, equals: .name(field.id))
                         Divider().frame(height: 22)
-                        TextField(valuePlaceholder, text: textBinding(for: field.id, keyPath: \.value))
-                            .textFieldStyle(.plain)
+                        HighlightedTextField(
+                            valuePlaceholder,
+                            text: textBinding(for: field.id, keyPath: \.value),
+                            availableVariables: availableVariables,
+                            focused: focusBinding(for: .value(field.id))
+                        )
                             .font(.system(.body, design: .monospaced))
                             .frame(minWidth: 0, maxWidth: .infinity)
-                            .focused($focusedField, equals: .value(field.id))
                         if isTrailingField {
                             Color.clear.frame(width: 26)
                         } else {
@@ -497,11 +647,25 @@ private struct FieldTable: View {
             update(&trailingField)
         }
     }
+
+    private func focusBinding(for field: FieldFocus) -> Binding<Bool> {
+        Binding(
+            get: { focusedField == field },
+            set: { isFocused in
+                if isFocused {
+                    focusedField = field
+                } else if focusedField == field {
+                    focusedField = nil
+                }
+            }
+        )
+    }
 }
 
 private struct PathParameterTable: View {
     let names: [String]
     @Binding var fields: [HTTPField]
+    let availableVariables: Set<String>
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
@@ -530,8 +694,11 @@ private struct PathParameterTable: View {
                             .truncationMode(.middle)
                             .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
                         Divider().frame(height: 22)
-                        TextField("Value", text: valueBinding(for: name))
-                            .textFieldStyle(.plain)
+                        HighlightedTextField(
+                            "Value",
+                            text: valueBinding(for: name),
+                            availableVariables: availableVariables
+                        )
                             .font(.system(.body, design: .monospaced))
                             .frame(minWidth: 0, maxWidth: .infinity)
                     }

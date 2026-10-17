@@ -282,7 +282,27 @@ public actor HTTPExecutionManager {
         )
     }
 
+    public func start(identity: RequestIdentity, prepared: PreparedHTTPRequest) throws -> HTTPRun {
+        try Task.checkCancellation()
+        guard !isShutDown else {
+            throw HTTPExecutionError.shutDown
+        }
+
+        guard runByIdentity[identity] == nil else {
+            throw HTTPExecutionError.alreadyRunning
+        }
+
+        return try launch(
+            identity: identity,
+            configuration: prepared.configuration,
+            preparedRequest: prepared.request,
+            redirects: [],
+            followedRedirectCount: 0
+        )
+    }
+
     public func followRedirect(identity: RequestIdentity, response: HTTPResponseRecord) throws -> HTTPRun {
+        try Task.checkCancellation()
         guard !isShutDown else {
             throw HTTPExecutionError.shutDown
         }
@@ -388,8 +408,10 @@ public actor HTTPExecutionManager {
         }
     }
 
-    public func cancel(identity: RequestIdentity) {
-        guard let runID = runByIdentity[identity], var activeRun = activeRuns[runID] else {
+    public func cancel(identity: RequestIdentity, runID expectedRunID: UUID? = nil) {
+        guard let runID = runByIdentity[identity],
+              expectedRunID == nil || expectedRunID == runID,
+              var activeRun = activeRuns[runID] else {
             return
         }
 

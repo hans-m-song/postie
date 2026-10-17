@@ -1,6 +1,6 @@
 # Local storage design
 
-Recorded 2026-10-17. M1/M2 implement the collection index/per-request layout and recovery; secret variables and snapshots remain later work. The approved usability follow-up changes the default root to ~/.config/postie without implicit migration/merge. iCloud sync remains deferred.
+Recorded 2026-10-17. Collection index/per-request layout, three variable scopes and encrypted authentication are implemented. Snapshots remain M5 design; that subtree below is not created by the current app. Default root is ~/.config/postie without implicit migration/merge. iCloud sync remains deferred.
 
 ## Layout and identity
 
@@ -18,9 +18,11 @@ Recorded 2026-10-17. M1/M2 implement the collection index/per-request layout and
       <request-id>.json
 ```
 
-Collection and request IDs are UUIDs. A collection's directory name and a request's filename stem supply identity; JSON does not duplicate those IDs. Display names live in JSON, may repeat, and can change without renaming files. Storage locations are resolved through platform APIs; sandbox packaging may affect the actual Application Support path.
+Collection and request IDs are UUIDs. A collection's directory name and a request's filename stem supply identity; JSON does not duplicate those IDs. Display names live in JSON, may repeat, and can change without renaming files. Explicit directory arguments override the default root.
 
-`globals.json` contains its format version and global variables. Each `collection.json` contains its format version, display name, collection variables, and an ordered `requests` array of request IDs. Each request file contains its format version, display name, method, URL, ordered query/header entries, body, authentication configuration, and request variables. Proposed structured secrets are encrypted envelopes in JSON; only the application encryption key is in Keychain. See encryption.md. Details of those field schemas are defined during T-07/T-32.
+`globals.json` contains its format version and global variables. Each `collection.json` contains its format version, display name, collection variables, and an ordered `requests` array of request IDs. Each request file contains its format version, display name, method, URL, ordered query/header/path entries, body, authentication configuration, and request variables. Variable maps encode ordinary values as strings and secrets as `{ "version": 1, "combined": "Base64 sealed box" }`. Auth contains kind/username and optional encrypted password/token envelopes. Only the application key is in Keychain. See encryption.md.
+
+Absent additive request/collection variable/auth fields default empty/None. Malformed globals load read-only with an issue while unrelated collections remain usable; malformed collection variables make that collection read-only. Owned maps replace deleted/renamed keys rather than recursively resurrecting them. Unrelated unknown metadata is preserved. Marking a variable secret seals it before updating the model and atomically replaces its plaintext representation at save.
 
 Illustrative collection metadata:
 

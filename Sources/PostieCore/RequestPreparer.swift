@@ -7,6 +7,12 @@ private enum RequestPreparationError: LocalizedError {
     case invalidHeaderValue
     case invalidPathParameter(String)
     case unresolvedTemplate
+    case missingVariable(String)
+    case secretUnavailable
+    case invalidAuthentication
+    case invalidBasicCredentials
+    case invalidBearerCredential
+    case authorizationConflict
     case invalidTimeout
 
     var errorDescription: String? {
@@ -22,7 +28,19 @@ private enum RequestPreparationError: LocalizedError {
         case .invalidPathParameter(let name):
             return "Path parameter '\(name)' needs exactly one enabled, non-empty value."
         case .unresolvedTemplate:
-            return "Resolve all {{...}} template values before sending."
+            return "Resolve all valid {{...}} template values before sending."
+        case .missingVariable(let name):
+            return "Variable '\(name)' is missing."
+        case .secretUnavailable:
+            return "A required secret value could not be unlocked."
+        case .invalidAuthentication:
+            return "The selected authentication method is missing its secret value."
+        case .invalidBasicCredentials:
+            return "Basic credentials contain invalid characters."
+        case .invalidBearerCredential:
+            return "The Bearer token must be non-empty and contain no whitespace or control characters."
+        case .authorizationConflict:
+            return "Structured authentication conflicts with an enabled Authorization header."
         case .invalidTimeout:
             return "Timeouts and response limits must be valid positive values."
         }
@@ -34,26 +52,301 @@ public enum RequestPreparer {
         charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
     )
 
+    private struct PathParameterValue {
+        let name: String
+        let value: String
+    }
+
     public static func pathParameterNames(in url: String) -> [String] {
+        var seen = Set<String>()
+        return TemplateEngine.pathReferences(in: url).compactMap { reference in
+            guard seen.insert(reference.name).inserted else {
+                return nil
+            }
+            return reference.name
+        }
+    }
+
+    public static func prepare(_ configuration: HTTPRequestConfiguration) throws -> URLRequest {
+        guard configuration.authentication.kind == .none else {
+            throw RequestPreparationError.secretUnavailable
+        }
+
+        try validateOptions(configuration.options)
+        let pathParameters = try pathParameterValues(in: configuration)
+        let names = try referencedNames(in: templateSources(configuration, pathParameters: pathParameters))
+        let context = VariableContext(request: configuration.variables)
+        let resolvedVariables = try resolvePlainVariables(names, in: context)
+        return try makeRequest(
+            configuration,
+            pathParameters: pathParameters,
+            variableValues: resolvedVariables.mapValues(\.value),
+            authorizationHeader: nil
+        )
+    }
+
+    public static func prepare(
+        _ configuration: HTTPRequestConfiguration,
+        context: VariableContext,
+        decryptor: (any SecretValueDecrypting)?
+    ) async throws -> PreparedHTTPRequest {
+        try validateOptions(configuration.options)
+
+        let pathParameters = try pathParameterValues(in: configuration)
+        let effectiveContext = contextByAddingConfigurationRequestValues(configuration, to: context)
+        let sources = templateSources(configuration, pathParameters: pathParameters)
+        let names = try referencedNames(in: sources)
+        var resolvedVariables = try await resolveVariables(names, in: effectiveContext, decryptor: decryptor)
+
+        let secretTemplate: String?
+        switch configuration.authentication.kind {
+        case .none:
+            secretTemplate = nil
+        case .basic:
+            guard let envelope = configuration.authentication.password else {
+                throw RequestPreparationError.invalidAuthentication
+            }
+            secretTemplate = try await decrypt(envelope, using: decryptor)
+        case .bearer:
+            guard let envelope = configuration.authentication.token else {
+                throw RequestPreparationError.invalidAuthentication
+            }
+            secretTemplate = try await decrypt(envelope, using: decryptor)
+        }
+
+        if let secretTemplate {
+            let additionalNames = try referencedNames(in: [secretTemplate]).filter { resolvedVariables[$0] == nil }
+            let additionalVariables = try await resolveVariables(additionalNames, in: effectiveContext, decryptor: decryptor)
+            resolvedVariables.merge(additionalVariables) { current, _ in current }
+        }
+
+        let variableValues = resolvedVariables.mapValues(\.value)
+        let authorizationHeader = try structuredAuthorizationHeader(
+            configuration.authentication,
+            secretTemplate: secretTemplate,
+            variableValues: variableValues
+        )
+        let request = try makeRequest(
+            configuration,
+            pathParameters: pathParameters,
+            variableValues: variableValues,
+            authorizationHeader: authorizationHeader
+        )
+
+        return PreparedHTTPRequest(
+            configuration: configuration,
+            request: request,
+            referencedInputs: resolvedVariables
+        )
+    }
+
+    private static func contextByAddingConfigurationRequestValues(
+        _ configuration: HTTPRequestConfiguration,
+        to context: VariableContext
+    ) -> VariableContext {
+        var result = context
+        for (name, value) in configuration.variables where result.request[name] == nil {
+            result.request[name] = value
+        }
+        return result
+    }
+
+    private static func templateSources(
+        _ configuration: HTTPRequestConfiguration,
+        pathParameters: [PathParameterValue]
+    ) -> [String] {
+        var sources = [configuration.url]
+        sources.append(contentsOf: pathParameters.map(\.value))
+        sources.append(contentsOf: configuration.query.filter(isActive).flatMap { [$0.name, $0.value] })
+        sources.append(contentsOf: configuration.headers.filter(isActive).flatMap { [$0.name, $0.value] })
+
+        if configuration.bodyEnabled {
+            sources.append(configuration.body)
+        }
+
+        if configuration.authentication.kind == .basic {
+            sources.append(configuration.authentication.username)
+        }
+
+        return sources
+    }
+
+    private static func isActive(_ field: HTTPField) -> Bool {
+        field.isEnabled && !(field.name.isEmpty && field.value.isEmpty)
+    }
+
+    private static func referencedNames(in sources: [String]) throws -> [String] {
         var seen = Set<String>()
         var names: [String] = []
 
-        for segment in rawPath(in: url).split(separator: "/", omittingEmptySubsequences: false) {
-            guard let name = pathParameterName(in: segment), seen.insert(name).inserted else {
-                continue
+        for source in sources {
+            let result = TemplateEngine.scan(source)
+            guard result.invalidRanges.isEmpty else {
+                throw RequestPreparationError.unresolvedTemplate
             }
-            names.append(name)
+
+            for reference in result.references where seen.insert(reference.name).inserted {
+                names.append(reference.name)
+            }
         }
 
         return names
     }
 
-    public static func prepare(_ configuration: HTTPRequestConfiguration) throws -> URLRequest {
-        try validateOptions(configuration.options)
-        try rejectTemplates(in: configuration.url)
+    private static func resolvePlainVariables(
+        _ names: [String],
+        in context: VariableContext
+    ) throws -> [String: ResolvedVariable] {
+        var resolved: [String: ResolvedVariable] = [:]
+        for name in names {
+            guard let (value, scope) = effectiveValue(named: name, in: context) else {
+                throw RequestPreparationError.missingVariable(name)
+            }
+            guard case .plain(let plainValue) = value else {
+                throw RequestPreparationError.secretUnavailable
+            }
+            resolved[name] = ResolvedVariable(value: plainValue, scope: scope, isSecret: false)
+        }
+        return resolved
+    }
 
-        guard !configuration.url.unicodeScalars.contains(where: { CharacterSet.whitespacesAndNewlines.contains($0) || CharacterSet.controlCharacters.contains($0) }),
-              var components = URLComponents(string: configuration.url),
+    private static func resolveVariables(
+        _ names: [String],
+        in context: VariableContext,
+        decryptor: (any SecretValueDecrypting)?
+    ) async throws -> [String: ResolvedVariable] {
+        var resolved: [String: ResolvedVariable] = [:]
+        for name in names {
+            guard let (value, scope) = effectiveValue(named: name, in: context) else {
+                throw RequestPreparationError.missingVariable(name)
+            }
+
+            switch value {
+            case .plain(let plainValue):
+                resolved[name] = ResolvedVariable(value: plainValue, scope: scope, isSecret: false)
+            case .encrypted(let envelope):
+                let plainValue = try await decrypt(envelope, using: decryptor)
+                resolved[name] = ResolvedVariable(value: plainValue, scope: scope, isSecret: true)
+            }
+        }
+        return resolved
+    }
+
+    private static func effectiveValue(
+        named name: String,
+        in context: VariableContext
+    ) -> (VariableValue, VariableScope)? {
+        if let value = context.request[name] {
+            return (value, .request)
+        }
+        if let value = context.collection[name] {
+            return (value, .collection)
+        }
+        if let value = context.global[name] {
+            return (value, .global)
+        }
+        return nil
+    }
+
+    private static func decrypt(
+        _ envelope: SecretEnvelope,
+        using decryptor: (any SecretValueDecrypting)?
+    ) async throws -> String {
+        guard let decryptor else {
+            throw RequestPreparationError.secretUnavailable
+        }
+
+        do {
+            return try await decryptor.decrypt(envelope)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            throw RequestPreparationError.secretUnavailable
+        }
+    }
+
+    private static func structuredAuthorizationHeader(
+        _ authentication: RequestAuthentication,
+        secretTemplate: String?,
+        variableValues: [String: String]
+    ) throws -> String? {
+        switch authentication.kind {
+        case .none:
+            return nil
+        case .basic:
+            guard let secretTemplate else {
+                throw RequestPreparationError.invalidAuthentication
+            }
+            let username = try substitute(authentication.username, values: variableValues)
+            let password = try substitute(secretTemplate, values: variableValues)
+            guard !username.contains(":"), !containsControlCharacters(username), !containsControlCharacters(password) else {
+                throw RequestPreparationError.invalidBasicCredentials
+            }
+            let credentials = Data("\(username):\(password)".utf8).base64EncodedString()
+            return "Basic \(credentials)"
+        case .bearer:
+            guard let secretTemplate else {
+                throw RequestPreparationError.invalidAuthentication
+            }
+            let token = try substitute(secretTemplate, values: variableValues)
+            guard !token.isEmpty,
+                  token.unicodeScalars.allSatisfy({
+                      !CharacterSet.whitespacesAndNewlines.contains($0) &&
+                          !CharacterSet.controlCharacters.contains($0)
+                  }) else {
+                throw RequestPreparationError.invalidBearerCredential
+            }
+            return "Bearer \(token)"
+        }
+    }
+
+    private static func containsControlCharacters(_ value: String) -> Bool {
+        value.unicodeScalars.contains { CharacterSet.controlCharacters.contains($0) }
+    }
+
+    private static func pathParameterValues(in configuration: HTTPRequestConfiguration) throws -> [PathParameterValue] {
+        var seen = Set<String>()
+        var values: [PathParameterValue] = []
+
+        for reference in TemplateEngine.pathReferences(in: configuration.url) where seen.insert(reference.name).inserted {
+            let candidates = configuration.pathParameters.filter { $0.name == reference.name && $0.isEnabled }
+            guard candidates.count == 1,
+                  let candidate = candidates.first,
+                  !candidate.value.isEmpty else {
+                throw RequestPreparationError.invalidPathParameter(reference.name)
+            }
+            values.append(PathParameterValue(name: reference.name, value: candidate.value))
+        }
+
+        return values
+    }
+
+    private static func makeRequest(
+        _ configuration: HTTPRequestConfiguration,
+        pathParameters: [PathParameterValue],
+        variableValues: [String: String],
+        authorizationHeader: String?
+    ) throws -> URLRequest {
+        var encodedPathValues: [String: String] = [:]
+        for pathParameter in pathParameters {
+            let resolvedValue = try substitute(pathParameter.value, values: variableValues)
+            guard let encodedValue = encodePathSegment(resolvedValue) else {
+                throw RequestPreparationError.invalidURL
+            }
+            encodedPathValues[pathParameter.name] = encodedValue
+        }
+
+        let originalPathReferences = TemplateEngine.pathReferences(in: configuration.url)
+        let urlWithPathValues = replacingPathParameters(
+            in: configuration.url,
+            references: originalPathReferences,
+            values: encodedPathValues
+        )
+        let resolvedURL = try substitute(urlWithPathValues, values: variableValues)
+        guard !resolvedURL.unicodeScalars.contains(where: {
+            CharacterSet.whitespacesAndNewlines.contains($0) || CharacterSet.controlCharacters.contains($0)
+        }),
+              var components = URLComponents(string: resolvedURL),
               let scheme = components.scheme?.lowercased(),
               ["http", "https"].contains(scheme),
               let host = components.host,
@@ -61,22 +354,15 @@ public enum RequestPreparer {
             throw RequestPreparationError.invalidURL
         }
 
-        let pathValues = try pathParameterValues(in: configuration)
-        components.percentEncodedPath = replacingPathParameters(in: components.percentEncodedPath, with: pathValues)
-
         guard isHTTPToken(configuration.method) else {
             throw RequestPreparationError.invalidMethod
         }
 
         var queryItems: [HTTPField] = []
-        for field in configuration.query where field.isEnabled {
-            if field.name.isEmpty && field.value.isEmpty {
-                continue
-            }
-
-            try rejectTemplates(in: field.name)
-            try rejectTemplates(in: field.value)
-            queryItems.append(field)
+        for field in configuration.query where isActive(field) {
+            let name = try substitute(field.name, values: variableValues)
+            let value = try substitute(field.value, values: variableValues)
+            queryItems.append(HTTPField(id: field.id, name: name, value: value, isEnabled: true))
         }
 
         if !queryItems.isEmpty {
@@ -102,18 +388,25 @@ public enum RequestPreparer {
         request.timeoutInterval = configuration.options.inactivityTimeout
         request.cachePolicy = .reloadIgnoringLocalCacheData
 
-        for field in configuration.headers where field.isEnabled {
-            if field.name.isEmpty && field.value.isEmpty {
-                continue
-            }
+        var resolvedHeaders: [HTTPField] = []
+        for field in configuration.headers where isActive(field) {
+            resolvedHeaders.append(HTTPField(
+                id: field.id,
+                name: try substitute(field.name, values: variableValues),
+                value: try substitute(field.value, values: variableValues),
+                isEnabled: true
+            ))
+        }
 
-            try rejectTemplates(in: field.name)
-            try rejectTemplates(in: field.value)
+        if authorizationHeader != nil,
+           resolvedHeaders.contains(where: { $0.name.caseInsensitiveCompare("Authorization") == .orderedSame }) {
+            throw RequestPreparationError.authorizationConflict
+        }
 
+        for field in resolvedHeaders {
             guard isHTTPToken(field.name) else {
                 throw RequestPreparationError.invalidHeaderName
             }
-
             guard isValidHeaderValue(field.value) else {
                 throw RequestPreparationError.invalidHeaderValue
             }
@@ -127,42 +420,39 @@ public enum RequestPreparer {
             }
         }
 
+        if let authorizationHeader {
+            request.setValue(authorizationHeader, forHTTPHeaderField: "Authorization")
+        }
+
         if configuration.bodyEnabled {
-            try rejectTemplates(in: configuration.body)
-            request.httpBody = Data(configuration.body.utf8)
+            let body = try substitute(configuration.body, values: variableValues)
+            request.httpBody = Data(body.utf8)
         }
 
         return request
     }
 
-    private static func validateOptions(_ options: HTTPOptions) throws {
-        guard options.inactivityTimeout.isFinite,
-              options.inactivityTimeout > 0,
-              options.overallTimeout.map({ $0.isFinite && $0 > 0 }) ?? true,
-              options.maximumResponseBytes.map({ $0 >= 0 }) ?? true else {
-            throw RequestPreparationError.invalidTimeout
+    private static func substitute(_ source: String, values: [String: String]) throws -> String {
+        do {
+            return try TemplateEngine.substitute(source, values: values)
+        } catch {
+            throw RequestPreparationError.unresolvedTemplate
         }
     }
 
-    private static func pathParameterValues(in configuration: HTTPRequestConfiguration) throws -> [String: String] {
-        var values: [String: String] = [:]
-
-        for name in pathParameterNames(in: configuration.url) {
-            let candidates = configuration.pathParameters.filter { $0.name == name && $0.isEnabled }
-            guard candidates.count == 1,
-                  let candidate = candidates.first,
-                  !candidate.value.isEmpty else {
-                throw RequestPreparationError.invalidPathParameter(name)
+    private static func replacingPathParameters(
+        in source: String,
+        references: [TemplateReference],
+        values: [String: String]
+    ) -> String {
+        let result = NSMutableString(string: source)
+        for reference in references.reversed() {
+            guard let value = values[reference.name] else {
+                continue
             }
-
-            try rejectTemplates(in: candidate.value)
-            guard let encodedValue = encodePathSegment(candidate.value) else {
-                throw RequestPreparationError.invalidURL
-            }
-            values[name] = encodedValue
+            result.replaceCharacters(in: reference.range, with: value)
         }
-
-        return values
+        return result as String
     }
 
     private static func encodePathSegment(_ value: String) -> String? {
@@ -175,84 +465,12 @@ public enum RequestPreparer {
         return value.addingPercentEncoding(withAllowedCharacters: unreservedCharacters)
     }
 
-    private static func replacingPathParameters(in path: String, with values: [String: String]) -> String {
-        path.split(separator: "/", omittingEmptySubsequences: false)
-            .map { segment in
-                guard let name = pathParameterName(in: segment), let value = values[name] else {
-                    return String(segment)
-                }
-                return value
-            }
-            .joined(separator: "/")
-    }
-
-    private static func pathParameterName(in segment: Substring) -> String? {
-        guard segment.first == ":" else {
-            return nil
-        }
-
-        let name = segment.dropFirst()
-        let bytes = name.utf8
-        guard let first = bytes.first,
-              isASCIIIdentifierStart(first),
-              bytes.dropFirst().allSatisfy(isASCIIIdentifierContinuation) else {
-            return nil
-        }
-        return String(name)
-    }
-
-    private static func isASCIIIdentifierStart(_ byte: UInt8) -> Bool {
-        (0x41...0x5A).contains(byte) || (0x61...0x7A).contains(byte) || byte == 0x5F
-    }
-
-    private static func isASCIIIdentifierContinuation(_ byte: UInt8) -> Bool {
-        isASCIIIdentifierStart(byte) || (0x30...0x39).contains(byte)
-    }
-
-    private static func rawPath(in url: String) -> String {
-        let boundary = url.firstIndex { $0 == "?" || $0 == "#" } ?? url.endIndex
-        let urlWithoutSuffix = url[..<boundary]
-
-        if let delimiter = urlWithoutSuffix.range(of: "://"),
-           isScheme(urlWithoutSuffix[..<delimiter.lowerBound]) {
-            let authority = urlWithoutSuffix[delimiter.upperBound...]
-            guard let pathStart = authority.firstIndex(of: "/") else {
-                return ""
-            }
-            return String(urlWithoutSuffix[pathStart...])
-        }
-
-        if urlWithoutSuffix.hasPrefix("//") {
-            let authorityStart = urlWithoutSuffix.index(urlWithoutSuffix.startIndex, offsetBy: 2)
-            guard let pathStart = urlWithoutSuffix[authorityStart...].firstIndex(of: "/") else {
-                return ""
-            }
-            return String(urlWithoutSuffix[pathStart...])
-        }
-
-        if let schemeEnd = urlWithoutSuffix.firstIndex(of: ":"),
-           isScheme(urlWithoutSuffix[..<schemeEnd]) {
-            return String(urlWithoutSuffix[urlWithoutSuffix.index(after: schemeEnd)...])
-        }
-
-        return String(urlWithoutSuffix)
-    }
-
-    private static func isScheme(_ value: Substring) -> Bool {
-        let bytes = value.utf8
-        guard let first = bytes.first,
-              (0x41...0x5A).contains(first) || (0x61...0x7A).contains(first) else {
-            return false
-        }
-        return bytes.dropFirst().allSatisfy { byte in
-            (0x41...0x5A).contains(byte) || (0x61...0x7A).contains(byte) ||
-                (0x30...0x39).contains(byte) || byte == 0x2B || byte == 0x2D || byte == 0x2E
-        }
-    }
-
-    private static func rejectTemplates(in value: String) throws {
-        guard !value.contains("{{"), !value.contains("}}") else {
-            throw RequestPreparationError.unresolvedTemplate
+    private static func validateOptions(_ options: HTTPOptions) throws {
+        guard options.inactivityTimeout.isFinite,
+              options.inactivityTimeout > 0,
+              options.overallTimeout.map({ $0.isFinite && $0 > 0 }) ?? true,
+              options.maximumResponseBytes.map({ $0 >= 0 }) ?? true else {
+            throw RequestPreparationError.invalidTimeout
         }
     }
 

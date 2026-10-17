@@ -363,7 +363,7 @@ private struct HeaderTable: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
                 }
-                .font(.callout)
+                .font(.system(.callout, design: .monospaced))
                 .padding(.horizontal, 9)
                 .padding(.vertical, 7)
                 if field.id != fields.last?.id {
@@ -383,6 +383,11 @@ private struct ResponseBodyPreview: View {
     @EnvironmentObject private var model: AppModel
     let identity: RequestIdentity
     let latest: AppModel.LatestResponse
+    @State private var syntax: BodySyntax = .none
+    @State private var pretty = false
+    @State private var formatted: String?
+    @State private var formatError: String?
+    @State private var isFormatting = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -393,6 +398,30 @@ private struct ResponseBodyPreview: View {
                 Text(latest.response.bodyByteCount.formatted(.byteCount(style: .file)))
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+
+            HStack {
+                Picker("Response syntax", selection: $syntax) {
+                    Text("None").tag(BodySyntax.none)
+                    Text("JSON").tag(BodySyntax.json)
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .frame(width: 86)
+                Picker("Response presentation", selection: $pretty) {
+                    Text("Raw").tag(false)
+                    Text("Pretty").tag(true)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 120)
+                .disabled(syntax != .json || latest.preview?.isBinary != false)
+            }
+            .fixedSize(horizontal: false, vertical: true)
+
+            if isFormatting { ProgressView("Formatting JSON…").controlSize(.small) }
+            if let formatError {
+                Text(formatError).font(.caption).foregroundStyle(.secondary)
             }
 
             if latest.isLoadingPreview {
@@ -413,9 +442,10 @@ private struct ResponseBodyPreview: View {
                         .frame(maxWidth: .infinity, minHeight: 90)
                 } else {
                     ScrollView(.horizontal) {
-                        Text(preview.text.isEmpty ? "(empty body)" : preview.text)
-                            .font(.system(.callout, design: .monospaced))
-                            .textSelection(.enabled)
+                        HighlightedResponseText(
+                            text: displayedText(preview),
+                            syntax: syntax
+                        )
                             .fixedSize(horizontal: true, vertical: true)
                             .padding(10)
                     }
@@ -424,7 +454,7 @@ private struct ResponseBodyPreview: View {
                     .overlay {
                         RoundedRectangle(cornerRadius: 7).stroke(.quaternary, lineWidth: 1)
                     }
-                    if preview.isTruncated {
+                    if preview.isTruncated && !(pretty && formatted != nil) {
                         Label("Preview limited to the first 1 MiB. The saved response file is complete.", systemImage: "info.circle")
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -435,5 +465,32 @@ private struct ResponseBodyPreview: View {
                     .frame(maxWidth: .infinity, minHeight: 100)
             }
         }
+        .onAppear {
+            let type = latest.response.responseHeaders.first {
+                $0.name.caseInsensitiveCompare("Content-Type") == .orderedSame
+            }?.value.lowercased().split(separator: ";").first.map(String.init) ?? ""
+            syntax = type == "application/json" || type.hasSuffix("+json") ? .json : .none
+        }
+        .task(id: pretty && syntax == .json) {
+            formatted = nil
+            formatError = nil
+            guard pretty && syntax == .json else { isFormatting = false; return }
+            isFormatting = true
+            let url = latest.response.bodyFileURL
+            let result = await Task.detached(priority: .userInitiated) {
+                Result { try JSONPresentation.pretty(at: url) }
+            }.value
+            guard !Task.isCancelled else { return }
+            isFormatting = false
+            switch result {
+            case let .success(text): formatted = text
+            case let .failure(error): formatError = error.localizedDescription
+            }
+        }
+    }
+
+    private func displayedText(_ preview: BodyPreview) -> String {
+        let text = pretty && syntax == .json ? (formatted ?? preview.text) : preview.text
+        return text.isEmpty ? "(empty body)" : text
     }
 }

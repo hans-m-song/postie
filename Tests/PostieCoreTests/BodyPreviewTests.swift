@@ -3,6 +3,19 @@ import XCTest
 @testable import PostieCore
 
 final class BodyPreviewTests: XCTestCase {
+    func testPrettyJSONPreservesLexemesAndSourceAndBoundsExpansion() throws {
+        let source = Data(#"{"a":1e2,"a":"é\\\"","empty":[],"nested":{"ok":true}}"#.utf8)
+        let file = try bodyFile(source)
+        defer { try? FileManager.default.removeItem(at: file) }
+        let pretty = try JSONPresentation.pretty(at: file)
+        XCTAssertTrue(pretty.contains("1e2"))
+        XCTAssertEqual(pretty.components(separatedBy: "\"a\"").count, 3)
+        XCTAssertNotNil(try JSONSerialization.jsonObject(with: Data(pretty.utf8)))
+        XCTAssertEqual(try Data(contentsOf: file), source)
+        XCTAssertThrowsError(try JSONPresentation.pretty(source, maximumBytes: source.count))
+        XCTAssertThrowsError(try JSONPresentation.pretty(Data("{invalid".utf8)))
+    }
+
     func testPreviewReadsBoundedUTF8PrefixAndMarksTruncation() throws {
         let file = try bodyFile(Data("hello world".utf8))
         defer { try? FileManager.default.removeItem(at: file) }

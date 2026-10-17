@@ -70,18 +70,28 @@ final class StoreTests: XCTestCase {
         let root = try makeRoot()
         defer { try? FileManager.default.removeItem(at: root) }
         let collectionID = try await createWorkspace(at: root, requestCount: 1)
-        let index = try readObject(at: collectionURL(root, collectionID).appendingPathComponent("collection.json"))["requests"] as! [String]
+        let metadataURL = collectionURL(root, collectionID).appendingPathComponent("collection.json")
+        var metadata = try readObject(at: metadataURL)
+        metadata.removeValue(forKey: "variables")
+        try writeObject(metadata, to: metadataURL)
+        let index = metadata["requests"] as! [String]
         let requestID = try XCTUnwrap(UUID(uuidString: try XCTUnwrap(index.first)))
         let storedURL = requestURL(root, collectionID, requestID)
         var stored = try readObject(at: storedURL)
         stored.removeValue(forKey: "pathParameters")
+        stored.removeValue(forKey: "variables")
+        stored.removeValue(forKey: "authentication")
         stored["futureRequestData"] = ["retained": ["value": 42]]
         try writeObject(stored, to: storedURL)
 
         let store = try CollectionStore(rootURL: root)
         let loaded = try await store.load()
+        let collection = try XCTUnwrap(loaded.collections.first)
         var request = try XCTUnwrap(loaded.collections.first?.requests.first)
         XCTAssertTrue(request.pathParameters.isEmpty)
+        XCTAssertTrue(request.variables.isEmpty)
+        XCTAssertEqual(request.authentication, RequestAuthentication())
+        XCTAssertTrue(collection.variables.isEmpty)
 
         request.name = "Saved after loading old data"
         try await store.saveRequest(request, in: collectionID)
@@ -91,6 +101,198 @@ final class StoreTests: XCTestCase {
         let futureData = try XCTUnwrap(updated["futureRequestData"] as? [String: Any])
         let nestedFutureData = try XCTUnwrap(futureData["retained"] as? [String: Any])
         XCTAssertEqual(nestedFutureData["value"] as? Int, 42)
+    }
+
+    func testVariableScopesAndEncryptedAuthenticationRoundTripWithoutPlaintextAfterConversion() async throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let collectionID = try await createWorkspace(at: root, requestCount: 1)
+        let store = try CollectionStore(rootURL: root)
+
+        try await store.saveGlobalVariables(["globalName": .plain("global value")])
+        try await store.saveCollectionVariables(["collectionName": .plain("collection value")], in: collectionID)
+
+        let initialLoad = try await store.load()
+        var request = try XCTUnwrap(initialLoad.collections.first?.requests.first)
+        request.variables = [
+            "requestSecret": .plain("synthetic plaintext before conversion"),
+            "requestName": .plain("request value")
+        ]
+        request.authentication = RequestAuthentication(
+            kind: .bearer,
+            token: SecretEnvelope(combined: "synthetic bearer ciphertext")
+        )
+        try await store.saveRequest(request, in: collectionID)
+
+        request.variables["requestSecret"] = .encrypted(SecretEnvelope(combined: "synthetic encrypted request value"))
+        try await store.saveRequest(request, in: collectionID)
+
+        let loaded = try await store.load()
+        let collection = try XCTUnwrap(loaded.collections.first { $0.id == collectionID })
+        let reloadedRequest = try XCTUnwrap(collection.requests.first)
+        XCTAssertEqual(loaded.globalVariables["globalName"], .plain("global value"))
+        XCTAssertFalse(loaded.globalVariablesAreReadOnly)
+        XCTAssertEqual(collection.variables["collectionName"], .plain("collection value"))
+        XCTAssertEqual(reloadedRequest.variables["requestSecret"], .encrypted(SecretEnvelope(combined: "synthetic encrypted request value")))
+        XCTAssertEqual(reloadedRequest.variables["requestName"], .plain("request value"))
+        XCTAssertEqual(reloadedRequest.authentication.token, SecretEnvelope(combined: "synthetic bearer ciphertext"))
+
+        let globals = try readObject(at: root.appendingPathComponent("globals.json"))
+        let globalValues = try XCTUnwrap(globals["variables"] as? [String: Any])
+        XCTAssertEqual(globalValues["globalName"] as? String, "global value")
+        let storedRequest = try readObject(at: requestURL(root, collectionID, reloadedRequest.id))
+        let requestValues = try XCTUnwrap(storedRequest["variables"] as? [String: Any])
+        XCTAssertNil(requestValues["requestSecret"] as? String)
+        XCTAssertEqual((requestValues["requestSecret"] as? [String: Any])?["combined"] as? String, "synthetic encrypted request value")
+        let storedAuthentication = try XCTUnwrap(storedRequest["authentication"] as? [String: Any])
+        XCTAssertEqual((storedAuthentication["token"] as? [String: Any])?["combined"] as? String, "synthetic bearer ciphertext")
+        let serializedRequest = try String(contentsOf: requestURL(root, collectionID, reloadedRequest.id), encoding: .utf8)
+        XCTAssertFalse(serializedRequest.contains("synthetic plaintext before conversion"))
+    }
+
+    func testOwnedVariableMapsRemoveRenamedKeysAndPreserveUnknownMetadata() async throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let collectionID = try await createWorkspace(at: root, requestCount: 1)
+        let store = try CollectionStore(rootURL: root)
+        let oldEnvelope = SecretEnvelope(combined: "synthetic retained ciphertext")
+
+        try await store.saveGlobalVariables(["oldGlobal": .plain("old"), "keptGlobal": .encrypted(oldEnvelope)])
+        try await store.saveCollectionVariables(["oldCollection": .plain("old"), "keptCollection": .encrypted(oldEnvelope)], in: collectionID)
+        let initialLoad = try await store.load()
+        var request = try XCTUnwrap(initialLoad.collections.first?.requests.first)
+        request.variables = ["oldRequest": .plain("old"), "keptRequest": .encrypted(oldEnvelope)]
+        request.authentication = RequestAuthentication(
+            kind: .basic,
+            username: "old user",
+            password: oldEnvelope,
+            token: SecretEnvelope(combined: "synthetic obsolete token")
+        )
+        try await store.saveRequest(request, in: collectionID)
+
+        let globalsURL = root.appendingPathComponent("globals.json")
+        var globals = try readObject(at: globalsURL)
+        var globalValues = try XCTUnwrap(globals["variables"] as? [String: Any])
+        var keptGlobal = try XCTUnwrap(globalValues["keptGlobal"] as? [String: Any])
+        keptGlobal["futureEnvelopeData"] = ["retained": true]
+        globalValues["keptGlobal"] = keptGlobal
+        globals["variables"] = globalValues
+        globals["futureGlobalsData"] = ["retained": true]
+        try writeObject(globals, to: globalsURL)
+
+        let metadataURL = collectionURL(root, collectionID).appendingPathComponent("collection.json")
+        var metadata = try readObject(at: metadataURL)
+        var collectionValues = try XCTUnwrap(metadata["variables"] as? [String: Any])
+        var keptCollection = try XCTUnwrap(collectionValues["keptCollection"] as? [String: Any])
+        keptCollection["futureEnvelopeData"] = ["retained": true]
+        collectionValues["keptCollection"] = keptCollection
+        metadata["variables"] = collectionValues
+        metadata["futureCollectionData"] = ["retained": true]
+        try writeObject(metadata, to: metadataURL)
+
+        let storedRequestURL = requestURL(root, collectionID, request.id)
+        var storedRequest = try readObject(at: storedRequestURL)
+        var requestValues = try XCTUnwrap(storedRequest["variables"] as? [String: Any])
+        var keptRequest = try XCTUnwrap(requestValues["keptRequest"] as? [String: Any])
+        keptRequest["futureEnvelopeData"] = ["retained": true]
+        requestValues["keptRequest"] = keptRequest
+        storedRequest["variables"] = requestValues
+        storedRequest["futureRequestData"] = ["retained": true]
+        var authentication = try XCTUnwrap(storedRequest["authentication"] as? [String: Any])
+        var password = try XCTUnwrap(authentication["password"] as? [String: Any])
+        password["futureEnvelopeData"] = ["retained": true]
+        authentication["password"] = password
+        authentication["futureAuthData"] = ["retained": true]
+        storedRequest["authentication"] = authentication
+        try writeObject(storedRequest, to: storedRequestURL)
+
+        try await store.saveGlobalVariables([
+            "newGlobal": .plain("new"),
+            "keptGlobal": .encrypted(SecretEnvelope(combined: "synthetic updated global ciphertext"))
+        ])
+        try await store.saveCollectionVariables([
+            "newCollection": .plain("new"),
+            "keptCollection": .encrypted(SecretEnvelope(combined: "synthetic updated collection ciphertext"))
+        ], in: collectionID)
+
+        let beforeSave = try await store.load()
+        var loadedRequest = try XCTUnwrap(beforeSave.collections.first?.requests.first)
+        loadedRequest.variables = [
+            "newRequest": .plain("new"),
+            "keptRequest": .encrypted(SecretEnvelope(combined: "synthetic updated request ciphertext"))
+        ]
+        loadedRequest.authentication = RequestAuthentication(
+            kind: .basic,
+            username: "updated user",
+            password: SecretEnvelope(combined: "synthetic updated password ciphertext")
+        )
+        try await store.saveRequest(loadedRequest, in: collectionID)
+
+        globals = try readObject(at: globalsURL)
+        globalValues = try XCTUnwrap(globals["variables"] as? [String: Any])
+        XCTAssertNil(globalValues["oldGlobal"])
+        XCTAssertNotNil(globalValues["newGlobal"])
+        XCTAssertEqual((globalValues["keptGlobal"] as? [String: Any])?["futureEnvelopeData"] as? [String: Bool], ["retained": true])
+        XCTAssertEqual((globals["futureGlobalsData"] as? [String: Bool])?["retained"], true)
+
+        metadata = try readObject(at: metadataURL)
+        collectionValues = try XCTUnwrap(metadata["variables"] as? [String: Any])
+        XCTAssertNil(collectionValues["oldCollection"])
+        XCTAssertNotNil(collectionValues["newCollection"])
+        XCTAssertEqual((collectionValues["keptCollection"] as? [String: Any])?["futureEnvelopeData"] as? [String: Bool], ["retained": true])
+        XCTAssertEqual((metadata["futureCollectionData"] as? [String: Bool])?["retained"], true)
+
+        storedRequest = try readObject(at: storedRequestURL)
+        requestValues = try XCTUnwrap(storedRequest["variables"] as? [String: Any])
+        XCTAssertNil(requestValues["oldRequest"])
+        XCTAssertNotNil(requestValues["newRequest"])
+        XCTAssertEqual((requestValues["keptRequest"] as? [String: Any])?["futureEnvelopeData"] as? [String: Bool], ["retained": true])
+        XCTAssertEqual((storedRequest["futureRequestData"] as? [String: Bool])?["retained"], true)
+        authentication = try XCTUnwrap(storedRequest["authentication"] as? [String: Any])
+        XCTAssertNil(authentication["token"])
+        XCTAssertEqual((authentication["password"] as? [String: Any])?["combined"] as? String, "synthetic updated password ciphertext")
+        XCTAssertEqual((authentication["password"] as? [String: Any])?["futureEnvelopeData"] as? [String: Bool], ["retained": true])
+        XCTAssertEqual((authentication["futureAuthData"] as? [String: Bool])?["retained"], true)
+        XCTAssertFalse(try String(contentsOf: storedRequestURL, encoding: .utf8).contains("synthetic obsolete token"))
+    }
+
+    func testUnreadableGlobalsAreReadOnlyWithoutBlockingCollections() async throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let collectionID = try await createWorkspace(at: root, requestCount: 1)
+        let store = try CollectionStore(rootURL: root)
+        let globalsURL = root.appendingPathComponent("globals.json")
+
+        var globals = try readObject(at: globalsURL)
+        globals["formatVersion"] = 99
+        try writeObject(globals, to: globalsURL)
+        let unsupportedData = try Data(contentsOf: globalsURL)
+        let unsupportedLoad = try await store.load()
+        XCTAssertTrue(unsupportedLoad.globalVariablesAreReadOnly)
+        XCTAssertTrue(unsupportedLoad.issues.contains { $0.id.hasPrefix("store:globals-version-unsupported") })
+        XCTAssertFalse(try XCTUnwrap(unsupportedLoad.collections.first { $0.id == collectionID }).isReadOnly)
+        XCTAssertEqual(try XCTUnwrap(unsupportedLoad.collections.first { $0.id == collectionID }).requests.count, 1)
+        do {
+            try await store.saveGlobalVariables(["new": .plain("value")])
+            XCTFail("Unsupported globals must not be overwritten")
+        } catch CollectionStoreError.ioFailure {
+        }
+        XCTAssertEqual(try Data(contentsOf: globalsURL), unsupportedData)
+
+        globals["formatVersion"] = 1
+        globals["variables"] = ["unsupportedValue": 42]
+        try writeObject(globals, to: globalsURL)
+        let malformedData = try Data(contentsOf: globalsURL)
+        let malformedLoad = try await store.load()
+        XCTAssertTrue(malformedLoad.globalVariablesAreReadOnly)
+        XCTAssertTrue(malformedLoad.issues.contains { $0.id.hasPrefix("store:globals-malformed") })
+        XCTAssertEqual(try XCTUnwrap(malformedLoad.collections.first { $0.id == collectionID }).requests.count, 1)
+        do {
+            try await store.saveGlobalVariables(["new": .plain("value")])
+            XCTFail("Malformed globals must not be overwritten")
+        } catch CollectionStoreError.ioFailure {
+        }
+        XCTAssertEqual(try Data(contentsOf: globalsURL), malformedData)
     }
 
     func testLifetimeLockRejectsASecondWriter() async throws {

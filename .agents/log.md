@@ -127,3 +127,17 @@
 - Created dependency-free SwiftPM package, core shared models, native app worker, HTTP worker and persistence worker. Separate core target enables focused tests within one package.
 - Xcode27/Swift6.4 host verified. Sandbox blocked generated SwiftPM/XCBuild files; an auto-review-approved escalated trusted build with credential stores disabled compiled core and full app. No user signing identities/Keychain/runtime data were inspected.
 - Independent review identified nullable-limit merge, transient body cleanup, partial-delete UI state, final redirect method and cancellation outcome defects. Store cap fix is implemented with a regression; other fixes are assigned to original owners and independent tests are underway. No milestone completion claimed.
+
+## 2026-10-17 — M3/M4 implementation in progress
+
+- User authorised M3/M4, including URL variable/path parameter highlighting and the accepted v3 mockup direction. Current checklist and concrete decisions are in docs/implementation-m3-m4.md; M5 remains deferred.
+- Core persistence, template preparation and encryption workers completed their bounded source changes. The isolated core target compiled after correcting one missing return; all 53 core functional tests passed, using synthetic stores, fake keys and loopback HTTP. Actual built-app Keychain continuity remains unverified.
+- AppModel worker implemented scoped save/flush, conservative key creation and accepted secret-commit handling. Parent added run-specific cancellation to prevent an obsolete preparation callback from cancelling a later run. Native field/body highlighting and auth/variable UI workers are still implementing; independent core/security review is underway.
+
+## 2026-10-17 — M3/M4 completed locally
+
+- Three scopes, single-pass literal templates, Basic/Bearer, AES-GCM/Keychain, native None/JSON/template/path highlighting, bounded Raw/Pretty, variable source summary and Command-K search implemented. No M5 feature expansion. Persisted models remain templates/ciphertext; only effective referenced secrets unlock.
+- Independent security review found no substantiated blocker. Independent UI review identified state crossing request identities, a second debounce losing edits, and edits during busy secret operations. Owners corrected all; recheck closed findings. Full tests caught workspace publication before readiness; atomic load/initial-load ordering fixed, old tests retained.
+- Native validation caught promoted-row focus loss and doubled URL drawing. State-backed native focus, queued transition guards and editing-cell drawing fix passed full header entry/Tab, hidden-tab input isolation and single-render missing cues. None/JSON preserved body undo; palette Escape restored selection. Compact response-control labels were corrected against minimum-size screenshots.
+- Final independent make test passed66 (Core53/App13), release build and strict signature passed. Actual new synthetic Keychain key creation, secret conversion/Bearer and same-binary restart passed. Resigned rebuild prompted for access; user approved, unattended rebuild continuity remains unverified. Do not weaken ACLs. OS removable-volume dialogs require user action because Computer Use blocks UserNotificationCenter.
+- Only isolated synthetic paths/new services/loopback were used, never existing runtime config or keys. Owned validation apps closed and fixture stopped. Local commit only, no push. Details and residual IME/light/performance/signing limits: docs/implementation-m3-m4.md.

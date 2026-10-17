@@ -125,7 +125,7 @@ public actor CollectionStore {
 
     public func load() throws -> WorkspaceLoad {
         var issues: [StorageIssue] = []
-        appendGlobalsIssue(to: &issues)
+        let globals = loadGlobals(issues: &issues)
 
         let collectionEntries: [URL]
         do {
@@ -171,7 +171,29 @@ public actor CollectionStore {
             return $0.name.localizedStandardCompare($1.name) == .orderedAscending
         }
 
-        return WorkspaceLoad(collections: collections, issues: issues)
+        return WorkspaceLoad(
+            collections: collections,
+            issues: issues,
+            globalVariables: globals.values,
+            globalVariablesAreReadOnly: globals.isReadOnly
+        )
+    }
+
+    public func saveGlobalVariables(_ variables: VariableValues) throws {
+        var object = try writableGlobalsObject()
+        let incoming = try Self.variableJSONValue(variables)
+        let existing = object["variables"] ?? .object([:])
+        object["variables"] = Self.mergeOwnedVariables(existing, with: incoming)
+        try replaceJSON(.object(object), at: globalsURL, operation: "save global variables")
+    }
+
+    public func saveCollectionVariables(_ variables: VariableValues, in collectionID: UUID) throws {
+        let (directory, record) = try writableCollection(id: collectionID)
+        let existing = record.object["variables"] ?? .object([:])
+        var updated = record
+        let incoming = try Self.variableJSONValue(variables)
+        updated.object["variables"] = Self.mergeOwnedVariables(existing, with: incoming)
+        try replaceJSON(updated.jsonValue, at: directory.appendingPathComponent("collection.json"), operation: "save collection variables")
     }
 
     public func createCollection(name: String) throws -> RequestCollection {
@@ -310,7 +332,7 @@ public actor CollectionStore {
 
         let existing = try readRequest(at: url, identity: request.id)
         let incoming = try requestJSONValue(request)
-        let merged = Self.mergeUnknownData(existing.jsonValue, with: incoming)
+        let merged = Self.mergeRequestData(existing.jsonValue, with: incoming)
         try replaceJSON(merged, at: url, operation: "save the request")
     }
 
@@ -407,24 +429,49 @@ public actor CollectionStore {
         }
     }
 
-    private func appendGlobalsIssue(to issues: inout [StorageIssue]) {
+    private func loadGlobals(issues: inout [StorageIssue]) -> (values: VariableValues, isReadOnly: Bool) {
         guard Self.isRegularFile(globalsURL), let data = try? Data(contentsOf: globalsURL) else {
             issues.append(makeIssue(.missingGlobals, message: "The globals document is missing or unreadable and was preserved."))
-            return
+            return ([:], true)
         }
         guard case .object(let object) = try? JSONDecoder().decode(JSONValue.self, from: data),
               case .number(let version)? = object["formatVersion"] else {
             issues.append(makeIssue(.malformedGlobals, message: "The globals document is malformed and was preserved."))
-            return
+            return ([:], true)
         }
         guard version == Decimal(Self.currentFormatVersion) else {
             issues.append(makeIssue(.unsupportedGlobalsVersion, message: "The globals document uses an unsupported format and was preserved."))
-            return
+            return ([:], true)
         }
-        guard case .object? = object["variables"] else {
+        guard let rawVariables = object["variables"] else {
             issues.append(makeIssue(.malformedGlobals, message: "The globals document is malformed and was preserved."))
-            return
+            return ([:], true)
         }
+        do {
+            return (try Self.decodeVariables(rawVariables), false)
+        } catch {
+            issues.append(makeIssue(.malformedGlobals, message: "The globals document is malformed and was preserved."))
+            return ([:], true)
+        }
+    }
+
+    private func writableGlobalsObject() throws -> [String: JSONValue] {
+        let unavailable = CollectionStoreError.ioFailure(operation: "save global variables because the globals document is unavailable or unsupported")
+        guard Self.isRegularFile(globalsURL), let data = try? Data(contentsOf: globalsURL) else {
+            throw unavailable
+        }
+        guard case .object(let object) = try? JSONDecoder().decode(JSONValue.self, from: data),
+              case .number(let version)? = object["formatVersion"],
+              version == Decimal(Self.currentFormatVersion),
+              let rawVariables = object["variables"] else {
+            throw unavailable
+        }
+        do {
+            _ = try Self.decodeVariables(rawVariables)
+        } catch {
+            throw unavailable
+        }
+        return object
     }
 
     private func loadCollection(id: UUID, at directory: URL, issues: inout [StorageIssue]) -> RequestCollection {
@@ -463,6 +510,20 @@ public actor CollectionStore {
               case .array(let entries)? = object["requests"], case .string? = object["name"] else {
             issues.append(makeIssue(.malformedCollectionMetadata, collectionID: id, message: "Collection metadata is malformed; the collection files were preserved."))
             return RequestCollection(id: id, name: "Unavailable collection", isReadOnly: true)
+        }
+
+        let variables: VariableValues
+        var variablesAreReadOnly = false
+        if let rawVariables = object["variables"] {
+            do {
+                variables = try Self.decodeVariables(rawVariables)
+            } catch {
+                issues.append(makeIssue(.malformedCollectionVariables, collectionID: id, message: "Collection variables are malformed; the collection was loaded read-only and its files were preserved."))
+                variables = [:]
+                variablesAreReadOnly = true
+            }
+        } else {
+            variables = [:]
         }
 
         let record = CollectionRecord(object: object, name: displayName, entries: entries)
@@ -519,7 +580,7 @@ public actor CollectionStore {
 
         appendUnknownEntryIssues(in: directory, collectionID: id, requestFiles: requestFiles, issues: &issues)
         appendOrphanIssues(in: directory, collectionID: id, requestFiles: requestFiles, indexedIDs: Set(indexCounts.keys), issues: &issues)
-        return RequestCollection(id: id, name: record.name, requests: requests)
+        return RequestCollection(id: id, name: record.name, requests: requests, isReadOnly: variablesAreReadOnly, variables: variables)
     }
 
     private func appendUnknownEntryIssues(in directory: URL, collectionID: UUID, requestFiles: [UUID: [URL]], issues: inout [StorageIssue]) {
@@ -682,6 +743,19 @@ public actor CollectionStore {
         return .object(requestObject)
     }
 
+    private static func decodeVariables(_ value: JSONValue) throws -> VariableValues {
+        guard case .object = value else {
+            throw DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "Variable values must be a JSON object."))
+        }
+        let data = try JSONEncoder.postieEncoder.encode(value)
+        return try JSONDecoder().decode(VariableValues.self, from: data)
+    }
+
+    private static func variableJSONValue(_ variables: VariableValues) throws -> JSONValue {
+        let data = try JSONEncoder.postieEncoder.encode(variables)
+        return try JSONDecoder().decode(JSONValue.self, from: data)
+    }
+
     private func writeNewJSON(_ value: JSONValue, to url: URL, operation: String) throws {
         let data: Data
         do {
@@ -798,6 +872,76 @@ public actor CollectionStore {
         }
     }
 
+    private static func mergeRequestData(_ old: JSONValue, with incoming: JSONValue) -> JSONValue {
+        guard case .object(let oldObject) = old,
+              case .object(let newObject) = incoming else {
+            return incoming
+        }
+
+        var merged = oldObject
+        for (key, newValue) in newObject {
+            switch key {
+            case "variables":
+                merged[key] = mergeOwnedVariables(oldObject[key] ?? .object([:]), with: newValue)
+            case "authentication":
+                merged[key] = mergeAuthentication(oldObject[key] ?? .object([:]), with: newValue)
+            default:
+                if let oldValue = oldObject[key] {
+                    merged[key] = mergeUnknownData(oldValue, with: newValue)
+                } else {
+                    merged[key] = newValue
+                }
+            }
+        }
+        return .object(merged)
+    }
+
+    private static func mergeOwnedVariables(_ old: JSONValue, with incoming: JSONValue) -> JSONValue {
+        guard case .object(let oldValues) = old,
+              case .object(let newValues) = incoming else {
+            return incoming
+        }
+
+        var merged: [String: JSONValue] = [:]
+        for (name, newValue) in newValues {
+            if let oldValue = oldValues[name] {
+                merged[name] = mergeUnknownData(oldValue, with: newValue)
+            } else {
+                merged[name] = newValue
+            }
+        }
+        return .object(merged)
+    }
+
+    private static func mergeAuthentication(_ old: JSONValue, with incoming: JSONValue) -> JSONValue {
+        guard case .object(let oldObject) = old,
+              case .object(let newObject) = incoming else {
+            return incoming
+        }
+
+        let knownFields: Set<String> = ["kind", "username", "password", "token"]
+        var merged = oldObject
+        for key in knownFields {
+            guard let newValue = newObject[key] else {
+                merged.removeValue(forKey: key)
+                continue
+            }
+            if (key == "password" || key == "token"), let oldValue = oldObject[key] {
+                merged[key] = mergeUnknownData(oldValue, with: newValue)
+            } else {
+                merged[key] = newValue
+            }
+        }
+        for (key, newValue) in newObject where !knownFields.contains(key) {
+            if let oldValue = oldObject[key] {
+                merged[key] = mergeUnknownData(oldValue, with: newValue)
+            } else {
+                merged[key] = newValue
+            }
+        }
+        return .object(merged)
+    }
+
     private static func objectID(_ value: JSONValue) -> String? {
         guard case .object(let object) = value else { return nil }
         return object["id"]?.stringValue
@@ -848,6 +992,7 @@ public actor CollectionStore {
         case duplicateCollectionDirectory = "duplicate-collection-directory"
         case missingCollectionMetadata = "collection-metadata-missing"
         case malformedCollectionMetadata = "collection-metadata-malformed"
+        case malformedCollectionVariables = "collection-variables-malformed"
         case unsupportedCollectionVersion = "collection-version-unsupported"
         case unreadableCollectionContents = "collection-contents-unreadable"
         case malformedIndexEntry = "index-entry-malformed"
@@ -875,6 +1020,7 @@ public actor CollectionStore {
             self.object = [
                 "formatVersion": .number(Decimal(CollectionStore.currentFormatVersion)),
                 "name": .string(name),
+                "variables": .object([:]),
                 "requests": .array(entries)
             ]
             self.name = name
@@ -913,6 +1059,13 @@ public actor CollectionStore {
                   case .string(let name)? = object["name"], case .array(let entries)? = object["requests"] else {
                 throw DocumentFailure.malformed
             }
+            if let variables = object["variables"] {
+                do {
+                    _ = try CollectionStore.decodeVariables(variables)
+                } catch {
+                    throw DocumentFailure.malformed
+                }
+            }
             return CollectionRecord(object: object, name: name, entries: entries)
         }
     }
@@ -929,6 +1082,8 @@ public actor CollectionStore {
         var bodyEnabled: Bool
         var bodySyntax: BodySyntax
         var options: HTTPOptions
+        var variables: VariableValues?
+        var authentication: RequestAuthentication?
 
         init(configuration: HTTPRequestConfiguration) {
             self.formatVersion = CollectionStore.currentFormatVersion
@@ -942,6 +1097,8 @@ public actor CollectionStore {
             self.bodyEnabled = configuration.bodyEnabled
             self.bodySyntax = configuration.bodySyntax
             self.options = configuration.options
+            self.variables = configuration.variables
+            self.authentication = configuration.authentication
         }
 
         func configuration(identity: UUID) -> HTTPRequestConfiguration {
@@ -956,7 +1113,9 @@ public actor CollectionStore {
                 body: body,
                 bodyEnabled: bodyEnabled,
                 bodySyntax: bodySyntax,
-                options: options
+                options: options,
+                variables: variables ?? [:],
+                authentication: authentication ?? RequestAuthentication()
             )
         }
     }

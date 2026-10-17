@@ -1,6 +1,6 @@
 # Postie roadmap
 
-Recorded 2026-10-17. M1 and M2 are complete locally under explicit user authorisation. M3–M5 remain not started. IDs are stable; do not reuse deleted IDs. Paste cURL is deferred beyond this implementation slice.
+Recorded 2026-10-17. M1–M4 are complete locally. M5 remains not started. IDs are stable; do not reuse deleted IDs. Paste cURL is deferred beyond this implementation slice. See implementation-m3-m4.md for decisions, audit dispositions, verification and limits.
 
 This document records the approved high-level breakdown. User agreed on 2026-10-17 to keep local planning for now; TaskView records have not been created. Revisit TaskView migration only when project tracking is requested again.
 
@@ -26,7 +26,7 @@ T-47 Git outcome: local baseline `a3aa26b` on main. User explicitly chose to kee
 
 User approved this bounded slice after M1/M2: T-36 trailing empty query/header rows with focus retained; T-37 whole-heading disclosure hit targets and response headers collapsed by default; T-38 one-hop manual redirect from captured exchange without mutating saved settings; T-39 default configuration at ~/.config/postie without silently migrating/merging existing stores; T-40 literal :name path-segment parameters, encoded substitution and missing-value diagnostics; T-41 full-width method/URL/Send toolbar above both panes. Existing directory overrides remain. Verification uses synthetic isolated paths only. Main owns integration and durable docs; bounded workers own core path/storage, HTTP/model continuation and native views. Independent test/review required before completion.
 
-T-42 is deferred: session request log with expandable request headers, response headers and body. It does not authorise persisted history. M3–M5 otherwise remain deferred.
+T-42 is deferred: session request log with expandable request headers, response headers and body. It does not authorise persisted history. M3/M4 were subsequently authorised; M5 remains deferred.
 
 Additional user steering during validation: T-43 (complete) Request/Settings tabs, moving redirect/time/size options to Settings; T-44 (complete) remove unexplained response right-side unused band by fixing container width. T-41 also addresses compact-window clipping. No deferred feature expansion.
 
@@ -57,7 +57,7 @@ Goal: resume saved work after restart. Depends on M1.
 
 | ID | Deliverable | Dependency |
 |---|---|---|
-| T-07 | Versioned JSON storage format in Application Support | T-02 |
+| T-07 | Versioned JSON storage format (current default ~/.config/postie) | T-02 |
 | T-08 | Collection creation, rename and deletion | T-07 |
 | T-09 | Named request creation, duplication and deletion | T-08 |
 | T-10 | Automatic save and restore | T-07, T-09 |
@@ -68,7 +68,7 @@ Gate: create multiple collections/requests, restart, and recover saved configura
 
 Storage proposal: one directory per collection, collection.json with ordered request IDs, one file per request identified by UUID filename, and separate globals.json. T-29 owns recovery between multi-file writes; see storage.md. Physical collection directories do not introduce product folders. Resolve multiple-app-instance writes and safe collection deletion before implementation.
 
-## M3 — Variables and authentication
+## M3 — Variables and authentication (complete locally)
 
 Goal: reuse configuration with predictable substitution. Depends on M2.
 
@@ -84,7 +84,7 @@ Goal: reuse configuration with predictable substitution. Depends on M2.
 
 Gate: override a name at all three scopes and inspect outgoing values; unresolved variables block sending/copying once cURL exists; encrypted values survive restart using the Keychain-held application key. No recursion or dynamic values. Resolve parsing, encoding, literal delimiters, secret visibility and Authorization conflict rules before implementation. Structured auth/secret saving must ship with encryption, never through a temporary plaintext path. Cover missing/denied Keychain, literal-to-secret conversion and independent duplicate/delete behaviour without app-key removal. No record/field binding or rename-dependent re-encryption is required initially. T-32 covers modified ciphertext rejection, unknown envelopes, no plaintext fallback and actual built-app Keychain access; see encryption.md.
 
-## M4 — Highlighting and editing
+## M4 — Highlighting and editing (complete locally)
 
 Goal: comfortable editing and response inspection. Depends on M3; editor feasibility can be investigated earlier.
 
@@ -97,8 +97,9 @@ Goal: comfortable editing and response inspection. Depends on M3; editor feasibi
 | T-22 | Stable selection, cursor, undo and responsive editing | T-19, T-21 |
 | T-23 | Essential shortcuts and loading/error states | T-01 through T-22 as relevant |
 | T-30 | Native request search palette: name and stored URL/path across collections | T-09, T-10, T-29 |
+| T-51 | URL variable and whole-segment path parameter highlighting, missing cues | T-14, T-20, T-40 |
 
-Gate: edit incomplete JSON containing templates without cursor disruption; inspect JSON/non-JSON; preserve original response data. Apply bounded reads/highlighting and full-body formatting thresholds over M1's file-backed bodies without blocking UI. Clearly mark partial previews without truncating stored bodies. Request editor and response renderer can be separate surfaces. Editor feasibility is an unresolved technical risk.
+Gate: edit incomplete JSON containing templates without cursor disruption; inspect JSON/non-JSON; preserve original response data. Apply bounded reads/highlighting and full-body formatting thresholds over M1's file-backed bodies without blocking UI. Clearly mark partial previews without truncating stored bodies. Native editor feasibility is established for the checked flows; IME and large-input latency remain unverified.
 
 T-30 gate: Command-K/menu invocation, case-insensitive name/URL/path matching, duplicate-name context, keyboard/pointer selection, empty/no-match handling and preserved edits on navigation. Search updates with saved-request changes, uses stable identities and opens without sending. No template resolution, persistent search index or generic command framework. See navigation.md. Can proceed independently of highlighting once persistence interfaces are stable.
 
@@ -128,7 +129,7 @@ T-31 gate: manually save a completed exchange, restart and reconstruct request i
 
 ## Verification and completion
 
-Latest baseline gates, 2026-10-17: independent reviews and bounded fixes complete; `make test` passes 46 tests (Core 38/AppModel 8), and `make app` produces the verified release bundle. See baseline-review.md. Earlier milestone counts below are historical.
+Latest M3/M4 gates, 2026-10-17: independent core/security/UI reviews, fixes and final functional verification complete; `make test` passes66 (Core53/App13). Release build/strict signature and isolated native syntax/undo/focus/search/secret restart checks passed. Ad-hoc rebuilds prompted for Keychain access, user approved; unattended continuity remains unverified. See implementation-m3-m4.md. Earlier milestone counts below are historical.
 
 M1/M2 completion, 2026-10-17: T-01–T-11, T-29, T-33 and T-34 are complete locally. Independent verification passed 36 tests with zero failures; final source review found no blocking findings. The final app bundle was rebuilt/signature-verified and real UI flows checked, including concurrency, redirects, cancellation and restart persistence. See implementation.md for precise evidence and residual gaps. T-04 supports text/JSON bytes in a raw editor; T-19 owns syntax selection/highlighting. T-28 remains later release readiness despite the current local bundle.
 

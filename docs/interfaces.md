@@ -1,4 +1,4 @@
-# M1/M2 worker contracts
+# Core and UI contracts
 
 Shared models are in Sources/PostieCore/Models.swift. Main agent owns those declarations and Package.swift; coordinate interface changes before editing shared files. Everything below is public in PostieCore. No networking or persistence of real user data is allowed in verification.
 
@@ -8,14 +8,17 @@ Shared models are in Sources/PostieCore/Models.swift. Main agent owns those decl
 public actor HTTPExecutionManager {
     public init(bodyDirectory: URL) throws
     public func start(identity: RequestIdentity, configuration: HTTPRequestConfiguration) throws -> HTTPRun
+    public func start(identity: RequestIdentity, prepared: PreparedHTTPRequest) throws -> HTTPRun
     public func followRedirect(identity: RequestIdentity, response: HTTPResponseRecord) throws -> HTTPRun
-    public func cancel(identity: RequestIdentity)
+    public func cancel(identity: RequestIdentity, runID expectedRunID: UUID? = nil)
     public func discardBody(at url: URL) throws
     public func shutdown() async
 }
 
 public enum RequestPreparer {
     public static func prepare(_ configuration: HTTPRequestConfiguration) throws -> URLRequest
+    public static func prepare(_ configuration: HTTPRequestConfiguration, context: VariableContext,
+                               decryptor: (any SecretValueDecrypting)?) async throws -> PreparedHTTPRequest
     public static func pathParameterNames(in url: String) -> [String]
 }
 
@@ -40,6 +43,8 @@ HTTPRequestConfiguration.pathParameters defaults to an empty field array, includ
 public actor CollectionStore {
     public init(rootURL: URL) throws
     public func load() throws -> WorkspaceLoad
+    public func saveGlobalVariables(_ variables: VariableValues) throws
+    public func saveCollectionVariables(_ variables: VariableValues, in collectionID: UUID) throws
     public func createCollection(name: String) throws -> RequestCollection
     public func renameCollection(id: UUID, name: String) throws
     public func deleteCollection(id: UUID) throws
@@ -51,7 +56,13 @@ public actor CollectionStore {
 }
 ```
 
-CollectionStore holds an exclusive OS lock for its lifetime. Unknown/malformed/indexed-missing records stay on disk with issues; unaffected requests still load. Preserve index membership when editing around broken entries; do not silently rebuild/drop them. Recovery explicitly adds a valid orphan to the index. Deletion removes membership first, then cleans the file; report partial failures. Collection deletion stages outside the active directory before cleanup. Filename/directory provides identity; do not duplicate request/collection IDs in stored JSON. Version each document. The initial globals document is empty; no variable editor/encryption in this slice.
+CollectionStore holds an exclusive OS lock for its lifetime. Unknown/malformed/indexed-missing records stay on disk with issues; unaffected requests still load. Preserve index membership when editing around broken entries; do not silently rebuild/drop them. Recovery explicitly adds a valid orphan to the index. Deletion removes membership first, then cleans the file; report partial failures. Collection deletion stages outside the active directory before cleanup. Filename/directory provides identity; do not duplicate request/collection IDs in stored JSON. Version each document. WorkspaceLoad includes globals and their read-only status; scope writes replace owned maps while preserving unrelated unknown fields.
+
+## M3 preparation and encryption
+
+ConfigurationValues.swift defines VariableValue (plain string/encrypted SecretEnvelope), VariableContext and non-Codable PreparedHTTPRequest. Request > collection > global lookup is single pass, active/referenced inputs only. The async preparer supplements missing context.request entries from configuration.variables, preserving explicit context overrides. Original configuration remains templates/ciphertext; URLRequest/referencedInputs are transient. SecretVault owns AES-GCM and narrowly scoped ApplicationKeyStore access, with conservative explicit creation permission. See implementation-m3-m4.md for parsing/auth/failure rules.
+
+AppModel publishes workspace snapshots only after vault gating and revision checks, updates ordinary values synchronously before debounced disk save, and tracks accepted asynchronous secret commits for termination. Per-target tokens invalidate commits after removal/rename/navigation. Run-specific cancellation prevents obsolete work cancelling a newer run. Secret edit buffers use explicit Save/Cancel; navigation discards unsaved secret edits, tabs within the same request retain them.
 
 ## UI worker
 

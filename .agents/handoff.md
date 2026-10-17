@@ -1,33 +1,35 @@
 # Handoff
 
-Latest follow-up: T-50 table alignment/input typography completed locally. Query/header headings, saved/empty rows share dimensions; protocol and numeric inputs are monospaced. Release rebuild5.45seconds and isolated native alignment/Tab/path/settings checks passed; default response-size field widened to120pt. Scoped independent review found no findings. No automated tests added/rerun for presentation-only changes. Validation app closed. Keep commits local; no push authorised.
+Updated 2026-10-17. M1–M4 are complete locally. Final native focus/drawing checks, independent66 functional tests, release build and strict signature passed. No incomplete worker. See docs/implementation-m3-m4.md for decisions, audits and residual limits. Computer Use blocks UserNotificationCenter; OS volume permissions require the user, and login passwords require handoff.
 
-Updated 2026-10-17. M1/M2, usability T-36–T-41/T-43–T-46, baseline review T-47, rename T-48 and Swift/Makefile tooling T-49 are complete locally. No worker remains incomplete. Baseline commit: a3aa26ba7c2cfc8b813f4b6a6cc85e5b12ae239f, branch main. User explicitly chose to keep the commit local; do not push without a new request. Origin is configured but no project content was pushed. Automatic review rejected the initial push attempt before execution because external-upload authorisation was unclear.
+## Scope and state
 
-## Read first
+M3/M4 adds three variable scopes, single-pass templates, Basic/Bearer, encrypted values/Keychain key, native None/JSON/template/path highlighting, Raw/Pretty, variable-source summary and Command-K search. M5/cURL/snapshots/T-42 log remain deferred. Local roadmap is approved; no TaskView project. Local completion commit on main records this work; prior commit52b90df. Keep commits local, never push without a new request. Main alone edits .agents docs. No worktree created.
 
-docs/baseline-review.md records current reviews, findings, verification and limitations. docs/implementation.md includes historical milestone evidence; docs/roadmap.md tracks deferred work. docs/interfaces.md and docs/structure.md describe current boundaries. Main alone edits this handoff and log.
+## Verification
 
-## Current deliverable and verification
+Independent security review found no substantiated blocker. Independent UI review found identity reuse, double-debounce edit loss and editable busy secret inputs; corrected and rechecked. Full tests exposed non-atomic workspace publication; fixed without weakening old tests. Final independent make test passes66 (Core53/App13), zero failures; diff check passes. Only main functional tests added.
 
-dist/Postie.app is the release bundle, macOS27.0+, ad-hoc signature verified. Baseline make test passed all46 tests (Core38/AppModel8), zero failures, using the Swift fixture. Baseline make app built in13.06seconds; T-50's latest incremental release build passed in5.45seconds. Strict signature and isolated launch passed. Make fixture emitted its loopback port, then was intentionally stopped.
+Native passed: loopback scoped/path/body/header substitution, Bearer, secret conversion, same-binary restart/decryption, ordinary edit/immediate quit, URL variable/path/missing colors, body undo across syntax changes, None retaining template cues, search path/arrow/Return/no-match/Escape restoring selection, compact syntax/response layout. Native row promotion lost focus and URL editing doubled glyphs; State focus/transition guards/idle drawing repairs passed full header entry and Tab, hidden-tab input isolation, and single-draw URL editing with missing cues. Bounded metadata-only variable source summary showed correct scope precedence.
 
-Independent security, architecture/performance and UI/specification reviews closed substantiated findings. Corrected retained-request collection deletion, body selection/undo across Settings, unused binary formatting and fixture teardown. Explicit Rename request… works through the sidebar context menu; native Save/Cancel/restart and editor selection/undo/redo passed.
+Actual new-service Keychain creation and same-binary restart passed. Resigned ad-hoc rebuild prompted for access; user reported approval. Unattended update continuity is not established. Never weaken ACLs; stable signing remains future work. No existing user keys queried.
 
-## Build and tests
+## Build and isolated artifacts
 
-Run from repository root: make app, make test, make fixture. Override SWIFT, BUILD_DIR, APP_DIR, CONFIGURATION on the make command line. All project implementation/tooling is Swift or Makefile/plist; both Python helpers were removed. PostieHTTPFixture is a separate test product, not bundled with the app. Tests launch its sibling executable automatically.
+make app/test/fixture; override SWIFT/BUILD_DIR/APP_DIR/CONFIGURATION. Swift /Volumes/Data/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swift. Build root /Volumes/Data/cache/postie-m34, TMPDIR /Volumes/Data/tmp/postie-m34. Trusted builds need escalation for manifests/maps; Makefile disables credential stores. Implementation/tooling Swift/Makefile/plist only.
 
-Latest isolated build root: /Volumes/Data/cache/postie-native-baseline; TMPDIR /Volumes/Data/tmp/postie-native-baseline. Restricted agent builds need authorised escalation for generated SwiftPM manifests/maps; credential stores remain disabled. Direct Swift: /Volumes/Data/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swift.
+dist/Postie.app is release, macOS27.0+, ad-hoc signed; final strict signature passed. Synthetic logs /Volumes/Data/tmp/postie-m34/independent-tests.log and release-build-final.log.
 
-The final isolated GUI used /Volumes/Data/cache/postie-baseline-validation/Postie.app and /Volumes/Data/tmp/postie-baseline-validation data/bodies; it was closed after checks. Never open user runtime data to reproduce these checks.
+Synthetic apps /Volumes/Data/cache/postie-m34-validation/Postie.app (dev.postie.validation.m34.20261017a; dedicated Keychain service suffix .workspace-encryption) and /Volumes/Data/cache/postie-m34-visual/Postie.app (dev.postie.validation.m34.visual; use ordinary Other request only) are closed. Matching data/bodies below /Volumes/Data/tmp/postie-m34-validation and postie-m34-visual. Always launch with explicit directory overrides, never default user config. Old validation cleanup had one automatic-review timeout then a successful verified retry. Do not delete synthetic Keychain items automatically.
 
-## Limits and standing constraints
+Fixture session57799 at127.0.0.1:57501 was intentionally stopped with Ctrl-C. No validation services remain running.
 
-Default data ~/.config/postie via Foundation home directory, no automatic migration/merge; explicit directory overrides remain. Literal configuration is plaintext. Auth/variables/encryption, syntax/highlighting/palette, snapshots/cURL and T-42 session log remain deferred. M1/M2 approval does not authorise them.
+## Next actions
 
-Only synthetic loopback and isolated workspaces exercised. TLS/proxy/power-loss behavior, exact900×600 sizing and IME remain unverified;900×652 layout observed. Termination mutation-race/10second timeout is source-reviewed only. Headers represent Foundation APIs, not wire bytes. No distribution/notarisation or performance benchmark claimed. Fixture startup still uses a blocking readiness read; teardown is bounded.
+M5 is next when authorised: cURL export, later import and immutable snapshots per roadmap. Stable signing is needed before promising unattended Keychain continuity across updates. No further M3/M4 implementation task is pending; do not broaden tests or revisit TaskView without a new request.
 
-A tester violated the ban on unverified XCTest flags and printed environment values to tool output/a temporary log. Tester reported deleting the log; main stopped the agent and informed the user. No values reused or recorded in repository. Never repeat that diagnostic. Future test invocations must use verified SwiftPM commands; never inspect env/runtime config/credentials/PII/Keychain.
+## Constraints and limits
 
-Local roadmap remains approved; no TaskView project created. Build/runtime artifacts are ignored; initial baseline includes source, tests, docs and prior visual concepts. No worktree created or pruned.
+Never inspect environment, PII, existing runtime config/credentials, .env/.config/.aws/.ssh or enumerate Keychain. Synthetic stores/new exact services only. Never use XCTest help/unverified flags (historical baseline diagnostic violated environment ban; not repeated). Use make test.
+
+No IME/light-mode runtime/performance/distribution/TLS/proxy claim. Formatting cap5MiB input/output, highlight1MiB UTF-8, raw preview1MiB; response files remain complete. Cancellation/deletion test asserts model ownership but lacks endpoint-hit counter. API headers are not wire-exact. Config without its Keychain key cannot recover secrets.

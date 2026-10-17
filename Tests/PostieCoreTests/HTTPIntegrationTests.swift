@@ -58,6 +58,37 @@ final class HTTPIntegrationTests: XCTestCase {
         try await manager.discardBody(at: postResponse.bodyFileURL)
     }
 
+    func testPreparedStartSendsResolvedRequestAndRetainsOriginalConfiguration() async throws {
+        let fixture = try LocalHTTPFixture()
+        let root = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let manager = try HTTPExecutionManager(bodyDirectory: root.appendingPathComponent("bodies", isDirectory: true))
+        let configuration = HTTPRequestConfiguration(
+            method: "POST",
+            url: fixture.baseURL + "/echo",
+            headers: [HTTPField(name: "X-Prepared", value: "{{headerValue}}")],
+            body: "{{bodyValue}}",
+            bodyEnabled: true
+        )
+        let prepared = try await RequestPreparer.prepare(
+            configuration,
+            context: VariableContext(request: [
+                "headerValue": .plain("resolved header"),
+                "bodyValue": .plain("resolved body")
+            ]),
+            decryptor: nil
+        )
+        let identity = RequestIdentity(collectionID: UUID(), requestID: configuration.id)
+
+        let response = try completedResponse(in: await collect(try await manager.start(identity: identity, prepared: prepared)))
+        let payload = try responseJSON(response)
+
+        XCTAssertEqual(response.request, configuration)
+        XCTAssertEqual(payload["body"] as? String, "resolved body")
+        XCTAssertEqual(try XCTUnwrap(requestHeader("X-Prepared", in: payload)), "resolved header")
+        try await manager.discardBody(at: response.bodyFileURL)
+    }
+
     func testRedirectCanBeDisabledAndFollowed() async throws {
         let fixture = try LocalHTTPFixture()
         let root = try makeTemporaryDirectory()

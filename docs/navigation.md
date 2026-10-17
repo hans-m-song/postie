@@ -1,6 +1,6 @@
 # Request search palette
 
-Recorded 2026-10-17. User requested a command-palette-style setup searching requests by name or URL/path. Proposed interaction below is not implemented.
+Recorded 2026-10-17. M4 implementation adds native Command-K/menu/sidebar search by draft or saved name and literal URL/path. Current verification is tracked in implementation-m3-m4.md.
 
 ## Initial interaction
 

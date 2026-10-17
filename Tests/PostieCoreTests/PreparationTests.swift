@@ -140,7 +140,182 @@ final class PreparationTests: XCTestCase {
         XCTAssertThrowsError(try RequestPreparer.prepare(configuration))
     }
 
+    func testTemplateEngineScansEscapesAndUsesWholePathSegments() throws {
+        let scan = TemplateEngine.scan("{{valid_2}} \\{{literal}} }} {{bad-name}} {{unclosed")
+
+        XCTAssertEqual(scan.references.map(\.name), ["valid_2"])
+        XCTAssertEqual(scan.invalidRanges.count, 2)
+        XCTAssertTrue(TemplateEngine.isValidVariableName("_valid2"))
+        XCTAssertFalse(TemplateEngine.isValidVariableName("2invalid"))
+
+        let url = "https://{{host}}/v/:team/:id?query=:ignored#fragment-:ignored"
+        let pathReferences = TemplateEngine.pathReferences(in: url)
+        XCTAssertEqual(pathReferences.map(\.name), ["team", "id"])
+        XCTAssertEqual(pathReferences.map { (url as NSString).substring(with: $0.range) }, [":team", ":id"])
+
+        XCTAssertEqual(try TemplateEngine.substitute("\\{{literal}} }}", values: [:]), "{{literal}} }}")
+    }
+
+    func testScopedPreparationUsesPrecedenceWithoutRecursiveExpansion() async throws {
+        let configuration = HTTPRequestConfiguration(
+            url: "https://{{host}}.test/",
+            headers: [
+                HTTPField(name: "X-Values", value: "{{winner}}|{{collectionOnly}}|{{globalOnly}}|{{nested}}"),
+                HTTPField(name: "X-Literal", value: "\\{{winner}}|json}}")
+            ],
+            body: "{{nested}}",
+            bodyEnabled: true,
+            variables: [
+                "winner": .plain("request"),
+                "nested": .plain("{{globalOnly}}")
+            ]
+        )
+        let context = VariableContext(
+            global: [
+                "host": .plain("api"),
+                "winner": .plain("global"),
+                "collectionOnly": .plain("global collection"),
+                "globalOnly": .plain("global")
+            ],
+            collection: [
+                "winner": .plain("collection"),
+                "collectionOnly": .plain("collection")
+            ]
+        )
+
+        let prepared = try await RequestPreparer.prepare(configuration, context: context, decryptor: nil)
+
+        XCTAssertEqual(prepared.configuration, configuration)
+        XCTAssertEqual(prepared.request.url?.host, "api.test")
+        XCTAssertEqual(headerValue("X-Values", in: prepared.request), "request|collection|global|{{globalOnly}}")
+        XCTAssertEqual(headerValue("X-Literal", in: prepared.request), "{{winner}}|json}}")
+        XCTAssertEqual(prepared.request.httpBody, Data("{{globalOnly}}".utf8))
+        XCTAssertEqual(prepared.referencedInputs["winner"]?.scope.rawValue, VariableScope.request.rawValue)
+        XCTAssertEqual(prepared.referencedInputs["collectionOnly"]?.scope.rawValue, VariableScope.collection.rawValue)
+        XCTAssertEqual(prepared.referencedInputs["globalOnly"]?.scope.rawValue, VariableScope.global.rawValue)
+    }
+
+    func testPreparationRejectsMissingAndMalformedActiveTemplates() async {
+        let missing = HTTPRequestConfiguration(
+            url: "https://example.test",
+            headers: [HTTPField(name: "X-Missing", value: "{{missing}}")]
+        )
+        let malformed = HTTPRequestConfiguration(
+            url: "https://example.test",
+            body: "{{bad-name}}",
+            bodyEnabled: true
+        )
+
+        do {
+            _ = try await RequestPreparer.prepare(missing, context: VariableContext(), decryptor: nil)
+            XCTFail("A missing referenced variable must prevent preparation.")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("missing"))
+        }
+
+        do {
+            _ = try await RequestPreparer.prepare(malformed, context: VariableContext(), decryptor: nil)
+            XCTFail("A malformed active template must prevent preparation.")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("template"))
+        }
+    }
+
+    func testPreparationEncodesResolvedQueryAndPathValuesOnce() async throws {
+        let configuration = HTTPRequestConfiguration(
+            url: "https://example.test/:id?existing=a%2Fb",
+            pathParameters: [HTTPField(name: "id", value: "{{segment}}")],
+            query: [HTTPField(name: "{{queryName}}", value: "{{queryValue}}")]
+        )
+        let context = VariableContext(request: [
+            "segment": .plain("a/b%?#"),
+            "queryName": .plain("q name"),
+            "queryValue": .plain("a+b/c%?#")
+        ])
+
+        let prepared = try await RequestPreparer.prepare(configuration, context: context, decryptor: nil)
+        let components = try XCTUnwrap(URLComponents(url: XCTUnwrap(prepared.request.url), resolvingAgainstBaseURL: false))
+
+        XCTAssertEqual(components.percentEncodedPath, "/a%2Fb%25%3F%23")
+        XCTAssertEqual(components.percentEncodedQuery, "existing=a%2Fb&q%20name=a%2Bb%2Fc%25%3F%23")
+    }
+
+    func testPreparationDecryptsOnlyEffectiveSecretsAndAddsStructuredAuthorization() async throws {
+        let selectedSecret = SecretEnvelope(combined: "selected-variable")
+        let password = SecretEnvelope(combined: "basic-password")
+        let decryptor = FakeDecryptor(values: [
+            selectedSecret.combined: "used secret",
+            password.combined: "pässword"
+        ])
+        let configuration = HTTPRequestConfiguration(
+            url: "https://example.test",
+            headers: [HTTPField(name: "X-Secret", value: "{{secret}}")],
+            variables: ["shadowed": .encrypted(SecretEnvelope(combined: "request-shadow"))],
+            authentication: RequestAuthentication(kind: .basic, username: "usér", password: password,
+                                                  token: SecretEnvelope(combined: "unused-inactive-token"))
+        )
+        let context = VariableContext(
+            global: [
+                "secret": .encrypted(SecretEnvelope(combined: "global-shadow")),
+                "unused": .encrypted(SecretEnvelope(combined: "unused-global"))
+            ],
+            collection: ["secret": .plain("collection shadow")],
+            request: ["secret": .encrypted(selectedSecret)]
+        )
+
+        let prepared = try await RequestPreparer.prepare(configuration, context: context, decryptor: decryptor)
+        let expectedBasic = Data("usér:pässword".utf8).base64EncodedString()
+        let decryptedEnvelopes = await decryptor.requestedEnvelopes()
+
+        XCTAssertEqual(headerValue("X-Secret", in: prepared.request), "used secret")
+        XCTAssertEqual(headerValue("Authorization", in: prepared.request), "Basic \(expectedBasic)")
+        XCTAssertEqual(Set(decryptedEnvelopes), Set([selectedSecret.combined, password.combined]))
+        XCTAssertEqual(prepared.referencedInputs["secret"]?.isSecret, true)
+    }
+
+    func testPreparationRejectsResolvedAuthorizationHeaderWithStructuredAuth() async throws {
+        let configuration = HTTPRequestConfiguration(
+            url: "https://example.test",
+            headers: [HTTPField(name: "{{headerName}}", value: "manual")],
+            authentication: RequestAuthentication(kind: .bearer, token: SecretEnvelope(combined: "bearer-token"))
+        )
+        let context = VariableContext(request: ["headerName": .plain("authorization")])
+        let decryptor = FakeDecryptor(values: ["bearer-token": "token-value"])
+
+        do {
+            _ = try await RequestPreparer.prepare(configuration, context: context, decryptor: decryptor)
+            XCTFail("A resolved enabled Authorization field must conflict with structured authentication.")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("Authorization"))
+        }
+    }
+
     private func headerValue(_ name: String, in request: URLRequest) -> String? {
         request.allHTTPHeaderFields?.first { $0.key.caseInsensitiveCompare(name) == .orderedSame }?.value
     }
+}
+
+private actor FakeDecryptor: SecretValueDecrypting {
+    private let values: [String: String]
+    private var requested: [String] = []
+
+    init(values: [String: String]) {
+        self.values = values
+    }
+
+    func decrypt(_ envelope: SecretEnvelope) async throws -> String {
+        requested.append(envelope.combined)
+        guard let value = values[envelope.combined] else {
+            throw FakeDecryptorError.unknownEnvelope
+        }
+        return value
+    }
+
+    func requestedEnvelopes() -> [String] {
+        requested
+    }
+}
+
+private enum FakeDecryptorError: Error {
+    case unknownEnvelope
 }

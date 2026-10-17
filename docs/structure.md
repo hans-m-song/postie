@@ -1,6 +1,6 @@
 # Postie structure
 
-Verified 2026-10-17. M1/M2 now exist in one dependency-free SwiftPM package; remaining responsibilities below describe later product scope.
+Verified 2026-10-17. One dependency-free SwiftPM package; M1–M4 are complete locally, with M3/M4 verification in implementation-m3-m4.md. cURL and snapshots remain later scope.
 
 ## Current documents
 
@@ -43,7 +43,11 @@ The package separates PostieCore from the PostieApp executable and has two focus
 ```text
 Sources/PostieCore/
   Models.swift                  Shared values and run events
-  RequestPreparer.swift         Validation and URLRequest construction
+  ConfigurationValues.swift     Persisted encrypted values and transient preparation contracts
+  TemplateEngine.swift          Shared literal token and path grammar
+  RequestPreparer.swift         Scoped substitution, auth and URLRequest construction
+  SecretVault.swift             AES-GCM and narrowly scoped Keychain key storage
+  JSONPresentation.swift        Bounded read-only JSON formatting
   HTTPExecutionManager.swift    URLSession, redirects, cancellation, body ownership
   ResponseBodyReader.swift      Bounded text/binary previews
   CollectionStore.swift         JSON, index, atomic writes, lock and recovery
@@ -54,6 +58,13 @@ Sources/PostieApp/
   RequestEditorView.swift       Stacked query/header/body and options
   RequestResponseSplit.swift    Native split allocation and persistent hosted panes
   GrowingBodyEditor.swift       Non-scrolling native editor, height, binding and undo
+  SyntaxHighlighting.swift      Bounded lexical spans and adaptive colors
+  HighlightedTextField.swift    Native URL/header/value template presentation
+  HighlightedResponseText.swift Selectable natural-size response text
+  AuthenticationEditor.swift    Explicit transient secret editing
+  VariableEditorView.swift      Scoped plain/secret variable editing
+  VariableOwner.swift           App scope identity
+  RequestSearchPalette.swift    Literal draft/stored name and URL search
   PaddedDisclosureGroupStyle.swift Whole-heading accessible disclosure control
   ResponseView.swift            Redirect/final exchanges and preview
   OngoingRequestsView.swift     Active runs, Cancel and Open Request
@@ -69,6 +80,6 @@ docs/interfaces.md              Concrete actor/UI contracts
 
 Runtime data defaults to ~/.config/postie; temporary response bodies use isolated locked sessions beneath temporary-directory/Postie. Explicit directory arguments support isolated verification. Existing stores are not automatically moved. Runtime configuration is not repository content.
 
-Ordinary literal configuration and responses can contain sensitive text; it is not automatically classified as a secret. Proposed encrypted fields protect marked variables/auth values through a Keychain-held key. Preparation/editor state may hold decrypted secrets transiently; saved models and error diagnostics must not receive those decrypted values.
+Ordinary literal configuration and responses can contain sensitive text; it is not automatically classified as a secret. Encrypted fields protect marked variables/auth values through a Keychain-held key. Preparation/editor state may hold decrypted secrets transiently; saved models and error diagnostics must not receive those decrypted values.
 
 The main agent owns product decisions, integration, and .agents/log.md and .agents/handoff.md. Bounded executors may own agreed source surfaces; independent reviewers remain read-only. Runtime user configuration is not repository content.
