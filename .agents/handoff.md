@@ -21,3 +21,9 @@ Memory changes explicitly paused by user. Assessment docs/memory-baseline.md rec
 Never inspect environment, PII, user runtime config/credentials, .env/.config/.aws/.ssh, or existing Keychain items. Only synthetic directories/fakekeys/loopback/exact new validation services. Launch validation with explicit --data-directory/--body-directory; never user defaults. OS protected dialogs/passwords require user. No comprehensive tests.
 
 Prior validation apps are closed; fixture12258/7812 stopped. Do not delete synthetic Keychain items automatically. Stable signing/Keychain continuity across changed binaries remains future work. IME/light-mode runtime/performance/distribution/TLS/proxy behavior unclaimed. No source change for deferred memory work.
+
+## Latest T-58–T-63 completed locally — 2026-10-18
+
+See docs/authoring-follow-up.md. JSON pairing, focused URL highlighting, scoped field/body/auth completion, send-time header privacy, read-only Variables reference table and compact secret controls complete. Independent 93 tests (Core61/App32), source reviews, scope audit and isolated native checks passed. No remaining source blocker. IME/light appearance/large-input latency unverified. Response bodies are not redacted. Memory work and M5 remain deferred.
+
+Normal output dist/Postie.app; logs /Volumes/Data/tmp/postie-m34/authoring-final-tests.log, authoring-final-build.log, authoring-dist-build.log. Synthetic .build/authoring-baseline app/data/bodies, ID dev.postie.validation.authoringbaseline.20261018a. Exact new validation Keychain service ending .workspace-encryption was created for synthetic checks; do not delete automatically. App closed, fixture23800 stopped. Reuse authoringBaseline CUA binding after explicit launch; fresh app lookup previously blocked1355s. Only local commit; never push.

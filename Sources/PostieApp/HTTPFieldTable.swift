@@ -7,6 +7,7 @@ struct FieldTable: View {
     let keyPlaceholder: String
     let valuePlaceholder: String
     let availableVariables: Set<String>
+    var completionVariables: [VariableCompletion] = []
     @State private var trailingField = HTTPField()
     @State private var focusedField: FieldFocus?
 
@@ -54,6 +55,7 @@ struct FieldTable: View {
                             keyPlaceholder,
                             text: textBinding(for: field.id, keyPath: \.name),
                             availableVariables: availableVariables,
+                            completionVariables: completionVariables,
                             focused: focusBinding(for: .name(field.id))
                         )
                             .font(.system(.body, design: .monospaced))
@@ -63,6 +65,7 @@ struct FieldTable: View {
                             valuePlaceholder,
                             text: textBinding(for: field.id, keyPath: \.value),
                             availableVariables: availableVariables,
+                            completionVariables: completionVariables,
                             focused: focusBinding(for: .value(field.id))
                         )
                             .font(.system(.body, design: .monospaced))

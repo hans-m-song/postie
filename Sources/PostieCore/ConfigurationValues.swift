@@ -103,11 +103,21 @@ public struct PreparedHTTPRequest: Sendable {
     public let configuration: HTTPRequestConfiguration
     public let request: URLRequest
     public let referencedInputs: [String: ResolvedVariable]
+    public let sensitiveRequestHeaderNames: Set<String>
+    public let secretRequestHeaderNames: Set<String>
 
-    init(configuration: HTTPRequestConfiguration, request: URLRequest, referencedInputs: [String: ResolvedVariable]) {
+    public init(
+        configuration: HTTPRequestConfiguration,
+        request: URLRequest,
+        referencedInputs: [String: ResolvedVariable],
+        sensitiveRequestHeaderNames: Set<String> = [],
+        secretRequestHeaderNames: Set<String> = []
+    ) {
         self.configuration = configuration
         self.request = request
         self.referencedInputs = referencedInputs
+        self.sensitiveRequestHeaderNames = Set(sensitiveRequestHeaderNames.map { $0.lowercased() })
+        self.secretRequestHeaderNames = Set(secretRequestHeaderNames.map { $0.lowercased() })
     }
 }
 

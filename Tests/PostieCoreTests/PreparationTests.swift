@@ -273,6 +273,107 @@ final class PreparationTests: XCTestCase {
         XCTAssertEqual(prepared.referencedInputs["secret"]?.isSecret, true)
     }
 
+    func testPreparationMarksOnlyActiveHeadersReferencingEncryptedVariablesAsSensitive() async throws {
+        let privateName = SecretEnvelope(combined: "private-header-name")
+        let privateValue = SecretEnvelope(combined: "private-header-value")
+        let inheritedValue = SecretEnvelope(combined: "inherited-header-value")
+        let disabledValue = SecretEnvelope(combined: "disabled-header-value")
+        let decryptor = FakeDecryptor(values: [
+            privateName.combined: "X-Name-Secret",
+            privateValue.combined: "value secret",
+            inheritedValue.combined: "inherited secret",
+            disabledValue.combined: "disabled secret"
+        ])
+        let configuration = HTTPRequestConfiguration(
+            url: "https://example.test",
+            headers: [
+                HTTPField(name: "{{privateName}}", value: "name value"),
+                HTTPField(name: "X-Private-Value", value: "Bearer {{privateValue}}"),
+                HTTPField(name: "X-Disabled", value: "{{disabledValue}}", isEnabled: false)
+            ]
+        )
+        let context = VariableContext(
+            collection: ["inheritedValue": .encrypted(inheritedValue)],
+            request: [
+                "privateName": .encrypted(privateName),
+                "privateValue": .encrypted(privateValue),
+                "disabledValue": .encrypted(disabledValue)
+            ]
+        )
+        let collection = CollectionRequestDefaults(headers: [
+            HTTPField(name: "X-Inherited-Private", value: "{{inheritedValue}}")
+        ])
+
+        let prepared = try await RequestPreparer.prepare(
+            configuration,
+            context: context,
+            decryptor: decryptor,
+            collection: collection
+        )
+        let decryptedEnvelopes = await decryptor.requestedEnvelopes()
+
+        XCTAssertEqual(
+            prepared.sensitiveRequestHeaderNames,
+            ["authorization", "proxy-authorization", "cookie", "set-cookie", "x-name-secret", "x-private-value", "x-inherited-private"]
+        )
+        XCTAssertEqual(prepared.secretRequestHeaderNames, ["x-name-secret"])
+        XCTAssertEqual(headerValue("X-Name-Secret", in: prepared.request), "name value")
+        XCTAssertEqual(headerValue("X-Private-Value", in: prepared.request), "Bearer value secret")
+        XCTAssertEqual(headerValue("X-Inherited-Private", in: prepared.request), "inherited secret")
+        XCTAssertNil(prepared.referencedInputs["disabledValue"])
+        XCTAssertEqual(Set(decryptedEnvelopes), Set([privateName.combined, privateValue.combined, inheritedValue.combined]))
+    }
+
+    func testSensitiveHeaderMetadataInitializersNormalizeNamesAndDefaultToEmpty() throws {
+        let url = try XCTUnwrap(URL(string: "https://example.test"))
+        let configuration = HTTPRequestConfiguration(url: url.absoluteString)
+        let request = URLRequest(url: url)
+        let sensitiveNames: Set<String> = ["X-Private", "sEt-CoOkIe"]
+        let secretNames: Set<String> = ["X-Private"]
+        let prepared = PreparedHTTPRequest(
+            configuration: configuration,
+            request: request,
+            referencedInputs: [:],
+            sensitiveRequestHeaderNames: sensitiveNames,
+            secretRequestHeaderNames: secretNames
+        )
+        let preparedWithoutNames = PreparedHTTPRequest(configuration: configuration, request: request, referencedInputs: [:])
+        let redirect = HTTPRedirect(
+            statusCode: 302,
+            url: url,
+            nextURL: url,
+            method: "GET",
+            nextMethod: "GET",
+            requestHeaders: [],
+            responseHeaders: [],
+            sensitiveRequestHeaderNames: sensitiveNames,
+            secretRequestHeaderNames: secretNames
+        )
+        let response = HTTPResponseRecord(
+            runID: UUID(),
+            request: configuration,
+            finalURL: url,
+            statusCode: 200,
+            requestHeaders: [],
+            responseHeaders: [],
+            redirects: [],
+            bodyFileURL: URL(fileURLWithPath: "/tmp/response.body"),
+            bodyByteCount: 0,
+            duration: 0,
+            sensitiveRequestHeaderNames: sensitiveNames,
+            secretRequestHeaderNames: secretNames
+        )
+
+        XCTAssertEqual(prepared.sensitiveRequestHeaderNames, ["x-private", "set-cookie"])
+        XCTAssertEqual(prepared.secretRequestHeaderNames, ["x-private"])
+        XCTAssertEqual(preparedWithoutNames.sensitiveRequestHeaderNames, [])
+        XCTAssertEqual(preparedWithoutNames.secretRequestHeaderNames, [])
+        XCTAssertEqual(redirect.sensitiveRequestHeaderNames, ["x-private", "set-cookie"])
+        XCTAssertEqual(redirect.secretRequestHeaderNames, ["x-private"])
+        XCTAssertEqual(response.sensitiveRequestHeaderNames, ["x-private", "set-cookie"])
+        XCTAssertEqual(response.secretRequestHeaderNames, ["x-private"])
+    }
+
     func testPreparationRejectsResolvedAuthorizationHeaderWithStructuredAuth() async throws {
         let configuration = HTTPRequestConfiguration(
             url: "https://example.test",
@@ -337,6 +438,11 @@ final class PreparationTests: XCTestCase {
         XCTAssertNil(headerValue("X-Private", in: prepared.request))
         XCTAssertTrue(decryptedEnvelopes.isEmpty)
         XCTAssertNil(prepared.referencedInputs["missingDisabledValue"])
+        XCTAssertEqual(
+            prepared.sensitiveRequestHeaderNames,
+            ["authorization", "proxy-authorization", "cookie", "set-cookie"]
+        )
+        XCTAssertEqual(prepared.secretRequestHeaderNames, [])
     }
 
     func testCollectionAuthenticationInheritanceUsesOnlyTheSelectedCredential() async throws {

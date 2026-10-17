@@ -122,135 +122,171 @@ struct VariableEditorView: View {
             : isEditable && nameError == nil && row.nameDraft == row.name && !row.isBusy
 
         return VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                HighlightedTextField(
-                    "Name",
-                    text: nameBinding(for: row.id),
-                    focused: focusBinding(for: .name(row.id))
-                )
-                .font(.system(.body, design: .monospaced))
-                .frame(minWidth: 0, maxWidth: .infinity)
-                .disabled(!isEditable || row.isBusy || (!row.isTrailing && row.isEditingSecret))
+            if row.isEditingSecret || (row.isTrailing && row.isSecretDraft) {
+                HStack(spacing: 6) {
+                    if row.isTrailing {
+                        Toggle("Secret", isOn: secretBinding(for: row.id))
+                            .labelsHidden()
+                            .toggleStyle(.checkbox)
+                            .frame(width: 16)
+                            .help("Store this variable as a secret")
+                            .disabled(!isEditable || row.isBusy)
+                    }
 
-                Divider().frame(height: 22)
+                    nameField(for: row)
+                        .frame(width: 68)
 
-                valueCell(for: row, canEditRow: canEditValue)
-                    .frame(minWidth: 0, maxWidth: .infinity)
-
-                Divider().frame(height: 22)
-
-                Toggle("Secret", isOn: secretBinding(for: row.id))
-                    .labelsHidden()
-                    .toggleStyle(.checkbox)
-                    .frame(width: 56)
-                    .help("Store this variable as a secret")
-                    .disabled(
-                        !isEditable
-                            || row.isBusy
-                            || (!row.isTrailing && (!canEditValue || row.isEditingSecret))
+                    SecretValueInput(
+                        placeholder: row.isTrailing ? "Value" : "Secret value",
+                        value: row.isTrailing ? valueBinding(for: row.id) : secretDraftBinding(for: row.id),
+                        isRevealed: secretRevealedBinding(for: row.id),
+                        isSecret: true
                     )
+                    .frame(minWidth: 0, maxWidth: .infinity)
+                    .disabled(!canEditValue)
 
-                if row.isTrailing {
-                    Color.clear.frame(width: 26)
-                } else {
-                    Button(role: .destructive) {
-                        removeRow(row)
-                    } label: {
-                        Image(systemName: "minus.circle")
+                    Button("Cancel") {
+                        cancelSecretEdit(for: row)
                     }
                     .buttonStyle(.borderless)
-                    .frame(width: 26)
-                    .help("Remove variable")
-                    .focusable(false)
-                    .disabled(!canEditValue || row.isEditingSecret)
+                    .fixedSize()
+                    .disabled(row.isTrailing ? row.isBusy : !canEditValue)
+
+                    Button("Save") {
+                        saveSecretEdit(for: row)
+                    }
+                    .buttonStyle(.borderless)
+                    .fixedSize()
+                    .disabled(row.isTrailing ? !isEditable || row.isBusy || nameError != nil : !canEditValue)
                 }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                HStack(spacing: 8) {
+                    nameField(for: row)
+                        .frame(minWidth: 0, maxWidth: .infinity)
+
+                    Divider().frame(height: 22)
+
+                    valueCell(for: row, canEditRow: canEditValue)
+                        .frame(minWidth: 0, maxWidth: .infinity)
+
+                    Divider().frame(height: 22)
+
+                    Toggle("Secret", isOn: secretBinding(for: row.id))
+                        .labelsHidden()
+                        .toggleStyle(.checkbox)
+                        .frame(width: 56)
+                        .help("Store this variable as a secret")
+                        .disabled(
+                            !isEditable
+                                || row.isBusy
+                                || (!row.isTrailing && (!canEditValue || row.isEditingSecret))
+                        )
+
+                    if row.isTrailing {
+                        Color.clear.frame(width: 26)
+                    } else {
+                        Button(role: .destructive) {
+                            removeRow(row)
+                        } label: {
+                            Image(systemName: "minus.circle")
+                        }
+                        .buttonStyle(.borderless)
+                        .frame(width: 26)
+                        .help("Remove variable")
+                        .focusable(false)
+                        .disabled(!canEditValue || row.isEditingSecret)
+                    }
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
 
             if let message = nameError ?? row.errorMessage {
                 inlineError(message)
             }
 
             if row.isTrailing && row.isSecretDraft {
-                HStack(spacing: 8) {
-                    Text("Secret values are saved only after encryption succeeds.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Spacer(minLength: 0)
-                    Button("Cancel") {
-                        cancelSecretEdit(for: row)
-                    }
-                    .buttonStyle(.borderless)
-                    .disabled(row.isBusy)
-                    Button("Save") {
-                        saveSecretEdit(for: row)
-                    }
-                    .buttonStyle(.borderless)
-                    .disabled(!isEditable || row.isBusy || nameError != nil)
-                }
-                .padding(.horizontal, 8)
-                .padding(.bottom, 6)
+                Text("Secret values are saved only after encryption succeeds.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 8)
+                    .padding(.bottom, 6)
             }
 
             Divider()
         }
     }
 
+    private func nameField(for row: VariableEditorRowState) -> some View {
+        HighlightedTextField(
+            "Name",
+            text: nameBinding(for: row.id),
+            focused: focusBinding(for: .name(row.id))
+        )
+        .font(.system(.body, design: .monospaced))
+        .disabled(!isEditable || row.isBusy || (!row.isTrailing && row.isEditingSecret))
+    }
+
     @ViewBuilder
     private func valueCell(for row: VariableEditorRowState, canEditRow: Bool) -> some View {
-        if row.isTrailing && row.isSecretDraft {
-            SecretValueInput(
-                placeholder: "Value",
-                value: valueBinding(for: row.id),
-                isRevealed: secretRevealedBinding(for: row.id),
-                isSecret: true
-            )
-            .disabled(!canEditRow)
-        } else if row.isEditingSecret {
-            VStack(alignment: .leading, spacing: 5) {
-                SecretValueInput(
-                    placeholder: "Secret value",
-                    value: secretDraftBinding(for: row.id),
-                    isRevealed: secretRevealedBinding(for: row.id),
-                    isSecret: true
-                )
-                .disabled(!canEditRow)
-
-                HStack(spacing: 8) {
+        if !row.isTrailing,
+           let value = variables[row.name],
+           case .encrypted = value {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 6) {
+                    Label("Encrypted", systemImage: "lock.fill")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: true, vertical: false)
                     Spacer(minLength: 0)
-                    Button("Cancel") {
-                        cancelSecretEdit(for: row)
+                    Button("Reveal") {
+                        revealSecret(for: row)
                     }
                     .buttonStyle(.borderless)
+                    .fixedSize()
+                    .help("Reveal secret")
                     .disabled(!canEditRow)
-                    Button("Save") {
-                        saveSecretEdit(for: row)
+
+                    Button("Replace") {
+                        beginSecretEdit(for: row, with: "", revealed: false)
                     }
                     .buttonStyle(.borderless)
+                    .fixedSize()
+                    .help("Replace secret")
                     .disabled(!canEditRow)
                 }
-            }
-        } else if !row.isTrailing,
-                  let value = variables[row.name],
-                  case .encrypted = value {
-            HStack(spacing: 6) {
-                Label("Encrypted", systemImage: "lock.fill")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-                Spacer(minLength: 0)
-                Button("Reveal") {
-                    revealSecret(for: row)
+
+                HStack(spacing: 6) {
+                    Image(systemName: "lock.fill")
+                        .foregroundStyle(.secondary)
+                        .accessibilityLabel("Encrypted")
+                    Spacer(minLength: 4)
+                    Button {
+                        revealSecret(for: row)
+                    } label: {
+                        Image(systemName: "eye")
+                    }
+                    .buttonStyle(.borderless)
+                    .fixedSize()
+                    .accessibilityLabel("Reveal secret")
+                    .help("Reveal secret")
+                    .disabled(!canEditRow)
+
+                    Button {
+                        beginSecretEdit(for: row, with: "", revealed: false)
+                    } label: {
+                        Image(systemName: "pencil")
+                    }
+                    .buttonStyle(.borderless)
+                    .fixedSize()
+                    .accessibilityLabel("Replace secret")
+                    .help("Replace secret")
+                    .disabled(!canEditRow)
                 }
-                .buttonStyle(.borderless)
-                .disabled(!canEditRow)
-                Button("Replace") {
-                    beginSecretEdit(for: row, with: "", revealed: false)
-                }
-                .buttonStyle(.borderless)
-                .disabled(!canEditRow)
             }
         } else {
             HighlightedTextField(
@@ -769,6 +805,7 @@ private struct SecretValueInput: View {
                     TextField(placeholder, text: $value)
                 }
             }
+            .frame(minWidth: 0, maxWidth: .infinity)
             .textFieldStyle(.plain)
             .font(.system(.body, design: .monospaced))
 
@@ -777,6 +814,7 @@ private struct SecretValueInput: View {
                     isRevealed.toggle()
                 }
                 .buttonStyle(.borderless)
+                .fixedSize()
             }
         }
     }

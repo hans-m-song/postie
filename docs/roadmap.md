@@ -6,6 +6,12 @@ This document records the approved high-level breakdown. User agreed on 2026-10-
 
 ## Shared task contract
 
+## T-58–T-63 — Authoring and response privacy follow-up (complete locally)
+
+Authorised2026-10-18: JSON delimiter pairing, focused URL highlighting, broader variable autocomplete, send-time response-header masking with Reveal/Copy, referenced-variable table in Variables, and inline secret-edit controls. See authoring-follow-up.md for ownership/checklist/choices. Existing Move up/Move down remains; drag-and-drop and memory-budget changes deferred. Depends on current native editor/M3-M4 behavior; no M5 expansion.
+
+Verified 2026-10-18: independent 93 functional tests passed (Core61/App32), source reviews closed, release build and isolated native checks passed. See authoring-follow-up.md for evidence and limits.
+
 ## T-57 — Response presentation defaults and wrapping (complete locally)
 
 Authorised2026-10-18: default supported JSON/+json responses to Pretty; other text and invalid/oversized JSON fallback use wrapped raw text. Keep Raw selectable, binary presentation unchanged, existing1MiB preview/5MiB formatting limits, and one vertical scroll owner. Executor owns ResponseView/HighlightedResponseText; main integrates and checks isolated native JSON/plain/fallback/resize behavior; independent review/test gate. Memory-budget changes remain explicitly deferred.

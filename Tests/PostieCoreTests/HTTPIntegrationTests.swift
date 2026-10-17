@@ -89,6 +89,88 @@ final class HTTPIntegrationTests: XCTestCase {
         try await manager.discardBody(at: response.bodyFileURL)
     }
 
+    func testSensitiveHeaderMetadataSurvivesAutomaticAndManualRedirects() async throws {
+        let fixture = try LocalHTTPFixture()
+        let root = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let manager = try HTTPExecutionManager(bodyDirectory: root.appendingPathComponent("bodies", isDirectory: true))
+        let redirectURL = try fixture.url(path: "/redirect", query: [
+            URLQueryItem(name: "to", value: "/echo"),
+            URLQueryItem(name: "status", value: "302")
+        ])
+        let credential = SecretEnvelope(combined: "captured-header-credential")
+        let headerName = SecretEnvelope(combined: "captured-header-name")
+        let decryptor = IntegrationSecretDecryptor(values: [
+            credential.combined: "captured value",
+            headerName.combined: "X-Private"
+        ])
+        let sensitiveHeaders: Set<String> = [
+            "authorization",
+            "proxy-authorization",
+            "cookie",
+            "set-cookie",
+            "x-private"
+        ]
+        let secretHeaders: Set<String> = ["x-private"]
+
+        var manualContext = VariableContext(request: [
+            "credential": .encrypted(credential),
+            "headerName": .encrypted(headerName)
+        ])
+        let manualRequest = HTTPRequestConfiguration(
+            url: redirectURL,
+            headers: [HTTPField(name: "{{headerName}}", value: "Bearer {{credential}}")]
+        )
+        let manualPrepared = try await RequestPreparer.prepare(
+            manualRequest,
+            context: manualContext,
+            decryptor: decryptor
+        )
+        manualContext.request["credential"] = .plain("replacement value")
+        manualContext.request["headerName"] = .plain("X-Replacement")
+        XCTAssertEqual(manualPrepared.request.value(forHTTPHeaderField: "X-Private"), "Bearer captured value")
+
+        let identity = RequestIdentity(collectionID: UUID(), requestID: manualRequest.id)
+        let stopped = try completedResponse(in: await collect(try await manager.start(identity: identity, prepared: manualPrepared)))
+        XCTAssertEqual(stopped.sensitiveRequestHeaderNames, sensitiveHeaders)
+        XCTAssertEqual(stopped.secretRequestHeaderNames, secretHeaders)
+        XCTAssertEqual(stopped.redirects.first?.sensitiveRequestHeaderNames, sensitiveHeaders)
+        XCTAssertEqual(stopped.redirects.first?.secretRequestHeaderNames, secretHeaders)
+
+        let followed = try completedResponse(in: await collect(
+            try await manager.followRedirect(identity: identity, response: stopped)
+        ))
+        XCTAssertEqual(followed.sensitiveRequestHeaderNames, sensitiveHeaders)
+        XCTAssertEqual(followed.secretRequestHeaderNames, secretHeaders)
+        XCTAssertEqual(followed.redirects.first?.sensitiveRequestHeaderNames, sensitiveHeaders)
+        XCTAssertEqual(followed.redirects.first?.secretRequestHeaderNames, secretHeaders)
+        try await manager.discardBody(at: stopped.bodyFileURL)
+        try await manager.discardBody(at: followed.bodyFileURL)
+
+        let automaticRequest = HTTPRequestConfiguration(
+            url: redirectURL,
+            headers: [HTTPField(name: "{{headerName}}", value: "Bearer {{credential}}")],
+            options: HTTPOptions(followRedirects: true)
+        )
+        let automaticPrepared = try await RequestPreparer.prepare(
+            automaticRequest,
+            context: VariableContext(request: [
+                "credential": .encrypted(credential),
+                "headerName": .encrypted(headerName)
+            ]),
+            decryptor: decryptor
+        )
+        let automatic = try completedResponse(in: await collect(try await manager.start(
+            identity: RequestIdentity(collectionID: UUID(), requestID: automaticRequest.id),
+            prepared: automaticPrepared
+        )))
+        XCTAssertEqual(automatic.sensitiveRequestHeaderNames, sensitiveHeaders)
+        XCTAssertEqual(automatic.secretRequestHeaderNames, secretHeaders)
+        XCTAssertEqual(automatic.redirects.first?.sensitiveRequestHeaderNames, sensitiveHeaders)
+        XCTAssertEqual(automatic.redirects.first?.secretRequestHeaderNames, secretHeaders)
+        try await manager.discardBody(at: automatic.bodyFileURL)
+    }
+
     func testRedirectCanBeDisabledAndFollowed() async throws {
         let fixture = try LocalHTTPFixture()
         let root = try makeTemporaryDirectory()
@@ -107,6 +189,11 @@ final class HTTPIntegrationTests: XCTestCase {
         let stopped = try completedResponse(in: stoppedEvents)
         XCTAssertEqual(stopped.statusCode, 302)
         XCTAssertEqual(stopped.effectiveMethod, "GET")
+        XCTAssertEqual(
+            stopped.sensitiveRequestHeaderNames,
+            ["authorization", "proxy-authorization", "cookie", "set-cookie"]
+        )
+        XCTAssertEqual(stopped.redirects.first?.sensitiveRequestHeaderNames, stopped.sensitiveRequestHeaderNames)
         XCTAssertFalse(stopped.redirectLimitReached)
         XCTAssertEqual(stopped.redirects.count, 1)
         XCTAssertEqual(stopped.redirects[0].statusCode, 302)
@@ -899,4 +986,19 @@ private actor CompletionLatch {
     func markFinished() {
         isFinished = true
     }
+}
+
+private struct IntegrationSecretDecryptor: SecretValueDecrypting {
+    let values: [String: String]
+
+    func decrypt(_ envelope: SecretEnvelope) async throws -> String {
+        guard let value = values[envelope.combined] else {
+            throw IntegrationSecretDecryptorError.unknownEnvelope
+        }
+        return value
+    }
+}
+
+private enum IntegrationSecretDecryptorError: Error {
+    case unknownEnvelope
 }

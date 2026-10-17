@@ -36,7 +36,8 @@ struct AuthenticationEditor: View {
             return Set(context.global.keys).union(context.collection.keys).union(context.request.keys)
         case let .collection(id):
             return Set(model.globalVariables.keys).union(model.variables(for: .collection(id)).keys)
-        case .global: return []
+        case .global:
+            return []
         }
     }
 
@@ -109,7 +110,8 @@ struct AuthenticationEditor: View {
                 HighlightedTextField(
                     "Username",
                     text: usernameBinding,
-                    availableVariables: availableVariables
+                    availableVariables: availableVariables,
+                    completionVariables: model.variableCompletions(for: owner)
                 )
                 .font(.system(.body, design: .monospaced))
                 .disabled(!model.canEditVariables(owner))
@@ -185,27 +187,31 @@ private struct AuthenticationSecretEditor: View {
                 .font(.subheadline.weight(.medium))
 
             if isEditing {
-                secretInput
-                    .disabled(isBusy)
-
-                Text("Secret changes are saved with Save. Leaving this editor discards unsaved secret edits.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
                 HStack(spacing: 8) {
+                    secretInput
+                        .frame(minWidth: 0, maxWidth: .infinity)
+                        .disabled(isBusy)
+
                     if hasSavedSecret {
                         Button("Reveal saved") {
                             revealSavedSecret()
                         }
+                        .fixedSize()
                         .disabled(isBusy)
                     }
-                    Spacer()
+
                     Button("Cancel", action: cancel)
+                        .fixedSize()
                         .disabled(isBusy)
                     Button("Save", action: save)
+                        .fixedSize()
                         .buttonStyle(.borderedProminent)
                         .disabled(isBusy)
                 }
+
+                Text("Secret changes are saved with Save. Leaving this editor discards unsaved secret edits.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             } else {
                 HStack(spacing: 10) {
                     Label(
@@ -259,12 +265,14 @@ private struct AuthenticationSecretEditor: View {
                         "Secret value",
                         text: $secretDraft,
                         availableVariables: availableVariables,
-                        rounded: true
+                        rounded: true,
+                        completionVariables: model.variableCompletions(for: owner)
                     )
                 } else {
                     SecureField("Secret value", text: $secretDraft)
                 }
             }
+            .frame(minWidth: 0, maxWidth: .infinity)
             .textFieldStyle(.roundedBorder)
             .font(.system(.body, design: .monospaced))
 

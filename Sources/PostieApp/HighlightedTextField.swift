@@ -139,8 +139,7 @@ private struct NativeHighlightedTextField: NSViewRepresentable {
         private var lastAppliedRequest: SyntaxHighlighting.Request?
         private weak var textField: SyntaxHighlightedTextField?
         private weak var activeFieldEditor: NSTextView?
-        private let completionPopover = NSPopover()
-        private let completionPopoverController = VariableCompletionPopoverController()
+        private let completionPopover = VariableCompletionPopover()
         private var completionContext: VariableCompletionContext?
         private var completionSuggestions: [VariableCompletion] = []
         private var selectedCompletionIndex = 0
@@ -162,16 +161,19 @@ private struct NativeHighlightedTextField: NSViewRepresentable {
             self.isURL = isURL
             self.isEnabled = isEnabled
             super.init()
-            completionPopover.behavior = .transient
-            completionPopover.animates = false
-            completionPopover.contentViewController = completionPopoverController
-            completionPopoverController.listView.onSelection = { [weak self] index in
+            completionPopover.onSelection = { [weak self] index in
                 self?.acceptCompletion(at: index)
             }
         }
 
         func attach(_ textField: SyntaxHighlightedTextField) {
             self.textField = textField
+            textField.highlightedCell.onFieldEditorSelected = { [weak self, weak textField] editor in
+                guard let self, let textField, let fieldEditor = editor as? NSTextView else {
+                    return
+                }
+                self.adoptFieldEditor(fieldEditor, in: textField)
+            }
         }
 
         func update(
@@ -212,6 +214,7 @@ private struct NativeHighlightedTextField: NSViewRepresentable {
             editSession += 1
             stopObservingSelectionChanges()
             dismissCompletion()
+            textField?.highlightedCell.onFieldEditorSelected = nil
             if let activeFieldEditor {
                 SyntaxHighlighting.clearTemporaryAttributes(from: activeFieldEditor)
             }
@@ -277,9 +280,7 @@ private struct NativeHighlightedTextField: NSViewRepresentable {
             lastAppliedRequest = nil
             focused?.wrappedValue = true
             if let fieldEditor = textField.currentEditor() as? NSTextView {
-                activeFieldEditor = fieldEditor
-                observeSelectionChanges(in: fieldEditor)
-                SyntaxHighlighting.clearTemporaryAttributes(from: fieldEditor)
+                adoptFieldEditor(fieldEditor, in: textField)
                 fieldEditor.isAutomaticQuoteSubstitutionEnabled = false
                 fieldEditor.isAutomaticDashSubstitutionEnabled = false
                 fieldEditor.isAutomaticTextReplacementEnabled = false
@@ -361,8 +362,7 @@ private struct NativeHighlightedTextField: NSViewRepresentable {
         }
 
         func refreshCompletion(in textField: SyntaxHighlightedTextField, fieldEditor: NSTextView?) {
-            guard isURL,
-                  isEnabled,
+            guard isEnabled,
                   textField.isEnabled,
                   !completionVariables.isEmpty,
                   let fieldEditor,
@@ -388,13 +388,13 @@ private struct NativeHighlightedTextField: NSViewRepresentable {
             completionContext = context
             completionSuggestions = suggestions
             updateCompletionPopoverSelection()
-
-            guard !completionPopover.isShown,
-                  let window = textField.window,
-                  window.isVisible else {
-                return
-            }
-            completionPopover.show(relativeTo: textField.bounds, of: textField, preferredEdge: .minY)
+            completionPopover.show(
+                relativeTo: textField.bounds,
+                of: textField,
+                preferredEdge: .minY,
+                suggestions: completionSuggestions,
+                selectedIndex: selectedCompletionIndex
+            )
         }
 
         private func observeSelectionChanges(in fieldEditor: NSTextView) {
@@ -405,6 +405,27 @@ private struct NativeHighlightedTextField: NSViewRepresentable {
                 name: NSTextView.didChangeSelectionNotification,
                 object: fieldEditor
             )
+        }
+
+        private func adoptFieldEditor(_ fieldEditor: NSTextView, in textField: SyntaxHighlightedTextField) {
+            guard self.textField === textField,
+                  textField.isEnabled,
+                  textField.currentEditor() === fieldEditor,
+                  textField.window?.firstResponder === fieldEditor else {
+                return
+            }
+            guard activeFieldEditor !== fieldEditor else {
+                return
+            }
+
+            stopObservingSelectionChanges()
+            activeFieldEditor = fieldEditor
+            observeSelectionChanges(in: fieldEditor)
+            SyntaxHighlighting.clearTemporaryAttributes(from: fieldEditor)
+            lastScheduledRequest = nil
+            lastAppliedRequest = nil
+            scheduleHighlighting(in: textField)
+            refreshCompletion(in: textField, fieldEditor: fieldEditor)
         }
 
         private func stopObservingSelectionChanges(in fieldEditor: NSTextView? = nil) {
@@ -425,11 +446,7 @@ private struct NativeHighlightedTextField: NSViewRepresentable {
         }
 
         private func updateCompletionPopoverSelection() {
-            completionPopoverController.listView.update(
-                suggestions: completionSuggestions,
-                selectedIndex: selectedCompletionIndex
-            )
-            completionPopover.contentSize = completionPopoverController.listView.intrinsicContentSize
+            completionPopover.update(suggestions: completionSuggestions, selectedIndex: selectedCompletionIndex)
         }
 
         private func acceptCompletion(at index: Int) {
@@ -454,13 +471,11 @@ private struct NativeHighlightedTextField: NSViewRepresentable {
         }
 
         private func dismissCompletion() {
-            if completionPopover.isShown {
-                completionPopover.performClose(nil)
-            }
+            completionPopover.dismiss()
             completionContext = nil
             completionSuggestions = []
             selectedCompletionIndex = 0
-            completionPopoverController.listView.update(suggestions: [], selectedIndex: 0)
+            completionPopover.update(suggestions: [], selectedIndex: 0)
         }
 
         func scheduleHighlighting(in textField: SyntaxHighlightedTextField) {
@@ -513,111 +528,27 @@ private struct NativeHighlightedTextField: NSViewRepresentable {
                     return
                 }
 
+                if let currentEditor,
+                   self.activeFieldEditor === currentEditor,
+                   (requestedFieldEditor !== currentEditor || self.editSession != session) {
+                    self.lastScheduledRequest = nil
+                    self.lastAppliedRequest = nil
+                    self.scheduleHighlighting(in: textField)
+                    return
+                }
+
                 self.lastAppliedRequest = request
                 textField.highlightedCell.spans = result.spans
                 textField.toolTip = result.isPaused ? "Highlighting paused over 1 MiB" : nil
                 if let currentEditor,
                    let requestedFieldEditor,
                    currentEditor === requestedFieldEditor,
-                   let activeFieldEditor = self.activeFieldEditor,
-                   activeFieldEditor === currentEditor,
+                   self.activeFieldEditor === currentEditor,
                    self.editSession == session {
                     SyntaxHighlighting.apply(result, to: currentEditor)
                 }
                 textField.needsDisplay = true
             }
-        }
-    }
-}
-
-@MainActor
-private final class VariableCompletionPopoverController: NSViewController {
-    let listView = VariableCompletionListView()
-
-    override func loadView() {
-        view = listView
-    }
-}
-
-@MainActor
-private final class VariableCompletionListView: NSView {
-    private let rowHeight: CGFloat = 26
-    private var suggestions: [VariableCompletion] = []
-    private var selectedIndex = 0
-    var onSelection: ((Int) -> Void)?
-
-    override var isFlipped: Bool { true }
-    override var acceptsFirstResponder: Bool { false }
-
-    override var intrinsicContentSize: NSSize {
-        NSSize(width: 360, height: rowHeight * CGFloat(max(1, suggestions.count)))
-    }
-
-    func update(suggestions: [VariableCompletion], selectedIndex: Int) {
-        self.suggestions = suggestions
-        self.selectedIndex = suggestions.isEmpty ? 0 : min(max(0, selectedIndex), suggestions.count - 1)
-        invalidateIntrinsicContentSize()
-        needsDisplay = true
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        NSColor.windowBackgroundColor.setFill()
-        bounds.fill()
-
-        for (index, suggestion) in suggestions.enumerated() {
-            let rowRect = NSRect(x: 0, y: rowHeight * CGFloat(index), width: bounds.width, height: rowHeight)
-            let isSelected = index == selectedIndex
-            if isSelected {
-                NSColor.selectedContentBackgroundColor.setFill()
-                NSBezierPath(roundedRect: rowRect.insetBy(dx: 4, dy: 1), xRadius: 4, yRadius: 4).fill()
-            }
-
-            let textColor = isSelected ? NSColor.alternateSelectedControlTextColor : NSColor.labelColor
-            let metadataColor = isSelected ? textColor : NSColor.secondaryLabelColor
-            let nameAttributes: [NSAttributedString.Key: Any] = [
-                .font: NSFont.monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular),
-                .foregroundColor: textColor
-            ]
-            let metadataAttributes: [NSAttributedString.Key: Any] = [
-                .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize),
-                .foregroundColor: metadataColor
-            ]
-            let metadata = suggestion.isSecret
-                ? "\(scopeLabel(suggestion.scope)) · 🔒 Secret"
-                : scopeLabel(suggestion.scope)
-            let metadataSize = (metadata as NSString).size(withAttributes: metadataAttributes)
-            let metadataWidth = min(metadataSize.width, bounds.width * 0.52)
-            let metadataRect = NSRect(
-                x: bounds.width - metadataWidth - 10,
-                y: rowRect.minY + 3,
-                width: metadataWidth,
-                height: rowHeight - 6
-            )
-            let nameRect = NSRect(
-                x: 10,
-                y: rowRect.minY + 3,
-                width: max(0, metadataRect.minX - 18),
-                height: rowHeight - 6
-            )
-            (suggestion.name as NSString).draw(in: nameRect, withAttributes: nameAttributes)
-            (metadata as NSString).draw(in: metadataRect, withAttributes: metadataAttributes)
-        }
-    }
-
-    override func mouseDown(with event: NSEvent) {
-        let point = convert(event.locationInWindow, from: nil)
-        let index = Int(point.y / rowHeight)
-        guard suggestions.indices.contains(index) else {
-            return
-        }
-        onSelection?(index)
-    }
-
-    private func scopeLabel(_ scope: VariableScope) -> String {
-        switch scope {
-        case .global: return "Global"
-        case .collection: return "Collection"
-        case .request: return "Request"
         }
     }
 }
@@ -642,6 +573,46 @@ private final class SyntaxHighlightedTextField: NSTextField {
 @MainActor
 private final class SyntaxHighlightedTextFieldCell: NSTextFieldCell {
     var spans: [SyntaxHighlighting.Span] = []
+    var onFieldEditorSelected: ((NSText) -> Void)?
+
+    override func edit(
+        withFrame rect: NSRect,
+        in controlView: NSView,
+        editor textObj: NSText,
+        delegate: Any?,
+        event: NSEvent?
+    ) {
+        super.edit(withFrame: rect, in: controlView, editor: textObj, delegate: delegate, event: event)
+        notifyFieldEditorSelected(textObj, in: controlView)
+    }
+
+    override func select(
+        withFrame rect: NSRect,
+        in controlView: NSView,
+        editor textObj: NSText,
+        delegate: Any?,
+        start selStart: Int,
+        length selLength: Int
+    ) {
+        super.select(
+            withFrame: rect,
+            in: controlView,
+            editor: textObj,
+            delegate: delegate,
+            start: selStart,
+            length: selLength
+        )
+        notifyFieldEditorSelected(textObj, in: controlView)
+    }
+
+    private func notifyFieldEditorSelected(_ editor: NSText, in controlView: NSView) {
+        guard let textField = controlView as? SyntaxHighlightedTextField,
+              textField.currentEditor() === editor,
+              textField.window?.firstResponder === editor else {
+            return
+        }
+        onFieldEditorSelected?(editor)
+    }
 
     override func drawInterior(withFrame cellFrame: NSRect, in controlView: NSView) {
         guard let textField = controlView as? NSTextField else {

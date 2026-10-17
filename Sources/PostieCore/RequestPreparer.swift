@@ -51,6 +51,13 @@ private enum RequestPreparationError: LocalizedError {
 }
 
 public enum RequestPreparer {
+    static let standardSensitiveRequestHeaderNames: Set<String> = [
+        "authorization",
+        "proxy-authorization",
+        "cookie",
+        "set-cookie"
+    ]
+
     private static let unreservedCharacters = CharacterSet(
         charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
     )
@@ -154,6 +161,11 @@ public enum RequestPreparer {
         }
 
         let variableValues = resolvedVariables.mapValues(\.value)
+        let headerSensitivity = try requestHeaderSensitivity(
+            in: headers,
+            resolvedVariables: resolvedVariables,
+            variableValues: variableValues
+        )
         let authorizationHeader = try structuredAuthorizationHeader(
             selectedAuthentication,
             secretTemplate: secretTemplate,
@@ -170,7 +182,9 @@ public enum RequestPreparer {
         return PreparedHTTPRequest(
             configuration: configuration,
             request: request,
-            referencedInputs: resolvedVariables
+            referencedInputs: resolvedVariables,
+            sensitiveRequestHeaderNames: headerSensitivity.sensitiveRequestHeaderNames,
+            secretRequestHeaderNames: headerSensitivity.secretRequestHeaderNames
         )
     }
 
@@ -210,6 +224,33 @@ public enum RequestPreparer {
 
     private static func isActive(_ field: HTTPField) -> Bool {
         field.isEnabled && !(field.name.isEmpty && field.value.isEmpty)
+    }
+
+    private static func requestHeaderSensitivity(
+        in headers: [HTTPField],
+        resolvedVariables: [String: ResolvedVariable],
+        variableValues: [String: String]
+    ) throws -> (sensitiveRequestHeaderNames: Set<String>, secretRequestHeaderNames: Set<String>) {
+        var sensitiveNames = standardSensitiveRequestHeaderNames
+        var secretNames = Set<String>()
+
+        for field in headers where isActive(field) {
+            let nameReferences = try referencedNames(in: [field.name])
+            let valueReferences = try referencedNames(in: [field.value])
+            let hasSecretName = nameReferences.contains { resolvedVariables[$0]?.isSecret == true }
+            let hasSecretValue = valueReferences.contains { resolvedVariables[$0]?.isSecret == true }
+            guard hasSecretName || hasSecretValue else {
+                continue
+            }
+
+            let resolvedName = try substitute(field.name, values: variableValues).lowercased()
+            sensitiveNames.insert(resolvedName)
+            if hasSecretName {
+                secretNames.insert(resolvedName)
+            }
+        }
+
+        return (sensitiveNames, secretNames)
     }
 
     private static func hasNonblankName(_ field: HTTPField) -> Bool {

@@ -233,7 +233,21 @@ final class AppModel: ObservableObject {
     }
 
     func variableCompletions(for identity: RequestIdentity) -> [VariableCompletion] {
-        let context = variableContext(for: identity)
+        variableCompletions(in: variableContext(for: identity))
+    }
+
+    func variableCompletions(for owner: VariableOwner) -> [VariableCompletion] {
+        switch owner {
+        case .global:
+            variableCompletions(in: VariableContext(global: globalVariables))
+        case let .collection(id):
+            variableCompletions(in: VariableContext(global: globalVariables, collection: variables(for: .collection(id))))
+        case let .request(identity):
+            variableCompletions(for: identity)
+        }
+    }
+
+    private func variableCompletions(in context: VariableContext) -> [VariableCompletion] {
         let names = Set(context.global.keys).union(context.collection.keys).union(context.request.keys)
         return names.sorted().map { name in
             if let value = context.request[name] { return VariableCompletion(name: name, scope: .request, isSecret: value.isEncrypted) }

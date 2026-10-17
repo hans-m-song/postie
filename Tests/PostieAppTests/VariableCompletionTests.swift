@@ -108,6 +108,32 @@ final class VariableCompletionTests: XCTestCase {
         ))
     }
 
+    func testBodyContextFindsCaretLocalTokenInLargeBody() throws {
+        let prefix = String(repeating: "x", count: VariableCompletionMatcher.maximumInputLength + 5)
+        let value = prefix + "{{host}} after"
+        let caret = (prefix + "{{ho").utf16.count
+
+        let context = try XCTUnwrap(VariableCompletionMatcher.bodyContext(
+            in: value,
+            selection: NSRange(location: caret, length: 0)
+        ))
+
+        XCTAssertEqual(context.prefix, "ho")
+        XCTAssertEqual(
+            context.replacementRange,
+            NSRange(location: prefix.utf16.count, length: "{{host}}".utf16.count)
+        )
+    }
+
+    func testBodyContextRejectsEscapedLocalToken() {
+        let value = String(repeating: "x", count: VariableCompletionMatcher.maximumInputLength + 5) + "\\{{host"
+
+        XCTAssertNil(VariableCompletionMatcher.bodyContext(
+            in: value,
+            selection: NSRange(location: (value as NSString).length, length: 0)
+        ))
+    }
+
     func testReplacementProducesOneCanonicalTemplateToken() {
         let variable = VariableCompletion(name: "baseURL", scope: .global, isSecret: false)
 

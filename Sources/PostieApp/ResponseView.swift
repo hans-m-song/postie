@@ -200,7 +200,7 @@ private struct ResponseExchangeView: View {
             DisclosureGroup(isExpanded: $isFinalExpanded) {
                 VStack(alignment: .leading, spacing: 14) {
                     DisclosureGroup("Request headers (\(response.requestHeaders.count))") {
-                        HeaderTable(fields: response.requestHeaders)
+                        HeaderTable(fields: response.requestHeaders, sensitiveNames: response.sensitiveRequestHeaderNames, secretNames: response.secretRequestHeaderNames)
                             .padding(.top, 7)
                     }
                     .disclosureGroupStyle(PaddedDisclosureGroupStyle())
@@ -261,7 +261,7 @@ private struct RedirectDisclosure: View {
     var body: some View {
         DisclosureGroup(isExpanded: expansion ?? $localExpanded) {
             VStack(alignment: .leading, spacing: 13) {
-                ExchangeHeaderGroup(title: "Request headers", fields: redirect.requestHeaders)
+                ExchangeHeaderGroup(title: "Request headers", fields: redirect.requestHeaders, sensitiveNames: redirect.sensitiveRequestHeaderNames, secretNames: redirect.secretRequestHeaderNames)
                 ExchangeHeaderGroup(title: "Response headers", fields: redirect.responseHeaders)
             }
             .padding(.top, 8)
@@ -323,11 +323,13 @@ private func statusReasonPhrase(_ statusCode: Int) -> String {
 private struct ExchangeHeaderGroup: View {
     let title: String
     let fields: [HTTPField]
+    var sensitiveNames: Set<String> = []
+    var secretNames: Set<String> = []
     @State private var isExpanded = false
 
     var body: some View {
         DisclosureGroup(isExpanded: $isExpanded) {
-            HeaderTable(fields: fields)
+            HeaderTable(fields: fields, sensitiveNames: sensitiveNames, secretNames: secretNames)
                 .padding(.top, 7)
         } label: {
             HStack {
@@ -342,6 +344,10 @@ private struct ExchangeHeaderGroup: View {
 
 private struct HeaderTable: View {
     let fields: [HTTPField]
+    var sensitiveNames: Set<String> = []
+    var secretNames: Set<String> = []
+
+    private let standardSensitiveNames: Set<String> = ["authorization", "proxy-authorization", "cookie", "set-cookie"]
 
     var body: some View {
         VStack(spacing: 0) {
@@ -353,16 +359,11 @@ private struct HeaderTable: View {
                     .padding(9)
             }
             ForEach(fields) { field in
-                HStack(alignment: .top, spacing: 10) {
-                    Text(field.name)
-                        .fontWeight(.medium)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(width: 110, alignment: .leading)
-                    Text(field.value)
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-                }
+                ResponseHeaderRow(
+                    field: field,
+                    isSensitive: sensitiveNames.contains(field.name.lowercased()) || standardSensitiveNames.contains(field.name.lowercased()),
+                    isNameSecret: secretNames.contains(field.name.lowercased())
+                )
                 .font(.system(.callout, design: .monospaced))
                 .padding(.horizontal, 9)
                 .padding(.vertical, 7)

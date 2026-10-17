@@ -170,3 +170,7 @@
 - User clarified increased footprint across feature builds rather than an observed session leak. Used synthetic current-release UI and loopback responses, RSS counters only. Measurements and independent source audit recorded in docs/memory-baseline.md.
 - RSS was99–113MiB empty,142MiB empty editor,162MiB smallJSON,210–216MiB for8/32MiB body with1MiB preview. No historical matched-build comparison or allocation attribution; no leak conclusion. App/fixture closed.
 - Proposed selected-request-only preview retention and100 request-body undo groups; implementation awaits approval. No source changes or tests/builds for assessment.
+
+## 2026-10-18 — T-58–T-63 authoring and header privacy
+
+Completed approved follow-up; see docs/authoring-follow-up.md for verification. Send-time lowercase sensitivity flags preserve request header masking across redirects without extra variable decryption or schema changes; names derived from secrets also mask. Explicit Reveal/Copy retains access. Response bodies unchanged. Completion uses names/scope metadata, with auth suggestions after Show and literal variable definitions excluded. Native editor focus capture fixes first-focus colors; JSON-only direct-key pairing preserves paste/undo. References moved to Variables; narrow secret controls use icon fallback. Independent93 functional tests, source reviews and isolated native checks passed. Memory and drag-drop remain deferred.

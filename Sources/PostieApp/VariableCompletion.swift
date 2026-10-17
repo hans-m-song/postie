@@ -29,13 +29,41 @@ enum VariableCompletionMatcher {
         }
 
         let source = value as NSString
-        guard selection.length == 0,
-              selection.location >= 0,
-              selection.location <= source.length else {
+        guard isInsertionPoint(selection, in: source) else {
             return nil
         }
 
-        var cursor = 0
+        return context(
+            in: source,
+            selection: selection,
+            scanStart: 0,
+            scanEnd: source.length
+        )
+    }
+
+    static func bodyContext(in value: String, selection: NSRange) -> VariableCompletionContext? {
+        let source = value as NSString
+        guard isInsertionPoint(selection, in: source) else {
+            return nil
+        }
+
+        let scanStart = max(0, selection.location - maximumInputLength - 3)
+        let scanEnd = min(source.length, selection.location + maximumInputLength)
+        return context(
+            in: source,
+            selection: selection,
+            scanStart: scanStart,
+            scanEnd: scanEnd
+        )
+    }
+
+    private static func context(
+        in source: NSString,
+        selection: NSRange,
+        scanStart: Int,
+        scanEnd: Int
+    ) -> VariableCompletionContext? {
+        var cursor = scanStart
         while cursor + 1 < selection.location {
             if isEscapedOpeningDelimiter(in: source, at: cursor) {
                 cursor += 3
@@ -49,9 +77,15 @@ enum VariableCompletionMatcher {
 
             let identifierStart = cursor + 2
             var identifierEnd = identifierStart
-            while identifierEnd < source.length,
+            while identifierEnd < scanEnd,
                   isIdentifierContinuation(source.character(at: identifierEnd)) {
                 identifierEnd += 1
+            }
+
+            if identifierEnd == scanEnd,
+               scanEnd < source.length,
+               isIdentifierContinuation(source.character(at: scanEnd)) {
+                return nil
             }
 
             if selection.location <= identifierEnd {
@@ -78,6 +112,12 @@ enum VariableCompletionMatcher {
         }
 
         return nil
+    }
+
+    private static func isInsertionPoint(_ selection: NSRange, in source: NSString) -> Bool {
+        selection.length == 0 &&
+            selection.location >= 0 &&
+            selection.location <= source.length
     }
 
     static func suggestions(

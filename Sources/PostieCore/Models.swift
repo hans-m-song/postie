@@ -198,9 +198,22 @@ public struct HTTPRedirect: Identifiable, Sendable {
     public let method: String
     public let nextMethod: String
     public let requestHeaders: [HTTPField]
+    public let sensitiveRequestHeaderNames: Set<String>
+    public let secretRequestHeaderNames: Set<String>
     public let responseHeaders: [HTTPField]
 
-    public init(id: UUID = UUID(), statusCode: Int, url: URL, nextURL: URL, method: String, nextMethod: String, requestHeaders: [HTTPField], responseHeaders: [HTTPField]) {
+    public init(
+        id: UUID = UUID(),
+        statusCode: Int,
+        url: URL,
+        nextURL: URL,
+        method: String,
+        nextMethod: String,
+        requestHeaders: [HTTPField],
+        responseHeaders: [HTTPField],
+        sensitiveRequestHeaderNames: Set<String> = [],
+        secretRequestHeaderNames: Set<String> = []
+    ) {
         self.id = id
         self.statusCode = statusCode
         self.url = url
@@ -208,6 +221,8 @@ public struct HTTPRedirect: Identifiable, Sendable {
         self.method = method
         self.nextMethod = nextMethod
         self.requestHeaders = requestHeaders
+        self.sensitiveRequestHeaderNames = Set(sensitiveRequestHeaderNames.map { $0.lowercased() })
+        self.secretRequestHeaderNames = Set(secretRequestHeaderNames.map { $0.lowercased() })
         self.responseHeaders = responseHeaders
     }
 }
@@ -228,6 +243,8 @@ public struct HTTPResponseRecord: Sendable {
     public let finalURL: URL
     public let statusCode: Int
     public let requestHeaders: [HTTPField]
+    public let sensitiveRequestHeaderNames: Set<String>
+    public let secretRequestHeaderNames: Set<String>
     public let responseHeaders: [HTTPField]
     public let redirects: [HTTPRedirect]
     public let bodyFileURL: URL
@@ -238,12 +255,31 @@ public struct HTTPResponseRecord: Sendable {
     public let redirectRequest: URLRequest?
     public let pendingRedirect: HTTPRedirect?
 
-    public init(runID: UUID, request: HTTPRequestConfiguration, finalURL: URL, statusCode: Int, requestHeaders: [HTTPField], responseHeaders: [HTTPField], redirects: [HTTPRedirect], bodyFileURL: URL, bodyByteCount: Int64, duration: TimeInterval, redirectLimitReached: Bool = false, effectiveMethod: String? = nil, redirectRequest: URLRequest? = nil, pendingRedirect: HTTPRedirect? = nil) {
+    public init(
+        runID: UUID,
+        request: HTTPRequestConfiguration,
+        finalURL: URL,
+        statusCode: Int,
+        requestHeaders: [HTTPField],
+        responseHeaders: [HTTPField],
+        redirects: [HTTPRedirect],
+        bodyFileURL: URL,
+        bodyByteCount: Int64,
+        duration: TimeInterval,
+        redirectLimitReached: Bool = false,
+        effectiveMethod: String? = nil,
+        redirectRequest: URLRequest? = nil,
+        pendingRedirect: HTTPRedirect? = nil,
+        sensitiveRequestHeaderNames: Set<String> = [],
+        secretRequestHeaderNames: Set<String> = []
+    ) {
         self.runID = runID
         self.request = request
         self.finalURL = finalURL
         self.statusCode = statusCode
         self.requestHeaders = requestHeaders
+        self.sensitiveRequestHeaderNames = Set(sensitiveRequestHeaderNames.map { $0.lowercased() })
+        self.secretRequestHeaderNames = Set(secretRequestHeaderNames.map { $0.lowercased() })
         self.responseHeaders = responseHeaders
         self.redirects = redirects
         self.bodyFileURL = bodyFileURL

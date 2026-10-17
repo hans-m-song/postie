@@ -57,6 +57,8 @@ private struct ActiveHTTPRun {
     let identity: RequestIdentity
     let configuration: HTTPRequestConfiguration
     let preparedRequest: URLRequest
+    let sensitiveRequestHeaderNames: Set<String>
+    let secretRequestHeaderNames: Set<String>
     let redirects: [HTTPRedirect]
     let followedRedirectCount: Int
     let continuation: AsyncStream<HTTPExecutionEvent>.Continuation
@@ -65,6 +67,13 @@ private struct ActiveHTTPRun {
     var session: URLSession?
     var task: URLSessionDownloadTask?
     var delegate: HTTPDownloadDelegate?
+}
+
+private struct RetainedHTTPResponse {
+    let identity: RequestIdentity
+    let bodyURL: URL
+    let sensitiveRequestHeaderNames: Set<String>
+    let secretRequestHeaderNames: Set<String>
 }
 
 private enum HTTPStorageLockError: Error {
@@ -254,7 +263,7 @@ public actor HTTPExecutionManager {
     private var activeRuns: [UUID: ActiveHTTPRun] = [:]
     private var runByIdentity: [RequestIdentity: UUID] = [:]
     private var retainedBodies: Set<URL> = []
-    private var retainedResponses: [UUID: (identity: RequestIdentity, bodyURL: URL)] = [:]
+    private var retainedResponses: [UUID: RetainedHTTPResponse] = [:]
     private var shutdownWaiters: [CheckedContinuation<Void, Never>] = []
     private var isShutDown = false
     private var shutdownCompleted = false
@@ -277,6 +286,8 @@ public actor HTTPExecutionManager {
             identity: identity,
             configuration: configuration,
             preparedRequest: preparedRequest,
+            sensitiveRequestHeaderNames: RequestPreparer.standardSensitiveRequestHeaderNames,
+            secretRequestHeaderNames: [],
             redirects: [],
             followedRedirectCount: 0
         )
@@ -296,6 +307,8 @@ public actor HTTPExecutionManager {
             identity: identity,
             configuration: prepared.configuration,
             preparedRequest: prepared.request,
+            sensitiveRequestHeaderNames: prepared.sensitiveRequestHeaderNames,
+            secretRequestHeaderNames: prepared.secretRequestHeaderNames,
             redirects: [],
             followedRedirectCount: 0
         )
@@ -308,8 +321,9 @@ public actor HTTPExecutionManager {
         }
 
         let bodyURL = response.bodyFileURL.standardizedFileURL.resolvingSymlinksInPath()
-        guard retainedResponses[response.runID]?.identity == identity,
-              retainedResponses[response.runID]?.bodyURL == bodyURL,
+        guard let retainedResponse = retainedResponses[response.runID],
+              retainedResponse.identity == identity,
+              retainedResponse.bodyURL == bodyURL,
               retainedBodies.contains(bodyURL),
               !response.redirectLimitReached,
               response.redirects.count <= 10,
@@ -335,6 +349,8 @@ public actor HTTPExecutionManager {
             identity: identity,
             configuration: response.request,
             preparedRequest: capturedRequest,
+            sensitiveRequestHeaderNames: retainedResponse.sensitiveRequestHeaderNames,
+            secretRequestHeaderNames: retainedResponse.secretRequestHeaderNames,
             redirects: response.redirects,
             followedRedirectCount: response.redirects.count
         )
@@ -344,6 +360,8 @@ public actor HTTPExecutionManager {
         identity: RequestIdentity,
         configuration: HTTPRequestConfiguration,
         preparedRequest: URLRequest,
+        sensitiveRequestHeaderNames: Set<String>,
+        secretRequestHeaderNames: Set<String>,
         redirects: [HTTPRedirect],
         followedRedirectCount: Int
     ) throws -> HTTPRun {
@@ -365,6 +383,8 @@ public actor HTTPExecutionManager {
             identity: identity,
             configuration: configuration,
             preparedRequest: preparedRequest,
+            sensitiveRequestHeaderNames: sensitiveRequestHeaderNames,
+            secretRequestHeaderNames: secretRequestHeaderNames,
             redirects: redirects,
             followedRedirectCount: followedRedirectCount,
             continuation: continuation,
@@ -506,6 +526,8 @@ public actor HTTPExecutionManager {
             runID: runID,
             request: activeRun.configuration,
             preparedRequest: activeRun.preparedRequest,
+            sensitiveRequestHeaderNames: activeRun.sensitiveRequestHeaderNames,
+            secretRequestHeaderNames: activeRun.secretRequestHeaderNames,
             redirects: activeRun.redirects,
             followedRedirectCount: activeRun.followedRedirectCount,
             bodyDirectory: bodyDirectory,
@@ -571,7 +593,12 @@ public actor HTTPExecutionManager {
         case .completed(let metadata):
             let bodyURL = metadata.bodyFileURL.standardizedFileURL.resolvingSymlinksInPath()
             retainedBodies.insert(bodyURL)
-            retainedResponses[runID] = (activeRun.identity, bodyURL)
+            retainedResponses[runID] = RetainedHTTPResponse(
+                identity: activeRun.identity,
+                bodyURL: bodyURL,
+                sensitiveRequestHeaderNames: activeRun.sensitiveRequestHeaderNames,
+                secretRequestHeaderNames: activeRun.secretRequestHeaderNames
+            )
             activeRun.continuation.yield(.completed(HTTPResponseRecord(
                 runID: runID,
                 request: activeRun.configuration,
@@ -586,7 +613,9 @@ public actor HTTPExecutionManager {
                 redirectLimitReached: metadata.redirectLimitReached,
                 effectiveMethod: metadata.effectiveMethod,
                 redirectRequest: metadata.redirectRequest,
-                pendingRedirect: metadata.pendingRedirect
+                pendingRedirect: metadata.pendingRedirect,
+                sensitiveRequestHeaderNames: activeRun.sensitiveRequestHeaderNames,
+                secretRequestHeaderNames: activeRun.secretRequestHeaderNames
             )))
         case .failed(let message, let bodyFileURL):
             if let bodyFileURL {
@@ -652,6 +681,8 @@ private final class HTTPDownloadDelegate: NSObject, URLSessionDownloadDelegate, 
     private let continuation: AsyncStream<HTTPExecutionEvent>.Continuation
     private let onCompletion: @Sendable (UUID, HTTPDownloadOutcome) -> Void
     private let maximumResponseBytes: Int64?
+    private let sensitiveRequestHeaderNames: Set<String>
+    private let secretRequestHeaderNames: Set<String>
     private var currentRequest: URLRequest
     private var redirects: [HTTPRedirect]
     private var followedRedirectCount: Int
@@ -667,6 +698,8 @@ private final class HTTPDownloadDelegate: NSObject, URLSessionDownloadDelegate, 
         runID: UUID,
         request: HTTPRequestConfiguration,
         preparedRequest: URLRequest,
+        sensitiveRequestHeaderNames: Set<String>,
+        secretRequestHeaderNames: Set<String>,
         redirects: [HTTPRedirect],
         followedRedirectCount: Int,
         bodyDirectory: URL,
@@ -677,6 +710,8 @@ private final class HTTPDownloadDelegate: NSObject, URLSessionDownloadDelegate, 
         self.runID = runID
         self.request = request
         self.currentRequest = preparedRequest
+        self.sensitiveRequestHeaderNames = sensitiveRequestHeaderNames
+        self.secretRequestHeaderNames = secretRequestHeaderNames
         self.redirects = redirects
         self.followedRedirectCount = followedRedirectCount
         self.bodyDirectory = bodyDirectory
@@ -723,7 +758,9 @@ private final class HTTPDownloadDelegate: NSObject, URLSessionDownloadDelegate, 
             method: currentRequest.httpMethod ?? "GET",
             nextMethod: redirectedRequest.httpMethod ?? "GET",
             requestHeaders: requestHeaders(from: currentRequest),
-            responseHeaders: responseHeaders(from: response)
+            responseHeaders: responseHeaders(from: response),
+            sensitiveRequestHeaderNames: sensitiveRequestHeaderNames,
+            secretRequestHeaderNames: secretRequestHeaderNames
         )
         redirects.append(redirect)
         continuation.yield(.redirect(redirect))

@@ -57,27 +57,38 @@ struct ReferencedVariableRow: View {
                     .foregroundStyle(details == nil ? Color.red : Color.teal)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                Spacer(minLength: 0)
+                    .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+                    .help("{{\(name)}}")
                 if let details {
                     Text(details.scopeName)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
+                        .frame(width: 66, alignment: .leading)
                     if details.value.isEncrypted {
                         Label("Secret", systemImage: "lock.fill")
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: true, vertical: false)
                             .lineLimit(1)
-                        actionButton(title: "Reveal") { reveal(details) }
+                            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
                     } else if case let .plain(value) = details.value {
                         Text(value.isEmpty ? "(empty)" : value)
                             .font(.system(.caption, design: .monospaced))
                             .lineLimit(1).truncationMode(.middle)
-                            .frame(maxWidth: 140, alignment: .trailing)
-                        actionButton(title: "View") { showPlainValue(details) }
+                            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
                     }
-                    actionButton(title: didCopy ? "Copied" : "Copy") { copy(details) }
+                    HStack(spacing: 8) {
+                        actionButton(title: details.value.isEncrypted ? "Reveal" : "View") {
+                            if details.value.isEncrypted { reveal(details) }
+                            else { showPlainValue(details) }
+                        }
+                        actionButton(title: didCopy ? "Copied" : "Copy") { copy(details) }
+                    }
+                    .frame(width: 90, alignment: .trailing)
                 } else {
+                    Text("—").foregroundStyle(.secondary).frame(width: 66, alignment: .leading)
                     Text("Missing").foregroundStyle(.red)
+                        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+                    Color.clear.frame(width: 90)
                 }
             }
             if let errorMessage {
@@ -88,6 +99,8 @@ struct ReferencedVariableRow: View {
             }
         }
         .font(.caption)
+        .padding(8)
+        .overlay(alignment: .bottom) { Divider() }
         .popover(isPresented: $isPopoverPresented, arrowEdge: .trailing) {
             fullValuePopover
         }

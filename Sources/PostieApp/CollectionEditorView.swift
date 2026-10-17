@@ -42,7 +42,8 @@ struct CollectionEditorView: View {
                             retained(FieldTable(title: "Collection headers", fields: Binding(
                                 get: { model.collection(id: collectionID)?.headers ?? [] },
                                 set: { model.updateCollectionHeaders($0, in: collectionID) }
-                            ), keyPlaceholder: "Header", valuePlaceholder: "Value", availableVariables: availableVariables), active: section == .headers)
+                            ), keyPlaceholder: "Header", valuePlaceholder: "Value", availableVariables: availableVariables,
+                            completionVariables: model.variableCompletions(for: owner)), active: section == .headers)
                             retained(AuthenticationEditor(collectionID: collectionID), active: section == .authentication)
                         }
                     }

@@ -198,8 +198,11 @@ struct RequestEditorView: View {
             retainedSection(requestContent, isActive: selectedSection == .request)
             retainedSection(AuthenticationEditor(identity: identity).id(identity), isActive: selectedSection == .authentication)
             retainedSection(
-                VariableEditorView(owner: .request(identity), isActive: selectedSection == .variables)
-                    .id(VariableOwner.request(identity)),
+                VStack(alignment: .leading, spacing: 18) {
+                    VariableEditorView(owner: .request(identity), isActive: selectedSection == .variables)
+                        .id(VariableOwner.request(identity))
+                    referencedVariables
+                },
                 isActive: selectedSection == .variables
             )
             retainedSection(settingsEditor, isActive: selectedSection == .settings)
@@ -213,13 +216,15 @@ struct RequestEditorView: View {
                 fields: fieldsBinding(\.query),
                 keyPlaceholder: "Name",
                 valuePlaceholder: "Value",
-                availableVariables: availableVariableNames
+                availableVariables: availableVariableNames,
+                completionVariables: model.variableCompletions(for: identity)
             )
             if !pathParameterNames.isEmpty {
                 PathParameterTable(
                     names: pathParameterNames,
                     fields: fieldsBinding(\.pathParameters),
-                    availableVariables: availableVariableNames
+                    availableVariables: availableVariableNames,
+                    completionVariables: model.variableCompletions(for: identity)
                 )
             }
             FieldTable(
@@ -227,11 +232,11 @@ struct RequestEditorView: View {
                 fields: fieldsBinding(\.headers),
                 keyPlaceholder: "Header",
                 valuePlaceholder: "Value",
-                availableVariables: availableVariableNames
+                availableVariables: availableVariableNames,
+                completionVariables: model.variableCompletions(for: identity)
             )
             collectionHeaders
             bodyEditor
-            referencedVariables
         }
     }
 
@@ -267,21 +272,33 @@ struct RequestEditorView: View {
                 Text("Referenced variables").font(.headline)
                 Text("Up to 128 names from the first 1 MiB of input templates. Secret auth inputs resolve when sending.")
                     .font(.caption).foregroundStyle(.secondary)
-                ForEach(referencedVariableNames, id: \.self) { name in
-                    ReferencedVariableRow(
-                        identity: identity,
-                        name: name,
-                        details: variableDetails(name),
-                        isActive: Binding(
-                            get: { selectedSection == .request },
-                            set: { _ in }
+                VStack(spacing: 0) {
+                    HStack(spacing: 8) {
+                        Text("Name").frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+                        Text("Scope").frame(width: 66, alignment: .leading)
+                        Text("Value").frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+                        Color.clear.frame(width: 90)
+                    }
+                    .font(.caption).foregroundStyle(.secondary)
+                    .padding(8)
+                    .background(.quaternary)
+                    ForEach(referencedVariableNames, id: \.self) { name in
+                        ReferencedVariableRow(
+                            identity: identity,
+                            name: name,
+                            details: variableDetails(name),
+                            isActive: Binding(
+                                get: { selectedSection == .variables },
+                                set: { _ in }
+                            )
                         )
-                    )
-                    .id(ReferencedVariableRowIdentity(identity: identity, name: name))
+                        .id(ReferencedVariableRowIdentity(identity: identity, name: name))
+                    }
                 }
+                .overlay { RoundedRectangle(cornerRadius: 7).stroke(.quaternary, lineWidth: 1) }
+                .clipShape(RoundedRectangle(cornerRadius: 7))
             }
-            .padding(10)
-            .background(.quaternary, in: RoundedRectangle(cornerRadius: 7))
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -356,7 +373,8 @@ struct RequestEditorView: View {
                 isEditable: model.canEdit(identity) && (model.request(for: identity)?.bodyEnabled ?? false),
                 isActive: selectedSection == .request,
                 syntax: model.request(for: identity)?.bodySyntax ?? .none,
-                availableVariables: availableVariableNames
+                availableVariables: availableVariableNames,
+                completionVariables: model.variableCompletions(for: identity)
             )
                 .id(identity)
                 .padding(8)
@@ -543,6 +561,7 @@ private struct PathParameterTable: View {
     let names: [String]
     @Binding var fields: [HTTPField]
     let availableVariables: Set<String>
+    var completionVariables: [VariableCompletion] = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
@@ -574,7 +593,8 @@ private struct PathParameterTable: View {
                         HighlightedTextField(
                             "Value",
                             text: valueBinding(for: name),
-                            availableVariables: availableVariables
+                            availableVariables: availableVariables,
+                            completionVariables: completionVariables
                         )
                             .font(.system(.body, design: .monospaced))
                             .frame(minWidth: 0, maxWidth: .infinity)
