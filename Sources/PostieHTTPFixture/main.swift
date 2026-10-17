@@ -116,6 +116,26 @@ private final class LoopbackHTTPServer {
             return
         }
 
+        if request.path == "/presentation" {
+            let variant = query["kind"]?.first ?? "json"
+            if variant == "binary" {
+                sendFixtureBytes(client, status: 200, body: Data([0, 1, 2, 3]), contentType: "application/json", headOnly: request.method == "HEAD")
+                return
+            }
+            if variant == "oversized" {
+                let count = 6 * 1_048_576
+                guard sendHeaders(client, status: 200, headers: [("Content-Type", "application/json"), ("Content-Length", String(count))]), request.method != "HEAD" else { return }
+                writeRepeatedByte(client, byte: 0x20, count: count, chunked: false, delay: 0)
+                return
+            }
+            let body = variant == "invalid"
+                ? "{invalid JSON: " + String(repeating: "fallback text ", count: 20)
+                : "{\"message\":\"" + String(repeating: "A long response value ", count: 20) + "\",\"items\":[1,2,3]}"
+            let type = variant == "problem" ? "application/problem+json; charset=utf-8" : "application/json"
+            sendFixtureBytes(client, status: 200, body: Data(body.utf8), contentType: type, headOnly: request.method == "HEAD")
+            return
+        }
+
         let payload: [String: Any] = [
             "method": request.method,
             "path": request.path,

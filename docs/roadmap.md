@@ -6,6 +6,12 @@ This document records the approved high-level breakdown. User agreed on 2026-10-
 
 ## Shared task contract
 
+## T-57 — Response presentation defaults and wrapping (complete locally)
+
+Authorised2026-10-18: default supported JSON/+json responses to Pretty; other text and invalid/oversized JSON fallback use wrapped raw text. Keep Raw selectable, binary presentation unchanged, existing1MiB preview/5MiB formatting limits, and one vertical scroll owner. Executor owns ResponseView/HighlightedResponseText; main integrates and checks isolated native JSON/plain/fallback/resize behavior; independent review/test gate. Memory-budget changes remain explicitly deferred.
+
+Verified2026-10-18: independent82 existing tests passed, no new automated tests. Release build and source review passed. Native synthetic checks passed JSON/+json defaults, manual Raw, invalid/6MiB JSON fallback explanations, JSON-labeled binary Raw/no formatter error, and unbroken plain text wrapping. Raw reflow was verified at335pt and464pt split widths by toggling the sidebar; the failed divider-drag attempt is not resize evidence. One outer vertical scrollbar reaches the body end. Fixture /presentation provides controlled valid/invalid/oversized/binary cases. No source-byte or limit change; isolated app and fixture closed. Light appearance/IME and new memory profiling were not exercised.
+
 ## T-56 — Referenced variable value actions (complete locally)
 
 Authorised2026-10-17: View full ordinary values, Reveal/Hide secrets and Copy full values directly from the referenced-variable summary. Decrypt only on explicit Reveal/Copy; clear revealed buffers on dismissal/navigation and reject stale async results. Reuse existing variable resolution and Keychain-backed decryption. Main owns integration/docs; referenced_value_actions owns the row/view; independent review and isolated synthetic native check. No comprehensive tests or deferred feature expansion.

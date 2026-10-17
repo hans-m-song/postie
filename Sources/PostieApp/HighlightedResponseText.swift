@@ -6,6 +6,13 @@ import SwiftUI
 struct HighlightedResponseText: NSViewRepresentable {
     let text: String
     let syntax: BodySyntax
+    let wrapsToWidth: Bool
+
+    init(text: String, syntax: BodySyntax, wrapsToWidth: Bool = false) {
+        self.text = text
+        self.syntax = syntax
+        self.wrapsToWidth = wrapsToWidth
+    }
 
     func makeCoordinator() -> Coordinator {
         Coordinator(text: text, syntax: syntax)
@@ -32,7 +39,7 @@ struct HighlightedResponseText: NSViewRepresentable {
         textView.isSelectable = true
         textView.allowsUndo = false
         textView.isVerticallyResizable = false
-        textView.isHorizontallyResizable = true
+        textView.isHorizontallyResizable = !wrapsToWidth
         textView.minSize = .zero
         textView.maxSize = NSSize(
             width: CGFloat.greatestFiniteMagnitude,
@@ -42,6 +49,7 @@ struct HighlightedResponseText: NSViewRepresentable {
         textView.font = NSFont.monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
         textView.drawsBackground = false
         textView.string = text
+        configureLayout(for: textView)
 
         let hostView = NativeHighlightingHostView(textView: textView)
         context.coordinator.attach(hostView)
@@ -50,6 +58,7 @@ struct HighlightedResponseText: NSViewRepresentable {
 
     func updateNSView(_ hostView: NativeHighlightingHostView, context: Context) {
         let textView = hostView.textView
+        configureLayout(for: textView)
         if textView.string != text {
             textView.string = text
         }
@@ -73,18 +82,39 @@ struct HighlightedResponseText: NSViewRepresentable {
             return nil
         }
 
-        textContainer.containerSize = NSSize(
-            width: CGFloat.greatestFiniteMagnitude,
-            height: CGFloat.greatestFiniteMagnitude
-        )
+        let proposedWidth = proposal.width ?? hostView.bounds.width
+        if wrapsToWidth, proposedWidth > 0 {
+            textContainer.containerSize = NSSize(
+                width: max(1, proposedWidth - textView.textContainerInset.width * 2),
+                height: CGFloat.greatestFiniteMagnitude
+            )
+        } else {
+            textContainer.containerSize = NSSize(
+                width: CGFloat.greatestFiniteMagnitude,
+                height: CGFloat.greatestFiniteMagnitude
+            )
+        }
         layoutManager.ensureLayout(for: textContainer)
         let usedRect = layoutManager.usedRect(for: textContainer)
         let extraLineRect = layoutManager.extraLineFragmentRect
         let inset = textView.textContainerInset
-        let width = ceil(max(usedRect.maxX, extraLineRect.maxX) + inset.width * 2)
+        let contentWidth = ceil(max(usedRect.maxX, extraLineRect.maxX) + inset.width * 2)
         let fontHeight = textView.font?.boundingRectForFont.height ?? NSFont.systemFontSize
         let height = ceil(max(max(usedRect.maxY, extraLineRect.maxY), fontHeight) + inset.height * 2)
-        return CGSize(width: max(1, width), height: max(1, height))
+        let width = wrapsToWidth ? max(1, proposedWidth) : max(1, contentWidth)
+        return CGSize(width: width, height: max(1, height))
+    }
+
+    private func configureLayout(for textView: NSTextView) {
+        textView.isHorizontallyResizable = !wrapsToWidth
+        guard let textContainer = textView.textContainer else { return }
+        textContainer.widthTracksTextView = false
+        if !wrapsToWidth {
+            textContainer.containerSize = NSSize(
+                width: CGFloat.greatestFiniteMagnitude,
+                height: CGFloat.greatestFiniteMagnitude
+            )
+        }
     }
 
     @MainActor

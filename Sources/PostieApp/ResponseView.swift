@@ -383,11 +383,36 @@ private struct ResponseBodyPreview: View {
     @EnvironmentObject private var model: AppModel
     let identity: RequestIdentity
     let latest: AppModel.LatestResponse
-    @State private var syntax: BodySyntax = .none
-    @State private var pretty = false
+    @State private var syntax: BodySyntax
+    @State private var pretty: Bool
     @State private var formatted: String?
     @State private var formatError: String?
     @State private var isFormatting = false
+
+    init(identity: RequestIdentity, latest: AppModel.LatestResponse) {
+        self.identity = identity
+        self.latest = latest
+
+        let initialSyntax = Self.syntax(for: latest.response.responseHeaders)
+        _syntax = State(initialValue: initialSyntax)
+        _pretty = State(initialValue: initialSyntax == .json && latest.preview?.isBinary != true)
+    }
+
+    private var shouldFormatJSON: Bool {
+        pretty && syntax == .json && latest.preview?.isBinary == false
+    }
+
+    private var isPrettyJSON: Bool {
+        shouldFormatJSON && formatted != nil
+    }
+
+    private func highlightedText(for preview: BodyPreview) -> HighlightedResponseText {
+        HighlightedResponseText(
+            text: displayedText(preview),
+            syntax: syntax,
+            wrapsToWidth: !isPrettyJSON
+        )
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -441,13 +466,18 @@ private struct ResponseBodyPreview: View {
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, minHeight: 90)
                 } else {
-                    ScrollView(.horizontal) {
-                        HighlightedResponseText(
-                            text: displayedText(preview),
-                            syntax: syntax
-                        )
-                            .fixedSize(horizontal: true, vertical: true)
-                            .padding(10)
+                    Group {
+                        if isPrettyJSON {
+                            ScrollView(.horizontal) {
+                                highlightedText(for: preview)
+                                    .fixedSize(horizontal: true, vertical: true)
+                                    .padding(10)
+                            }
+                        } else {
+                            highlightedText(for: preview)
+                                .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+                                .padding(10)
+                        }
                     }
                     .frame(minWidth: 0, maxWidth: .infinity)
                     .background(.background, in: RoundedRectangle(cornerRadius: 7))
@@ -465,16 +495,10 @@ private struct ResponseBodyPreview: View {
                     .frame(maxWidth: .infinity, minHeight: 100)
             }
         }
-        .onAppear {
-            let type = latest.response.responseHeaders.first {
-                $0.name.caseInsensitiveCompare("Content-Type") == .orderedSame
-            }?.value.lowercased().split(separator: ";").first.map(String.init) ?? ""
-            syntax = type == "application/json" || type.hasSuffix("+json") ? .json : .none
-        }
-        .task(id: pretty && syntax == .json) {
+        .task(id: shouldFormatJSON) {
             formatted = nil
             formatError = nil
-            guard pretty && syntax == .json else { isFormatting = false; return }
+            guard shouldFormatJSON else { isFormatting = false; return }
             isFormatting = true
             let url = latest.response.bodyFileURL
             let result = await Task.detached(priority: .userInitiated) {
@@ -487,6 +511,22 @@ private struct ResponseBodyPreview: View {
             case let .failure(error): formatError = error.localizedDescription
             }
         }
+        .onChange(of: latest.preview?.isBinary) { _, isBinary in
+            if isBinary == true { pretty = false }
+        }
+    }
+
+    private static func syntax(for headers: [HTTPField]) -> BodySyntax {
+        let contentType = headers.first {
+            $0.name.caseInsensitiveCompare("Content-Type") == .orderedSame
+        }?.value
+        let mediaType = contentType?
+            .split(separator: ";", maxSplits: 1, omittingEmptySubsequences: false)
+            .first?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased() ?? ""
+
+        return mediaType == "application/json" || mediaType.hasSuffix("+json") ? .json : .none
     }
 
     private func displayedText(_ preview: BodyPreview) -> String {

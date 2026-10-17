@@ -1,5 +1,12 @@
 # Decision log
 
+## 2026-10-18 — T-57 response presentation completed locally
+
+- User approved fresh JSON/+json Pretty defaults, wrapped other/raw/fallback text, existing binary behavior and unchanged preview/formatting limits. Width-aware TextKit sizing reuses the growing-editor approach; successful Pretty keeps long-line horizontal scrolling under the pane's outer vertical scroll.
+- Source review caught automatic formatting of JSON-labeled binary bodies. Formatting now waits for a loaded nonbinary preview; binary selects disabled Raw. Independent recheck found no remaining issue. Source bytes and Content-Type unchanged.
+- Existing82 functional tests passed, zero failures; no new automated tests. Release build/strict signature passed. Native loopback verified JSON/+json defaults, manualRaw, invalid/6MiB fallback, binaryJSON, plain unbroken text, reflow at335/464pt via sidebar toggle and full-height scrolling. Divider drag did not move; not claimed as resize evidence. No new memory/IME/light-mode profile.
+- Added bounded /presentation validation variants in the Swift fixture. Isolated response app and fixture closed, user runtime/Keychain untouched. Memory-budget work remains paused;66c4443 records assessment only. Local check-in, no push.
+
 ## 2026-10-17 — T-56 referenced variable value actions completed locally
 
 - User approved View full ordinary values, Reveal/Hide encrypted values, and full-value Copy without prior Reveal. ReferencedVariableRow resolves request > collection > global and reuses existing on-demand Keychain decryption; it does not change persisted configuration.
