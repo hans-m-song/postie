@@ -58,8 +58,12 @@ Sources/PostieApp/
   RequestEditorView.swift       Stacked query/header/body and options
   RequestResponseSplit.swift    Native split allocation and persistent hosted panes
   GrowingBodyEditor.swift       Non-scrolling native editor, height, binding and undo
+  JSONBodyEditing.swift         Pure delimiter, selection and indentation edit plans
   SyntaxHighlighting.swift      Bounded lexical spans and adaptive colors
   HighlightedTextField.swift    Native URL/header/value template presentation
+  VariableCompletion.swift     Bounded metadata-only token completion matching
+  VariableCompletionPopover.swift Native completion list and positioning
+  VariableInspection.swift     Scoped token inspector, explicit reveal and navigation
   HighlightedResponseText.swift Selectable natural-size response text
   AuthenticationEditor.swift    Explicit transient secret editing
   VariableEditorView.swift      Scoped plain/secret variable editing

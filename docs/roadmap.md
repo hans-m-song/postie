@@ -6,6 +6,12 @@ This document records the approved high-level breakdown. User agreed on 2026-10-
 
 ## Shared task contract
 
+## T-64–T-67 — Inherited headers, variable inspection and JSON editing (complete locally)
+
+Approved 2026-10-18: one headers table with read-only inherited rows/source navigation, JSON newline indentation and selected-text wrapping, token-anchored variable inspection/value/reveal/definition navigation, and the subsequently reported revealed-secret column alignment repair (T-67). See inherited-headers-and-editing.md. No M5 or memory-budget expansion.
+
+Verified 2026-10-18: 106 functional tests (Core61/App45), independent reviews, final release/signature and isolated native checks passed. The secret alignment repair covers collection/request shared editing. See inherited-headers-and-editing.md for exact evidence and limits.
+
 ## T-58–T-63 — Authoring and response privacy follow-up (complete locally)
 
 Authorised2026-10-18: JSON delimiter pairing, focused URL highlighting, broader variable autocomplete, send-time response-header masking with Reveal/Copy, referenced-variable table in Variables, and inline secret-edit controls. See authoring-follow-up.md for ownership/checklist/choices. Existing Move up/Move down remains; drag-and-drop and memory-budget changes deferred. Depends on current native editor/M3-M4 behavior; no M5 expansion.

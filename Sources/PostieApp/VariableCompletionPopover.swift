@@ -33,9 +33,12 @@ final class VariableCompletionPopover {
         selectedIndex: Int
     ) {
         update(suggestions: suggestions, selectedIndex: selectedIndex)
-        guard !popover.isShown,
-              let window = view.window,
+        guard let window = view.window,
               window.isVisible else {
+            return
+        }
+        if popover.isShown {
+            popover.positioningRect = anchor
             return
         }
         popover.show(relativeTo: anchor, of: view, preferredEdge: preferredEdge)

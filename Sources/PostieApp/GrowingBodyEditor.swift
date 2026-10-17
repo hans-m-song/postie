@@ -256,35 +256,54 @@ struct GrowingBodyEditor: NSViewRepresentable {
         }
 
         func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
-            guard completionPopover.isShown,
-                  !completionSuggestions.isEmpty else {
+            if completionPopover.isShown, !completionSuggestions.isEmpty {
+                switch commandSelector {
+                case #selector(NSResponder.moveUp(_:)):
+                    selectedCompletionIndex = max(0, selectedCompletionIndex - 1)
+                    updateCompletionPopoverSelection()
+                    return true
+                case #selector(NSResponder.moveDown(_:)):
+                    selectedCompletionIndex = min(completionSuggestions.count - 1, selectedCompletionIndex + 1)
+                    updateCompletionPopoverSelection()
+                    return true
+                case #selector(NSResponder.insertNewline(_:)):
+                    guard NSApp.currentEvent?.modifierFlags.contains(.command) != true else {
+                        return false
+                    }
+                    acceptCompletion(at: selectedCompletionIndex)
+                    return true
+                case #selector(NSResponder.insertTab(_:)):
+                    acceptCompletion(at: selectedCompletionIndex)
+                    return true
+                case #selector(NSResponder.cancelOperation(_:)):
+                    dismissCompletion()
+                    return true
+                default:
+                    break
+                }
+            }
+
+            guard commandSelector == #selector(NSResponder.insertNewline(_:)),
+                  NSApp.currentEvent?.modifierFlags.contains(.command) != true,
+                  syntax == .json,
+                  isActive,
+                  textView.isEditable,
+                  !textView.hasMarkedText(),
+                  case let .replace(range, replacement, selection) = JSONBodyEditing.edit(
+                    in: textView.string,
+                    range: textView.selectedRange(),
+                    replacement: "\n",
+                    inputKind: .newline,
+                    stringStateCache: &jsonStringStateCache
+                  ) else {
                 return false
             }
 
-            switch commandSelector {
-            case #selector(NSResponder.moveUp(_:)):
-                selectedCompletionIndex = max(0, selectedCompletionIndex - 1)
-                updateCompletionPopoverSelection()
-                return true
-            case #selector(NSResponder.moveDown(_:)):
-                selectedCompletionIndex = min(completionSuggestions.count - 1, selectedCompletionIndex + 1)
-                updateCompletionPopoverSelection()
-                return true
-            case #selector(NSResponder.insertNewline(_:)):
-                guard NSApp.currentEvent?.modifierFlags.contains(.command) != true else {
-                    return false
-                }
-                acceptCompletion(at: selectedCompletionIndex)
-                return true
-            case #selector(NSResponder.insertTab(_:)):
-                acceptCompletion(at: selectedCompletionIndex)
-                return true
-            case #selector(NSResponder.cancelOperation(_:)):
-                dismissCompletion()
-                return true
-            default:
-                return false
-            }
+            applyJSONBodyEdit(
+                .replace(range: range, with: replacement, selection: selection),
+                in: textView
+            )
+            return true
         }
 
         func textView(
@@ -313,16 +332,19 @@ struct GrowingBodyEditor: NSViewRepresentable {
                 return true
             }
 
+            applyJSONBodyEdit(edit, in: textView)
+            return false
+        }
+
+        private func applyJSONBodyEdit(_ edit: JSONBodyEditing.Edit, in textView: NSTextView) {
             switch edit {
             case let .moveCaret(to: location):
                 textView.setSelectedRange(NSRange(location: location, length: 0))
-                return false
             case let .replace(range, replacement, selection):
                 isApplyingPairEdit = true
                 defer { isApplyingPairEdit = false }
                 textView.insertText(replacement as NSString, replacementRange: range)
                 textView.setSelectedRange(selection)
-                return false
             }
         }
 

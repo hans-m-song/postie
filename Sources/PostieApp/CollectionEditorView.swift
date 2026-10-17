@@ -4,11 +4,7 @@ import PostieCore
 struct CollectionEditorView: View {
     @EnvironmentObject private var model: AppModel
     let collectionID: UUID
-    @State private var section: Section = .variables
-
-    private enum Section: Hashable {
-        case variables, headers, authentication
-    }
+    private var section: CollectionEditorSection { model.collectionEditorSection }
 
     private var owner: VariableOwner { .collection(collectionID) }
     private var availableVariables: Set<String> {
@@ -22,10 +18,10 @@ struct CollectionEditorView: View {
                     Text(collection.name).font(.title2.weight(.semibold))
                     Text("Shared variables, headers and authentication for this collection.")
                         .font(.callout).foregroundStyle(.secondary)
-                    Picker("Collection section", selection: $section) {
-                        Text("Variables").tag(Section.variables)
-                        Text("Headers").tag(Section.headers)
-                        Text("Auth").tag(Section.authentication)
+                    Picker("Collection section", selection: $model.collectionEditorSection) {
+                        Text("Variables").tag(CollectionEditorSection.variables)
+                        Text("Headers").tag(CollectionEditorSection.headers)
+                        Text("Auth").tag(CollectionEditorSection.authentication)
                     }
                     .pickerStyle(.segmented).labelsHidden()
                 }

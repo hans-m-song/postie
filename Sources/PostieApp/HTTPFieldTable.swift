@@ -8,6 +8,9 @@ struct FieldTable: View {
     let valuePlaceholder: String
     let availableVariables: Set<String>
     var completionVariables: [VariableCompletion] = []
+    var inheritedFields: [HTTPField] = []
+    var inheritedFieldStatus: (HTTPField) -> String = { _ in "Inherited" }
+    var onOpenInheritedSource: (() -> Void)?
     @State private var trailingField = HTTPField()
     @State private var focusedField: FieldFocus?
 
@@ -39,54 +42,12 @@ struct FieldTable: View {
                 .padding(.vertical, 7)
                 .background(.quaternary)
 
+                ForEach(inheritedFields) { field in
+                    inheritedRow(field)
+                }
+
                 ForEach(fields + [trailingField]) { field in
-                    let isTrailingField = field.id == trailingField.id
-                    HStack(spacing: 8) {
-                        if isTrailingField {
-                            Color.clear.frame(width: 26)
-                        } else {
-                            Toggle("Enabled", isOn: enabledBinding(for: field.id))
-                                .labelsHidden()
-                                .toggleStyle(.checkbox)
-                                .frame(width: 26)
-                                .help("Enable this row")
-                        }
-                        HighlightedTextField(
-                            keyPlaceholder,
-                            text: textBinding(for: field.id, keyPath: \.name),
-                            availableVariables: availableVariables,
-                            completionVariables: completionVariables,
-                            focused: focusBinding(for: .name(field.id))
-                        )
-                            .font(.system(.body, design: .monospaced))
-                            .frame(minWidth: 0, maxWidth: .infinity)
-                        Divider().frame(height: 22)
-                        HighlightedTextField(
-                            valuePlaceholder,
-                            text: textBinding(for: field.id, keyPath: \.value),
-                            availableVariables: availableVariables,
-                            completionVariables: completionVariables,
-                            focused: focusBinding(for: .value(field.id))
-                        )
-                            .font(.system(.body, design: .monospaced))
-                            .frame(minWidth: 0, maxWidth: .infinity)
-                        if isTrailingField {
-                            Color.clear.frame(width: 26)
-                        } else {
-                            Button(role: .destructive) {
-                                fields.removeAll { $0.id == field.id }
-                            } label: {
-                                Image(systemName: "minus.circle")
-                            }
-                            .buttonStyle(.borderless)
-                            .frame(width: 26)
-                            .help("Remove row")
-                            .focusable(false)
-                        }
-                    }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 6)
-                    Divider()
+                    editableRow(field, isTrailingField: field.id == trailingField.id)
                 }
 
             }
@@ -95,6 +56,118 @@ struct FieldTable: View {
                     .stroke(.quaternary, lineWidth: 1)
             }
             .clipShape(RoundedRectangle(cornerRadius: 7))
+        }
+    }
+
+    @ViewBuilder
+    private func editableRow(_ field: HTTPField, isTrailingField: Bool = false) -> some View {
+        HStack(spacing: 8) {
+            if isTrailingField {
+                Color.clear.frame(width: 26)
+            } else {
+                Toggle("Enabled", isOn: enabledBinding(for: field.id))
+                    .labelsHidden()
+                    .toggleStyle(.checkbox)
+                    .frame(width: 26)
+                    .help("Enable this row")
+            }
+            HighlightedTextField(
+                keyPlaceholder,
+                text: textBinding(for: field.id, keyPath: \.name),
+                availableVariables: availableVariables,
+                completionVariables: completionVariables,
+                focused: focusBinding(for: .name(field.id))
+            )
+                .font(.system(.body, design: .monospaced))
+                .frame(minWidth: 0, maxWidth: .infinity)
+            Divider().frame(height: 22)
+            HighlightedTextField(
+                valuePlaceholder,
+                text: textBinding(for: field.id, keyPath: \.value),
+                availableVariables: availableVariables,
+                completionVariables: completionVariables,
+                focused: focusBinding(for: .value(field.id))
+            )
+                .font(.system(.body, design: .monospaced))
+                .frame(minWidth: 0, maxWidth: .infinity)
+            if isTrailingField {
+                Color.clear.frame(width: 26)
+            } else {
+                Button(role: .destructive) {
+                    fields.removeAll { $0.id == field.id }
+                } label: {
+                    Image(systemName: "minus.circle")
+                }
+                .buttonStyle(.borderless)
+                .frame(width: 26)
+                .help("Remove row")
+                .focusable(false)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        Divider()
+    }
+
+    @ViewBuilder
+    private func inheritedRow(_ field: HTTPField) -> some View {
+        let status = inheritedFieldStatus(field)
+
+        HStack(spacing: 8) {
+            Image(systemName: inheritedStatusSymbol(status))
+                .foregroundStyle(.secondary)
+                .frame(width: 26)
+                .help(status)
+                .accessibilityLabel(status)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(field.name)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .textSelection(.enabled)
+                    .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+                Text(status)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .font(.system(.body, design: .monospaced))
+            Divider().frame(height: 30)
+            Text(field.value)
+                .font(.system(.body, design: .monospaced))
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .textSelection(.enabled)
+                .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+            if let onOpenInheritedSource {
+                Button(action: onOpenInheritedSource) {
+                    Image(systemName: "arrow.up.right.square")
+                }
+                .buttonStyle(.borderless)
+                .frame(width: 26)
+                .accessibilityLabel("Open collection headers")
+                .help("Open collection headers")
+                .environment(\.isEnabled, true)
+                .focusable(false)
+            } else {
+                Color.clear.frame(width: 26)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .font(.system(.body, design: .monospaced))
+        Divider()
+    }
+
+    private func inheritedStatusSymbol(_ status: String) -> String {
+        switch status {
+        case "Disabled": "minus.circle"
+        case "Overridden": "arrow.uturn.backward.circle"
+        case "Suppressed": "eye.slash"
+        case "Variable dependent": "questionmark.circle"
+        case "Inactive": "circle.dashed"
+        default: "checkmark.circle"
         }
     }
 

@@ -2,6 +2,16 @@ import Foundation
 import Combine
 import PostieCore
 
+enum CollectionEditorSection: Hashable {
+    case variables, headers, authentication
+}
+
+struct VariableDefinitionRequest: Identifiable {
+    let id = UUID()
+    let owner: VariableOwner
+    let name: String
+}
+
 @MainActor
 final class AppModel: ObservableObject {
     static let shared = AppModel()
@@ -45,6 +55,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var storageIssues: [StorageIssue] = []
     @Published private(set) var selectedIdentity: RequestIdentity?
     @Published private(set) var selectedCollectionID: UUID?
+    @Published var collectionEditorSection: CollectionEditorSection = .variables
+    @Published private(set) var variableDefinitionRequest: VariableDefinitionRequest?
     @Published private(set) var showsOngoingRequests = false
     @Published private(set) var now = Date()
     @Published private(set) var startupError: String?
@@ -170,6 +182,7 @@ final class AppModel: ObservableObject {
     }
 
     func select(_ identity: RequestIdentity?) {
+        variableDefinitionRequest = nil
         selectedIdentity = identity
         selectedCollectionID = nil
         showsOngoingRequests = false
@@ -177,12 +190,14 @@ final class AppModel: ObservableObject {
     }
 
     func showOngoingRequests() {
+        variableDefinitionRequest = nil
         selectedCollectionID = nil
         showsGlobalVariables = false
         showsOngoingRequests = true
     }
 
     func showRequests() {
+        variableDefinitionRequest = nil
         selectedCollectionID = nil
         showsOngoingRequests = false
         showsGlobalVariables = false
@@ -193,6 +208,7 @@ final class AppModel: ObservableObject {
 
     func openRequest(_ identity: RequestIdentity) {
         guard drafts[identity] != nil, !reconcilingRequests.contains(identity) else { return }
+        variableDefinitionRequest = nil
         selectedIdentity = identity
         selectedCollectionID = nil
         showsOngoingRequests = false
@@ -200,6 +216,7 @@ final class AppModel: ObservableObject {
     }
 
     func showGlobalVariables() {
+        variableDefinitionRequest = nil
         selectedCollectionID = nil
         showsGlobalVariables = true
         showsOngoingRequests = false
@@ -210,8 +227,10 @@ final class AppModel: ObservableObject {
         showsRequestSearch = true
     }
 
-    func showCollection(_ id: UUID) {
+    func showCollection(_ id: UUID, section: CollectionEditorSection = .variables) {
         guard collections.contains(where: { $0.id == id }) else { return }
+        variableDefinitionRequest = nil
+        collectionEditorSection = section
         selectedCollectionID = id
         showsGlobalVariables = false
         showsOngoingRequests = false
@@ -274,6 +293,50 @@ final class AppModel: ObservableObject {
             collection: collection(for: identity)?.variables ?? [:],
             request: drafts[identity]?.variables ?? [:]
         )
+    }
+
+    func variableInspection(named name: String, in origin: VariableOwner) -> VariableInspection? {
+        guard !isTerminating, activeVariableOwner == origin else { return nil }
+        let owners: [VariableOwner]
+        switch origin {
+        case .global: owners = [.global]
+        case let .collection(id): owners = [.collection(id), .global]
+        case let .request(identity): owners = [.request(identity), .collection(identity.collectionID), .global]
+        }
+        for owner in owners {
+            if let value = variables(for: owner)[name] {
+                return VariableInspection(origin: origin, owner: owner, name: name, value: value)
+            }
+        }
+        return nil
+    }
+
+    func isCurrent(_ inspection: VariableInspection) -> Bool {
+        variableInspection(named: inspection.name, in: inspection.origin) == inspection
+    }
+
+    func showVariableDefinition(_ inspection: VariableInspection) {
+        guard isCurrent(inspection) else { return }
+        switch inspection.owner {
+        case .global: showGlobalVariables()
+        case let .collection(id): showCollection(id)
+        case let .request(identity):
+            openRequest(identity)
+            variableDefinitionRequest = VariableDefinitionRequest(owner: inspection.owner, name: inspection.name)
+        }
+    }
+
+    func consumeVariableDefinitionRequest(_ id: UUID) {
+        guard variableDefinitionRequest?.id == id else { return }
+        variableDefinitionRequest = nil
+    }
+
+    private var activeVariableOwner: VariableOwner? {
+        guard !showsOngoingRequests else { return nil }
+        if showsGlobalVariables { return .global }
+        if let selectedCollectionID { return .collection(selectedCollectionID) }
+        if let selectedIdentity { return .request(selectedIdentity) }
+        return nil
     }
 
     func setVariable(name: String, value: String, isSecret: Bool, owner: VariableOwner) async throws {

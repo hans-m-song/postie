@@ -7,6 +7,39 @@ import PostieCore
 
 @MainActor
 final class AppModelTests: XCTestCase {
+    func testVariableInspectionUsesEffectiveDefinitionAndRejectsStaleNavigation() async throws {
+        let root = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = try makeModel(root: root, secretVault: SecretVault(keyStore: AppModelKeyStore()))
+        await model.createCollection(name: "Inspection")
+        let collectionID = try XCTUnwrap(model.collections.first?.id)
+        await model.createRequest(in: collectionID)
+        let request = try XCTUnwrap(model.collections.first?.requests.first)
+        let requestIdentity = identity(collectionID, request)
+        let origin = VariableOwner.request(requestIdentity)
+        try model.setPlainVariable(name: "host", value: "global", owner: .global)
+        try model.setPlainVariable(name: "host", value: "collection", owner: .collection(collectionID))
+        let collectionValue = try XCTUnwrap(model.variableInspection(named: "host", in: origin))
+        XCTAssertEqual(collectionValue.owner, .collection(collectionID))
+        XCTAssertEqual(collectionValue.value, .plain("collection"))
+        try model.setPlainVariable(name: "host", value: "request", owner: origin)
+        XCTAssertFalse(model.isCurrent(collectionValue))
+        let effective = try XCTUnwrap(model.variableInspection(named: "host", in: origin))
+        XCTAssertEqual(effective.owner, origin)
+        model.showVariableDefinition(effective)
+        XCTAssertEqual(model.variableDefinitionRequest?.owner, origin)
+        XCTAssertEqual(model.variableDefinitionRequest?.name, "host")
+        model.showCollection(collectionID, section: .headers)
+        XCTAssertEqual(model.collectionEditorSection, .headers)
+        XCTAssertNil(model.variableInspection(named: "host", in: origin))
+        model.showVariableDefinition(effective)
+        XCTAssertEqual(model.selectedCollectionID, collectionID)
+        let fromCollection = try XCTUnwrap(model.variableInspection(named: "host", in: .collection(collectionID)))
+        model.showVariableDefinition(fromCollection)
+        XCTAssertEqual(model.collectionEditorSection, .variables)
+        try await model.flushPendingSaves()
+    }
+
     func testFlushPersistsLatestEditAndNavigationRetainsOtherDrafts() async throws {
         let root = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }

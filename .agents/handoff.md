@@ -1,8 +1,16 @@
 # Handoff
 
-Updated2026-10-18. M1–M4 and follow-ups T-52–T-57 are complete locally. Keep commits local; never push without a new request. Prior commits:8e0a6eb referenced values,66c4443 memory assessment/explicit deferral. Main alone edits .agents documents. No incomplete worker or worktree.
+Updated 2026-10-18. M1–M4 and follow-ups T-52–T-67 are complete locally. Keep commits local; never push without a new request. Prior commits:8e0a6eb referenced values,66c4443 memory assessment/explicit deferral. Main alone edits .agents documents. No incomplete worker or worktree.
 
-## Latest: T-57 response defaults/wrapping
+## Latest: T-64–T-67 inherited headers, inspection and editor fixes
+
+See docs/inherited-headers-and-editing.md. Inherited headers share the request Headers table, read-only with source jump/status. Single-line complete variables show token-anchored values/explicit secret Reveal/definition navigation; incomplete tokens keep autocomplete. Inspector host/actions do not take URL focus. JSON Enter preserves/adds indentation and expands empty pairs; typed openers wrap selections. Shared secret editing now preserves Name/Value columns in wide collection and335pt request panes; fixed68pt name layout caused the reproduced bug.
+
+Independent final exact-source106 tests (Core61/App45), source reviews, scope audit, final release/strict signature and isolated native checks passed. Native secret decryption/RevealHide passed earlier candidate; final shared edit layout checked via Replace/Show in both panes, final inspector focus/navigation and autocomplete Return passed. Limits/evidence recorded in task doc. Screen locked during one keyboard attempt; discarded and repeated after user unlock. Temporary caffeinate assertion stopped. No user data or security dialogs accessed/bypassed.
+
+Normal output dist/Postie.app. Logs /Volumes/Data/tmp/postie-m34/inherited-editing-final-tests.log, inherited-editing-release.log, inherited-editing-dist.log. Isolated app/data/bodies .build/inherited-validation, ID dev.postie.validation.inherited.20261018a; exact new synthetic Keychain service ending .workspace-encryption created. App closed, no network sends/fixture needed. Keep synthetic key items, never delete automatically. Reuse editingValidation CUA binding after explicit isolated launch; first getApp lookup blocked187s. No incomplete worker/worktree. Memory/M5/drag-drop remain deferred. Commit local only; no push.
+
+## Earlier: T-57 response defaults/wrapping
 
 Fresh JSON/+json responses default to Pretty; MIME parameters/case/whitespace handled. Formatting starts only after a nonbinary preview loads. Raw, other text and invalid/oversized JSON fallback wrap to finite pane width and grow under one outer vertical scroll. Successful Pretty retains long-line horizontal scrolling; binary selects disabled Raw with its existing unavailable message. Caps unchanged:1MiB preview/5MiB pretty input-output; no source-byte changes.
 

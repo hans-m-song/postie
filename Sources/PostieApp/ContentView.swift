@@ -87,6 +87,7 @@ struct ContentView: View {
             }
         } else if let collectionID = model.selectedCollectionID {
             CollectionEditorView(collectionID: collectionID).id(collectionID)
+                .environment(\.variableInspectionOwner, .collection(collectionID))
         } else if let identity = model.selectedIdentity {
             VStack(spacing: 0) {
                 RequestToolbar(identity: identity)
@@ -95,6 +96,7 @@ struct ContentView: View {
                     .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
             }
             .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
+            .environment(\.variableInspectionOwner, .request(identity))
         } else {
             ContentUnavailableView(
                 "No request selected",

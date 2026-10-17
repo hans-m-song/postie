@@ -174,3 +174,9 @@
 ## 2026-10-18 — T-58–T-63 authoring and header privacy
 
 Completed approved follow-up; see docs/authoring-follow-up.md for verification. Send-time lowercase sensitivity flags preserve request header masking across redirects without extra variable decryption or schema changes; names derived from secrets also mask. Explicit Reveal/Copy retains access. Response bodies unchanged. Completion uses names/scope metadata, with auth suggestions after Show and literal variable definitions excluded. Native editor focus capture fixes first-focus colors; JSON-only direct-key pairing preserves paste/undo. References moved to Variables; narrow secret controls use icon fallback. Independent93 functional tests, source reviews and isolated native checks passed. Memory and drag-drop remain deferred.
+
+## 2026-10-18 — T-64–T-67 inherited headers and authoring
+
+Completed approved one-table read-only inherited headers/source jump, JSON newline indentation/selection wrapping, and single-line variable inspector with explicit Reveal/definition navigation. Templated header names cannot be case-folded before variable resolution; status now reports uncertainty, with regression coverage. New inspector presentation defers beyond field selection, avoids first-responder candidates and updates open anchors through positioningRect. Preserve native field typing/undo. Body inspector remains out of scope.
+
+User reported revealed secret name/value overlap in collection/request tables; native reproduction isolated the fixed68pt name row that replaced table columns. Shared editing now retains Name/Value columns and one-line Hide/Cancel/Save. Long-name collection and335pt request layouts passed through shared Replace/Show path; earlier actual synthetic Reveal passed. Independent final106 tests, source review/scope audit and release/signature checks passed. See docs/inherited-headers-and-editing.md for precise native evidence and limits. No memory/M5 change; no push.

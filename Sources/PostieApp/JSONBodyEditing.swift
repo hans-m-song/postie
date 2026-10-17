@@ -62,6 +62,7 @@ enum JSONBodyEditing {
     enum InputKind: Equatable {
         case typing
         case backspace
+        case newline
         case other
     }
 
@@ -107,14 +108,41 @@ enum JSONBodyEditing {
             )
         }
 
+        if inputKind == .newline {
+            guard range.length == 0,
+                  canManagePairs(state: state) else {
+                return nil
+            }
+
+            let baseIndent = indentation(in: source, before: range.location)
+            let opening = range.location > 0 ? source.character(at: range.location - 1) : 0
+            let isAfterOpener = opening == 0x7B || opening == 0x5B
+            let innerIndent = isAfterOpener ? baseIndent + "  " : baseIndent
+            let closing = range.location < source.length ? source.character(at: range.location) : 0
+            let isEmptyContainerPair = (opening == 0x7B && closing == 0x7D) ||
+                (opening == 0x5B && closing == 0x5D)
+            guard isAfterOpener || !baseIndent.isEmpty else {
+                return nil
+            }
+
+            let insertedText = isEmptyContainerPair
+                ? "\n\(innerIndent)\n\(baseIndent)"
+                : "\n\(innerIndent)"
+            return .replace(
+                range: range,
+                with: insertedText,
+                selection: NSRange(location: range.location + 1 + (innerIndent as NSString).length, length: 0)
+            )
+        }
+
         guard inputKind == .typing,
-              range.length == 0,
               replacement.utf16.count == 1,
               let character = replacement.utf16.first else {
             return nil
         }
 
-        if isClosingDelimiter(character),
+        if range.length == 0,
+           isClosingDelimiter(character),
            range.location < source.length,
            source.character(at: range.location) == character,
            shouldSkip(character, state: state) {
@@ -126,11 +154,35 @@ enum JSONBodyEditing {
             return nil
         }
 
+        let selectedText = source.substring(with: range)
+
         return .replace(
             range: range,
-            with: "\(replacement)\(closing)",
-            selection: NSRange(location: range.location + 1, length: 0)
+            with: "\(replacement)\(selectedText)\(closing)",
+            selection: NSRange(location: range.location + 1, length: range.length)
         )
+    }
+
+    private static func indentation(in source: NSString, before location: Int) -> String {
+        var lineStart = location
+        while lineStart > 0 {
+            let previous = source.character(at: lineStart - 1)
+            guard previous != 0x0A, previous != 0x0D else {
+                break
+            }
+            lineStart -= 1
+        }
+
+        var indentationEnd = lineStart
+        while indentationEnd < location {
+            let character = source.character(at: indentationEnd)
+            guard character == 0x20 || character == 0x09 else {
+                break
+            }
+            indentationEnd += 1
+        }
+
+        return source.substring(with: NSRange(location: lineStart, length: indentationEnd - lineStart))
     }
 
     private static func shouldPair(_ character: unichar, state: JSONBodyStringStateCache.State) -> Bool {

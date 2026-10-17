@@ -123,18 +123,11 @@ struct VariableEditorView: View {
 
         return VStack(spacing: 0) {
             if row.isEditingSecret || (row.isTrailing && row.isSecretDraft) {
-                HStack(spacing: 6) {
-                    if row.isTrailing {
-                        Toggle("Secret", isOn: secretBinding(for: row.id))
-                            .labelsHidden()
-                            .toggleStyle(.checkbox)
-                            .frame(width: 16)
-                            .help("Store this variable as a secret")
-                            .disabled(!isEditable || row.isBusy)
-                    }
+                HStack(spacing: 8) {
+                    secretEditingNameCell(for: row)
+                        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
 
-                    nameField(for: row)
-                        .frame(width: 68)
+                    Divider().frame(height: 22)
 
                     SecretValueInput(
                         placeholder: row.isTrailing ? "Value" : "Secret value",
@@ -145,19 +138,24 @@ struct VariableEditorView: View {
                     .frame(minWidth: 0, maxWidth: .infinity)
                     .disabled(!canEditValue)
 
-                    Button("Cancel") {
-                        cancelSecretEdit(for: row)
-                    }
-                    .buttonStyle(.borderless)
-                    .fixedSize()
-                    .disabled(row.isTrailing ? row.isBusy : !canEditValue)
+                    Divider().frame(height: 22)
 
-                    Button("Save") {
-                        saveSecretEdit(for: row)
+                    HStack(spacing: 6) {
+                        Button("Cancel") {
+                            cancelSecretEdit(for: row)
+                        }
+                        .buttonStyle(.borderless)
+                        .fixedSize()
+                        .disabled(row.isTrailing ? row.isBusy : !canEditValue)
+
+                        Button("Save") {
+                            saveSecretEdit(for: row)
+                        }
+                        .buttonStyle(.borderless)
+                        .fixedSize()
+                        .disabled(row.isTrailing ? !isEditable || row.isBusy || nameError != nil : !canEditValue)
                     }
-                    .buttonStyle(.borderless)
-                    .fixedSize()
-                    .disabled(row.isTrailing ? !isEditable || row.isBusy || nameError != nil : !canEditValue)
+                    .frame(width: 90, alignment: .trailing)
                 }
                 .padding(.horizontal, 8)
                 .padding(.vertical, 6)
@@ -218,6 +216,29 @@ struct VariableEditorView: View {
             }
 
             Divider()
+        }
+    }
+
+    @ViewBuilder
+    private func secretEditingNameCell(for row: VariableEditorRowState) -> some View {
+        if row.isTrailing {
+            HStack(spacing: 6) {
+                nameField(for: row)
+                    .frame(minWidth: 0, maxWidth: .infinity)
+
+                Toggle("Secret", isOn: secretBinding(for: row.id))
+                    .labelsHidden()
+                    .toggleStyle(.checkbox)
+                    .frame(width: 16)
+                    .help("Store this variable as a secret")
+                    .disabled(!isEditable || row.isBusy)
+            }
+        } else {
+            Text(row.name)
+                .font(.system(.body, design: .monospaced))
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .help(row.name)
         }
     }
 

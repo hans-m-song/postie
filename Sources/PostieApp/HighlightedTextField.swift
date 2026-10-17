@@ -4,6 +4,8 @@ import SwiftUI
 
 struct HighlightedTextField: View {
     @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.variableInspectionOwner) private var inspectionOwner
+    @EnvironmentObject private var model: AppModel
 
     private let placeholder: String
     @Binding private var text: String
@@ -44,7 +46,9 @@ struct HighlightedTextField: View {
             isURL: isURL,
             rounded: rounded,
             focused: focused,
-            isEnabled: isEnabled
+            isEnabled: isEnabled,
+            model: model,
+            inspectionOwner: inspectionOwner
         )
         .accessibilityLabel(placeholder)
     }
@@ -61,6 +65,8 @@ private struct NativeHighlightedTextField: NSViewRepresentable {
     let rounded: Bool
     let focused: Binding<Bool>?
     let isEnabled: Bool
+    let model: AppModel
+    let inspectionOwner: VariableOwner?
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
@@ -70,7 +76,9 @@ private struct NativeHighlightedTextField: NSViewRepresentable {
             completionVariables: completionVariables,
             validPathParameters: validPathParameters,
             isURL: isURL,
-            isEnabled: isEnabled
+            isEnabled: isEnabled,
+            model: model,
+            inspectionOwner: inspectionOwner
         )
     }
 
@@ -104,7 +112,8 @@ private struct NativeHighlightedTextField: NSViewRepresentable {
             completionVariables: completionVariables,
             validPathParameters: validPathParameters,
             isURL: isURL,
-            isEnabled: isEnabled
+            isEnabled: isEnabled,
+            inspectionOwner: inspectionOwner
         )
         textField.delegate = context.coordinator
         textField.placeholderString = placeholder
@@ -129,6 +138,11 @@ private struct NativeHighlightedTextField: NSViewRepresentable {
         private var validPathParameters: Set<String>
         private var isURL: Bool
         private var isEnabled: Bool
+        private let model: AppModel
+        private var inspectionOwner: VariableOwner?
+        private let inspectionPopover = VariableInspectionPopover()
+        private var inspectedVariable: VariableInspection?
+        private var inspectionGeneration = 0
         private var highlightTask: Task<SyntaxHighlighting.Result, Never>?
         private var presentationTask: Task<Void, Never>?
         private var highlightGeneration = 0
@@ -151,7 +165,9 @@ private struct NativeHighlightedTextField: NSViewRepresentable {
             completionVariables: [VariableCompletion],
             validPathParameters: Set<String>,
             isURL: Bool,
-            isEnabled: Bool
+            isEnabled: Bool,
+            model: AppModel,
+            inspectionOwner: VariableOwner?
         ) {
             self.text = text
             self.focused = focused
@@ -160,6 +176,8 @@ private struct NativeHighlightedTextField: NSViewRepresentable {
             self.validPathParameters = validPathParameters
             self.isURL = isURL
             self.isEnabled = isEnabled
+            self.model = model
+            self.inspectionOwner = inspectionOwner
             super.init()
             completionPopover.onSelection = { [weak self] index in
                 self?.acceptCompletion(at: index)
@@ -183,10 +201,16 @@ private struct NativeHighlightedTextField: NSViewRepresentable {
             completionVariables: [VariableCompletion],
             validPathParameters: Set<String>,
             isURL: Bool,
-            isEnabled: Bool
+            isEnabled: Bool,
+            inspectionOwner: VariableOwner?
         ) {
             self.text = text
             self.focused = focused
+            if self.inspectionOwner != inspectionOwner || !isEnabled ||
+                inspectedVariable.map({ !model.isCurrent($0) }) == true {
+                dismissInspection()
+            }
+            self.inspectionOwner = inspectionOwner
             let completionContextChanged = self.completionVariables != completionVariables || self.isURL != isURL
             let wasEnabled = self.isEnabled
             let inputsChanged = self.availableVariables != availableVariables ||
@@ -214,6 +238,7 @@ private struct NativeHighlightedTextField: NSViewRepresentable {
             editSession += 1
             stopObservingSelectionChanges()
             dismissCompletion()
+            dismissInspection()
             textField?.highlightedCell.onFieldEditorSelected = nil
             if let activeFieldEditor {
                 SyntaxHighlighting.clearTemporaryAttributes(from: activeFieldEditor)
@@ -296,6 +321,7 @@ private struct NativeHighlightedTextField: NSViewRepresentable {
                 return
             }
             let fieldEditor = textField.currentEditor() as? NSTextView
+            dismissInspection()
             let value = fieldEditor?.string ?? textField.stringValue
             if text.wrappedValue != value {
                 text.wrappedValue = value
@@ -317,6 +343,7 @@ private struct NativeHighlightedTextField: NSViewRepresentable {
                 stopObservingSelectionChanges(in: endingFieldEditor)
             }
             dismissCompletion()
+            if !inspectionPopover.isPresenting && !inspectionPopover.isHandlingCurrentEvent { dismissInspection() }
             activeFieldEditor = nil
             editSession += 1
             focusGeneration += 1
@@ -362,6 +389,44 @@ private struct NativeHighlightedTextField: NSViewRepresentable {
         }
 
         func refreshCompletion(in textField: SyntaxHighlightedTextField, fieldEditor: NSTextView?) {
+            if let fieldEditor, !fieldEditor.hasMarkedText(),
+               isEnabled, textField.isEnabled, activeFieldEditor === fieldEditor,
+               let reference = VariableInspectionMatcher.reference(
+                in: fieldEditor.string, selection: fieldEditor.selectedRange()
+               ) {
+                dismissCompletion()
+                guard let inspectionOwner,
+                      let inspection = model.variableInspection(named: reference.name, in: inspectionOwner) else {
+                    dismissInspection()
+                    return
+                }
+                inspectedVariable = inspection
+                inspectionGeneration += 1
+                let generation = inspectionGeneration
+                DispatchQueue.main.async { [weak self, weak textField, weak fieldEditor] in
+                    guard let self, let textField, let fieldEditor,
+                          self.inspectionGeneration == generation,
+                          self.activeFieldEditor === fieldEditor,
+                          textField.currentEditor() === fieldEditor,
+                          self.model.isCurrent(inspection),
+                          VariableInspectionMatcher.reference(in: fieldEditor.string, selection: fieldEditor.selectedRange()) == reference else { return }
+                    self.inspectionPopover.show(
+                        inspection, model: self.model,
+                        relativeTo: self.tokenRect(reference.range, in: textField, editor: fieldEditor),
+                        of: textField,
+                        isCurrent: { [weak self, weak textField] in
+                            guard let self, let textField,
+                                  self.inspectionPopover.isShown,
+                                  self.inspectedVariable == inspection,
+                                  self.model.isCurrent(inspection) else { return false }
+                            let value = (textField.currentEditor() as? NSTextView)?.string ?? textField.stringValue
+                            return VariableInspectionMatcher.reference(in: value, selection: reference.range)?.name == reference.name
+                        }
+                    )
+                }
+                return
+            }
+            dismissInspection()
             guard isEnabled,
                   textField.isEnabled,
                   !completionVariables.isEmpty,
@@ -389,12 +454,27 @@ private struct NativeHighlightedTextField: NSViewRepresentable {
             completionSuggestions = suggestions
             updateCompletionPopoverSelection()
             completionPopover.show(
-                relativeTo: textField.bounds,
+                relativeTo: tokenRect(context.replacementRange, in: textField, editor: fieldEditor),
                 of: textField,
-                preferredEdge: .minY,
+                preferredEdge: textField.isFlipped ? .minY : .maxY,
                 suggestions: completionSuggestions,
                 selectedIndex: selectedCompletionIndex
             )
+        }
+
+        private func tokenRect(_ range: NSRange, in textField: NSTextField, editor: NSTextView) -> NSRect {
+            guard let window = textField.window else { return textField.bounds }
+            let screenRect = editor.firstRect(forCharacterRange: range, actualRange: nil)
+            let rect = textField.convert(window.convertFromScreen(screenRect), from: nil)
+            let visible = rect.intersection(textField.bounds)
+            guard !visible.isNull, visible.width > 0, visible.height > 0 else { return textField.bounds }
+            return visible
+        }
+
+        private func dismissInspection() {
+            inspectionGeneration += 1
+            inspectedVariable = nil
+            inspectionPopover.dismiss()
         }
 
         private func observeSelectionChanges(in fieldEditor: NSTextView) {

@@ -1,6 +1,43 @@
 import SwiftUI
 import PostieCore
 
+enum InheritedHeaderStatus {
+    static func label(for field: HTTPField, requestHeaders: [HTTPField]) -> String {
+        guard field.isEnabled else { return "Disabled" }
+        guard !(field.name.isEmpty && field.value.isEmpty) else { return "Inactive" }
+
+        let namedRequestHeaders = requestHeaders.filter {
+            !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        let collectionNameIsTemplated = hasTemplateSyntax(in: field.name)
+        let literalMatches = namedRequestHeaders.filter {
+            !collectionNameIsTemplated &&
+                !hasTemplateSyntax(in: $0.name) &&
+                $0.name.lowercased() == field.name.lowercased()
+        }
+
+        if literalMatches.contains(where: \.isEnabled) {
+            return "Overridden"
+        }
+        let requestNameIsTemplated = namedRequestHeaders.contains {
+            hasTemplateSyntax(in: $0.name)
+        }
+        if (collectionNameIsTemplated && !namedRequestHeaders.isEmpty) || requestNameIsTemplated {
+            return "Variable dependent"
+        }
+        if !literalMatches.isEmpty {
+            return "Suppressed"
+        }
+
+        return "Inherited"
+    }
+
+    private static func hasTemplateSyntax(in name: String) -> Bool {
+        let scan = TemplateEngine.scan(name)
+        return !scan.references.isEmpty || !scan.invalidRanges.isEmpty
+    }
+}
+
 struct RequestToolbar: View {
     @EnvironmentObject private var model: AppModel
     let identity: RequestIdentity
@@ -141,6 +178,12 @@ struct RequestEditorView: View {
         .onChange(of: identity) { oldIdentity, _ in
             discardSecretEdits(for: oldIdentity)
         }
+        .onAppear {
+            selectVariablesForDefinitionRequest()
+        }
+        .onChange(of: model.variableDefinitionRequest?.id) { _, _ in
+            selectVariablesForDefinitionRequest()
+        }
         .onDisappear {
             discardSecretEdits(for: identity)
         }
@@ -233,36 +276,29 @@ struct RequestEditorView: View {
                 keyPlaceholder: "Header",
                 valuePlaceholder: "Value",
                 availableVariables: availableVariableNames,
-                completionVariables: model.variableCompletions(for: identity)
+                completionVariables: model.variableCompletions(for: identity),
+                inheritedFields: model.collection(for: identity)?.headers ?? [],
+                inheritedFieldStatus: { inheritedHeaderStatus(for: $0) },
+                onOpenInheritedSource: {
+                    model.showCollection(identity.collectionID, section: .headers)
+                }
             )
-            collectionHeaders
             bodyEditor
         }
     }
 
-    @ViewBuilder
-    private var collectionHeaders: some View {
-        if let collection = model.collection(for: identity), !collection.headers.isEmpty {
-            DisclosureGroup("Collection headers (\(collection.headers.count))") {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Request header names override these defaults. Disable a matching request row to suppress its collection header.")
-                        .font(.caption).foregroundStyle(.secondary)
-                    ForEach(collection.headers) { field in
-                        HStack(alignment: .top) {
-                            Image(systemName: field.isEnabled ? "checkmark.circle" : "minus.circle")
-                                .foregroundStyle(.secondary)
-                            Text(field.name).frame(maxWidth: .infinity, alignment: .leading)
-                            Text(field.value).frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                        .font(.system(.caption, design: .monospaced))
-                        .textSelection(.enabled)
-                    }
-                    Button("Edit collection defaults") { model.showCollection(collection.id) }
-                }
-                .padding(.top, 8)
-            }
-            .disclosureGroupStyle(PaddedDisclosureGroupStyle())
-        }
+    private func selectVariablesForDefinitionRequest() {
+        guard let definitionRequest = model.variableDefinitionRequest,
+              definitionRequest.owner == .request(identity) else { return }
+        selectedSection = .variables
+        model.consumeVariableDefinitionRequest(definitionRequest.id)
+    }
+
+    private func inheritedHeaderStatus(for field: HTTPField) -> String {
+        InheritedHeaderStatus.label(
+            for: field,
+            requestHeaders: model.request(for: identity)?.headers ?? []
+        )
     }
 
     @ViewBuilder
