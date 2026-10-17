@@ -85,6 +85,8 @@ struct ContentView: View {
                 Divider()
                 ScrollView { VariableEditorView(owner: .global).padding(18) }
             }
+        } else if let collectionID = model.selectedCollectionID {
+            CollectionEditorView(collectionID: collectionID).id(collectionID)
         } else if let identity = model.selectedIdentity {
             VStack(spacing: 0) {
                 RequestToolbar(identity: identity)
@@ -130,7 +132,7 @@ private struct SidebarView: View {
             .buttonStyle(.plain)
             .padding(.horizontal, 12)
             .padding(.vertical, 7)
-            .background(!model.showsOngoingRequests && !model.showsGlobalVariables ? Color.accentColor.opacity(0.13) : .clear, in: RoundedRectangle(cornerRadius: 7))
+            .background(!model.showsOngoingRequests && !model.showsGlobalVariables && model.selectedCollectionID == nil ? Color.accentColor.opacity(0.13) : .clear, in: RoundedRectangle(cornerRadius: 7))
 
             Button { model.showRequestSearch() } label: {
                 HStack {
@@ -261,99 +263,74 @@ private struct CollectionSidebarSection: View {
     @Binding var namePrompt: NamePrompt?
     @Binding var deletionTarget: DeletionTarget?
     @State private var isExpanded = true
-    @State private var showsVariables = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 6) {
-                Button {
-                    isExpanded.toggle()
-                } label: {
+                Button { isExpanded.toggle() } label: {
                     Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                         .font(.caption2.weight(.bold))
-                        .frame(width: 14, height: 20)
+                        .frame(width: 14, height: 24)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                Image(systemName: "folder")
-                    .foregroundStyle(.secondary)
-                Text(collection.name)
-                    .font(.system(size: 13, weight: .medium))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-                Spacer(minLength: 2)
-                if !collection.isReadOnly {
-                    Menu {
-                        Button("Collection variables…") { showsVariables = true }
-                        Button("New request") {
-                            namePrompt = NamePrompt(
-                                title: "New Request",
-                                initialValue: "New request",
-                                placeholder: "Request name",
-                                submitTitle: "Create"
-                            ) { name in
-                                Task { await model.createRequest(in: collection.id, name: name) }
-                            }
-                        }
-                        Button("Rename collection") {
-                            namePrompt = NamePrompt(
-                                title: "Rename Collection",
-                                initialValue: collection.name,
-                                placeholder: "Collection name",
-                                submitTitle: "Save"
-                            ) { name in
-                                Task { await model.renameCollection(id: collection.id, name: name) }
-                            }
-                        }
-                        Divider()
-                        Button("Delete collection", role: .destructive) {
-                            deletionTarget = .collection(collection.id)
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis")
-                            .frame(width: 24, height: 20)
-                            .contentShape(Rectangle())
+                .accessibilityLabel(isExpanded ? "Collapse collection" : "Expand collection")
+                Button { model.showCollection(collection.id) } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "folder").foregroundStyle(.secondary)
+                        Text(collection.name)
+                            .font(.system(size: 13, weight: .medium))
+                            .lineLimit(1).truncationMode(.tail)
+                        Spacer(minLength: 0)
                     }
-                    .menuStyle(.borderlessButton)
-                    .fixedSize()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 5)
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
             }
             .padding(.horizontal, 6)
+            .background(model.selectedCollectionID == collection.id ? Color.accentColor.opacity(0.14) : .clear, in: RoundedRectangle(cornerRadius: 6))
+            .contextMenu { collectionActions }
 
             if isExpanded {
                 if collection.requests.isEmpty {
                     Text("No requests")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                        .padding(.leading, 34)
-                        .padding(.vertical, 5)
+                        .font(.caption).foregroundStyle(.tertiary)
+                        .padding(.leading, 7).padding(.vertical, 5)
                 }
                 ForEach(Array(collection.requests.enumerated()), id: \.element.id) { index, request in
                     let identity = RequestIdentity(collectionID: collection.id, requestID: request.id)
-                    RequestSidebarRow(
-                        request: request,
-                        identity: identity,
-                        canMoveUp: index > 0,
-                        canMoveDown: index + 1 < collection.requests.count,
-                        canEdit: model.canEdit(identity),
-                        namePrompt: $namePrompt,
-                        deletionTarget: $deletionTarget
-                    )
+                    RequestSidebarRow(request: request, identity: identity,
+                                      canMoveUp: index > 0, canMoveDown: index + 1 < collection.requests.count,
+                                      canEdit: model.canEdit(identity), namePrompt: $namePrompt,
+                                      deletionTarget: $deletionTarget)
                 }
             }
         }
         .padding(.vertical, 3)
-        .sheet(isPresented: $showsVariables) {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack {
-                    Text("\(collection.name) — Variables").font(.headline)
-                    Spacer()
-                    Button("Done") { showsVariables = false }.keyboardShortcut(.cancelAction)
-                }
-                ScrollView { VariableEditorView(owner: .collection(collection.id)) }
-            }.padding(20).frame(width: 600, height: 420)
+    }
+
+    @ViewBuilder
+    private var collectionActions: some View {
+        Button("Collection settings") { model.showCollection(collection.id) }
+        Button("New request") {
+            namePrompt = NamePrompt(title: "New Request", initialValue: "New request",
+                                    placeholder: "Request name", submitTitle: "Create") { name in
+                Task { await model.createRequest(in: collection.id, name: name) }
+            }
         }
+        .disabled(collection.isReadOnly)
+        Button("Rename collection") {
+            namePrompt = NamePrompt(title: "Rename Collection", initialValue: collection.name,
+                                    placeholder: "Collection name", submitTitle: "Save") { name in
+                Task { await model.renameCollection(id: collection.id, name: name) }
+            }
+        }
+        .disabled(collection.isReadOnly)
+        Divider()
+        Button("Delete collection", role: .destructive) { deletionTarget = .collection(collection.id) }
+            .disabled(collection.isReadOnly)
     }
 }
 
@@ -393,11 +370,11 @@ private struct RequestSidebarRow: View {
                     .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
             }
             .font(.system(size: 13))
-            .padding(.leading, 28)
+            .padding(.leading, 7)
             .padding(.trailing, 7)
             .padding(.vertical, 6)
             .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-            .background(model.selectedIdentity == identity && !model.showsOngoingRequests && !model.showsGlobalVariables ? Color.accentColor.opacity(0.14) : .clear, in: RoundedRectangle(cornerRadius: 6))
+            .background(model.selectedIdentity == identity && model.selectedCollectionID == nil && !model.showsOngoingRequests && !model.showsGlobalVariables ? Color.accentColor.opacity(0.14) : .clear, in: RoundedRectangle(cornerRadius: 6))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -422,7 +399,7 @@ private struct RequestSidebarRow: View {
                 Button("Delete request", role: .destructive) { deletionTarget = .request(identity) }
             }
         }
-        .accessibilityAddTraits(model.selectedIdentity == identity && !model.showsOngoingRequests && !model.showsGlobalVariables ? .isSelected : [])
+        .accessibilityAddTraits(model.selectedIdentity == identity && model.selectedCollectionID == nil && !model.showsOngoingRequests && !model.showsGlobalVariables ? .isSelected : [])
     }
 
     private func methodColor(_ method: String) -> Color {

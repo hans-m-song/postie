@@ -10,6 +10,7 @@ private enum RequestPreparationError: LocalizedError {
     case missingVariable(String)
     case secretUnavailable
     case invalidAuthentication
+    case collectionDefaultsUnavailable
     case invalidBasicCredentials
     case invalidBearerCredential
     case authorizationConflict
@@ -35,6 +36,8 @@ private enum RequestPreparationError: LocalizedError {
             return "A required secret value could not be unlocked."
         case .invalidAuthentication:
             return "The selected authentication method is missing its secret value."
+        case .collectionDefaultsUnavailable:
+            return "Collection authentication requires collection defaults during request preparation."
         case .invalidBasicCredentials:
             return "Basic credentials contain invalid characters."
         case .invalidBearerCredential:
@@ -68,6 +71,9 @@ public enum RequestPreparer {
     }
 
     public static func prepare(_ configuration: HTTPRequestConfiguration) throws -> URLRequest {
+        guard !configuration.inheritsCollectionAuthentication else {
+            throw RequestPreparationError.collectionDefaultsUnavailable
+        }
         guard configuration.authentication.kind == .none else {
             throw RequestPreparationError.secretUnavailable
         }
@@ -88,27 +94,54 @@ public enum RequestPreparer {
     public static func prepare(
         _ configuration: HTTPRequestConfiguration,
         context: VariableContext,
-        decryptor: (any SecretValueDecrypting)?
+        decryptor: (any SecretValueDecrypting)?,
+        collection: CollectionRequestDefaults = .init()
     ) async throws -> PreparedHTTPRequest {
         try validateOptions(configuration.options)
 
         let pathParameters = try pathParameterValues(in: configuration)
         let effectiveContext = contextByAddingConfigurationRequestValues(configuration, to: context)
-        let sources = templateSources(configuration, pathParameters: pathParameters)
-        let names = try referencedNames(in: sources)
-        var resolvedVariables = try await resolveVariables(names, in: effectiveContext, decryptor: decryptor)
+        let selectedAuthentication = configuration.inheritsCollectionAuthentication
+            ? collection.authentication
+            : configuration.authentication
+        let requestHeaders = configuration.headers.filter(hasNonblankName)
+        let collectionHeaderNames = collection.headers.filter { $0.isEnabled && hasNonblankName($0) }
+        let headerNameSources = collectionHeaderNames.map(\.name) + requestHeaders.map(\.name)
+        let headerNameVariables = try referencedNames(in: headerNameSources)
+        var resolvedVariables = try await resolveVariables(headerNameVariables, in: effectiveContext, decryptor: decryptor)
+        let resolvedNameValues = resolvedVariables.mapValues(\.value)
+        let suppressedHeaderNames = Set(try requestHeaders.map {
+            try substitute($0.name, values: resolvedNameValues).lowercased()
+        })
+        var inheritedHeaders: [HTTPField] = []
+        for field in collection.headers where isActive(field) {
+            let name = try substitute(field.name, values: resolvedNameValues)
+            guard !suppressedHeaderNames.contains(name.lowercased()) else { continue }
+            inheritedHeaders.append(field)
+        }
+
+        let headers = inheritedHeaders + configuration.headers
+        let sources = templateSources(
+            configuration,
+            pathParameters: pathParameters,
+            headers: headers,
+            authentication: selectedAuthentication
+        )
+        let names = try referencedNames(in: sources).filter { resolvedVariables[$0] == nil }
+        let remainingVariables = try await resolveVariables(names, in: effectiveContext, decryptor: decryptor)
+        resolvedVariables.merge(remainingVariables) { current, _ in current }
 
         let secretTemplate: String?
-        switch configuration.authentication.kind {
+        switch selectedAuthentication.kind {
         case .none:
             secretTemplate = nil
         case .basic:
-            guard let envelope = configuration.authentication.password else {
+            guard let envelope = selectedAuthentication.password else {
                 throw RequestPreparationError.invalidAuthentication
             }
             secretTemplate = try await decrypt(envelope, using: decryptor)
         case .bearer:
-            guard let envelope = configuration.authentication.token else {
+            guard let envelope = selectedAuthentication.token else {
                 throw RequestPreparationError.invalidAuthentication
             }
             secretTemplate = try await decrypt(envelope, using: decryptor)
@@ -122,7 +155,7 @@ public enum RequestPreparer {
 
         let variableValues = resolvedVariables.mapValues(\.value)
         let authorizationHeader = try structuredAuthorizationHeader(
-            configuration.authentication,
+            selectedAuthentication,
             secretTemplate: secretTemplate,
             variableValues: variableValues
         )
@@ -130,7 +163,8 @@ public enum RequestPreparer {
             configuration,
             pathParameters: pathParameters,
             variableValues: variableValues,
-            authorizationHeader: authorizationHeader
+            authorizationHeader: authorizationHeader,
+            headers: headers
         )
 
         return PreparedHTTPRequest(
@@ -153,19 +187,22 @@ public enum RequestPreparer {
 
     private static func templateSources(
         _ configuration: HTTPRequestConfiguration,
-        pathParameters: [PathParameterValue]
+        pathParameters: [PathParameterValue],
+        headers: [HTTPField]? = nil,
+        authentication: RequestAuthentication? = nil
     ) -> [String] {
         var sources = [configuration.url]
         sources.append(contentsOf: pathParameters.map(\.value))
         sources.append(contentsOf: configuration.query.filter(isActive).flatMap { [$0.name, $0.value] })
-        sources.append(contentsOf: configuration.headers.filter(isActive).flatMap { [$0.name, $0.value] })
+        sources.append(contentsOf: (headers ?? configuration.headers).filter(isActive).flatMap { [$0.name, $0.value] })
 
         if configuration.bodyEnabled {
             sources.append(configuration.body)
         }
 
-        if configuration.authentication.kind == .basic {
-            sources.append(configuration.authentication.username)
+        let selectedAuthentication = authentication ?? configuration.authentication
+        if selectedAuthentication.kind == .basic {
+            sources.append(selectedAuthentication.username)
         }
 
         return sources
@@ -173,6 +210,10 @@ public enum RequestPreparer {
 
     private static func isActive(_ field: HTTPField) -> Bool {
         field.isEnabled && !(field.name.isEmpty && field.value.isEmpty)
+    }
+
+    private static func hasNonblankName(_ field: HTTPField) -> Bool {
+        !field.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private static func referencedNames(in sources: [String]) throws -> [String] {
@@ -325,7 +366,8 @@ public enum RequestPreparer {
         _ configuration: HTTPRequestConfiguration,
         pathParameters: [PathParameterValue],
         variableValues: [String: String],
-        authorizationHeader: String?
+        authorizationHeader: String?,
+        headers: [HTTPField]? = nil
     ) throws -> URLRequest {
         var encodedPathValues: [String: String] = [:]
         for pathParameter in pathParameters {
@@ -389,7 +431,7 @@ public enum RequestPreparer {
         request.cachePolicy = .reloadIgnoringLocalCacheData
 
         var resolvedHeaders: [HTTPField] = []
-        for field in configuration.headers where isActive(field) {
+        for field in (headers ?? configuration.headers) where isActive(field) {
             resolvedHeaders.append(HTTPField(
                 id: field.id,
                 name: try substitute(field.name, values: variableValues),

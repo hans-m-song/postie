@@ -59,6 +59,16 @@ public struct RequestAuthentication: Codable, Equatable, Sendable {
     }
 }
 
+public struct CollectionRequestDefaults: Codable, Equatable, Sendable {
+    public var headers: [HTTPField]
+    public var authentication: RequestAuthentication
+
+    public init(headers: [HTTPField] = [], authentication: RequestAuthentication = .init()) {
+        self.headers = headers
+        self.authentication = authentication
+    }
+}
+
 public enum VariableScope: String, CaseIterable, Sendable {
     case global
     case collection

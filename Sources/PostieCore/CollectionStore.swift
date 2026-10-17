@@ -196,6 +196,28 @@ public actor CollectionStore {
         try replaceJSON(updated.jsonValue, at: directory.appendingPathComponent("collection.json"), operation: "save collection variables")
     }
 
+    public func saveCollectionConfiguration(
+        _ defaults: CollectionRequestDefaults,
+        variables: VariableValues,
+        in collectionID: UUID
+    ) throws {
+        let (directory, record) = try writableCollection(id: collectionID)
+        let settings = try Self.collectionDefaultsJSONValue(defaults)
+        guard case .object(let settingsObject) = settings,
+              let incomingHeaders = settingsObject["headers"],
+              let incomingAuthentication = settingsObject["authentication"] else {
+            throw CollectionStoreError.ioFailure(operation: "encode collection settings")
+        }
+
+        var updated = record
+        let existingVariables = updated.object["variables"] ?? .object([:])
+        let incomingVariables = try Self.variableJSONValue(variables)
+        updated.object["variables"] = Self.mergeOwnedVariables(existingVariables, with: incomingVariables)
+        updated.object["headers"] = Self.mergeUnknownData(updated.object["headers"] ?? .array([]), with: incomingHeaders)
+        updated.object["authentication"] = Self.mergeAuthentication(updated.object["authentication"] ?? .object([:]), with: incomingAuthentication)
+        try replaceJSON(updated.jsonValue, at: directory.appendingPathComponent("collection.json"), operation: "save collection configuration")
+    }
+
     public func createCollection(name: String) throws -> RequestCollection {
         var id = UUID()
         var directoryURL = collectionDirectoryURL(id)
@@ -513,17 +535,26 @@ public actor CollectionStore {
         }
 
         let variables: VariableValues
-        var variablesAreReadOnly = false
+        var collectionIsReadOnly = false
         if let rawVariables = object["variables"] {
             do {
                 variables = try Self.decodeVariables(rawVariables)
             } catch {
                 issues.append(makeIssue(.malformedCollectionVariables, collectionID: id, message: "Collection variables are malformed; the collection was loaded read-only and its files were preserved."))
                 variables = [:]
-                variablesAreReadOnly = true
+                collectionIsReadOnly = true
             }
         } else {
             variables = [:]
+        }
+
+        let defaults: CollectionRequestDefaults
+        do {
+            defaults = try Self.decodeCollectionDefaults(from: object)
+        } catch {
+            issues.append(makeIssue(.malformedCollectionSettings, collectionID: id, message: "Collection headers or authentication are malformed; the collection was loaded read-only and its files were preserved."))
+            defaults = .init()
+            collectionIsReadOnly = true
         }
 
         let record = CollectionRecord(object: object, name: displayName, entries: entries)
@@ -580,7 +611,15 @@ public actor CollectionStore {
 
         appendUnknownEntryIssues(in: directory, collectionID: id, requestFiles: requestFiles, issues: &issues)
         appendOrphanIssues(in: directory, collectionID: id, requestFiles: requestFiles, indexedIDs: Set(indexCounts.keys), issues: &issues)
-        return RequestCollection(id: id, name: record.name, requests: requests, isReadOnly: variablesAreReadOnly, variables: variables)
+        return RequestCollection(
+            id: id,
+            name: record.name,
+            requests: requests,
+            isReadOnly: collectionIsReadOnly,
+            variables: variables,
+            headers: defaults.headers,
+            authentication: defaults.authentication
+        )
     }
 
     private func appendUnknownEntryIssues(in directory: URL, collectionID: UUID, requestFiles: [UUID: [URL]], issues: inout [StorageIssue]) {
@@ -754,6 +793,22 @@ public actor CollectionStore {
     private static func variableJSONValue(_ variables: VariableValues) throws -> JSONValue {
         let data = try JSONEncoder.postieEncoder.encode(variables)
         return try JSONDecoder().decode(JSONValue.self, from: data)
+    }
+
+    private static func collectionDefaultsJSONValue(_ defaults: CollectionRequestDefaults) throws -> JSONValue {
+        let data = try JSONEncoder.postieEncoder.encode(defaults)
+        return try JSONDecoder().decode(JSONValue.self, from: data)
+    }
+
+    private static func decodeCollectionDefaults(from object: [String: JSONValue]) throws -> CollectionRequestDefaults {
+        let headers = try object["headers"].map { try decodeJSON($0, as: [HTTPField].self) } ?? []
+        let authentication = try object["authentication"].map { try decodeJSON($0, as: RequestAuthentication.self) } ?? .init()
+        return CollectionRequestDefaults(headers: headers, authentication: authentication)
+    }
+
+    private static func decodeJSON<Value: Decodable>(_ value: JSONValue, as type: Value.Type) throws -> Value {
+        let data = try JSONEncoder.postieEncoder.encode(value)
+        return try JSONDecoder().decode(type, from: data)
     }
 
     private func writeNewJSON(_ value: JSONValue, to url: URL, operation: String) throws {
@@ -993,6 +1048,7 @@ public actor CollectionStore {
         case missingCollectionMetadata = "collection-metadata-missing"
         case malformedCollectionMetadata = "collection-metadata-malformed"
         case malformedCollectionVariables = "collection-variables-malformed"
+        case malformedCollectionSettings = "collection-settings-malformed"
         case unsupportedCollectionVersion = "collection-version-unsupported"
         case unreadableCollectionContents = "collection-contents-unreadable"
         case malformedIndexEntry = "index-entry-malformed"
@@ -1066,6 +1122,11 @@ public actor CollectionStore {
                     throw DocumentFailure.malformed
                 }
             }
+            do {
+                _ = try CollectionStore.decodeCollectionDefaults(from: object)
+            } catch {
+                throw DocumentFailure.malformed
+            }
             return CollectionRecord(object: object, name: name, entries: entries)
         }
     }
@@ -1084,6 +1145,7 @@ public actor CollectionStore {
         var options: HTTPOptions
         var variables: VariableValues?
         var authentication: RequestAuthentication?
+        var inheritsCollectionAuthentication: Bool?
 
         init(configuration: HTTPRequestConfiguration) {
             self.formatVersion = CollectionStore.currentFormatVersion
@@ -1099,6 +1161,7 @@ public actor CollectionStore {
             self.options = configuration.options
             self.variables = configuration.variables
             self.authentication = configuration.authentication
+            self.inheritsCollectionAuthentication = configuration.inheritsCollectionAuthentication
         }
 
         func configuration(identity: UUID) -> HTTPRequestConfiguration {
@@ -1115,7 +1178,8 @@ public actor CollectionStore {
                 bodySyntax: bodySyntax,
                 options: options,
                 variables: variables ?? [:],
-                authentication: authentication ?? RequestAuthentication()
+                authentication: authentication ?? RequestAuthentication(),
+                inheritsCollectionAuthentication: inheritsCollectionAuthentication ?? false
             )
         }
     }

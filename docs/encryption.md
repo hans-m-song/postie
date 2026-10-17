@@ -22,6 +22,8 @@ Ordinary variables keep plaintext values. A marked-secret variable stores an env
 
 Variable resolution still follows request > collection > global. Decrypt only the effective referenced values needed for preparation or explicit user access. Marking a value secret must encrypt before replacing its plaintext representation atomically; changing it back to ordinary is an explicit user action. Editing/deleting one value never rotates/deletes the application key.
 
+The variable table uses a reversible Secret checkbox. Conversion succeeds before the model changes; failures retain the old value/type and show an error. Failed conversion alone does not block quitting because the original value remains intact. Explicit failed secret-value Save still retains its draft/error until retry or Cancel; leaving the scope discards that transient edit. Collection structured auth uses the same encrypted fields/key and conservative missing-key gate as request auth. Inactive or overridden credentials are not unlocked during execution.
+
 ## Snapshot captures
 
 Retain send-time templates and an independent map of effective values for referenced variable names; encrypt the entire captured-input map, including ordinary referenced values and structured auth inputs, as one snapshot-owned payload. Live secret values and snapshot captures use the same encryption service, not mutable shared value references. Snapshot request literals/templates and the original response remain plaintext.

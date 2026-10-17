@@ -1,35 +1,23 @@
 # Handoff
 
-Updated 2026-10-17. M1–M4 are complete locally. Final native focus/drawing checks, independent66 functional tests, release build and strict signature passed. No incomplete worker. See docs/implementation-m3-m4.md for decisions, audits and residual limits. Computer Use blocks UserNotificationCenter; OS volume permissions require the user, and login passwords require handoff.
+Updated 2026-10-17. M1–M4 and collection follow-up T-52–T-55 are complete locally. Keep commits local, never push without a new request. Prior baseline commit96624aa; final local commit records the follow-up. Canonical decisions/reviews/limits: docs/collection-settings.md. Main alone edits .agents documents.
 
-## Scope and state
+## Delivered
 
-M3/M4 adds three variable scopes, single-pass templates, Basic/Bearer, encrypted values/Keychain key, native None/JSON/template/path highlighting, Raw/Pretty, variable-source summary and Command-K search. M5/cURL/snapshots/T-42 log remain deferred. Local roadmap is approved; no TaskView project. Local completion commit on main records this work; prior commit52b90df. Keep commits local, never push without a new request. Main alone edits .agents docs. No worktree created.
+Collection Variables/Headers/Auth page; name opens page, arrow expands requests, right-click actions and no ellipsis. Request method inset tightened. Shared headers with case-insensitive request override and disabled-row suppression. Request auth Inherit/None/Basic/Bearer; old requests explicit, newly created inherit. Name/Value/Secret tables with trailing entry rows and reversible checkboxes. Native URL autocomplete with scope/secret metadata, keyboard acceptance and undo.
 
 ## Verification
 
-Independent security review found no substantiated blocker. Independent UI review found identity reuse, double-debounce edit loss and editable busy secret inputs; corrected and rechecked. Full tests exposed non-atomic workspace publication; fixed without weakening old tests. Final independent make test passes66 (Core53/App13), zero failures; diff check passes. Only main functional tests added.
+Independent final make test passed82 (Core58/App24), zero failures. Release build passed. Source reviews repaired URL-tail deletion, unstable trailing-row promotion and failed-secret target cleanup on rename/retry/plain conversion/navigation; final narrow recheck found no substantiated blocker. Repository audit found no unrelated feature changes/artifacts. Native passed collection page/right-click; variable full-name promotion/Tab/value; collection header entry; inherited request scope, request override and disabled suppression; autocomplete labels/Down/Tab/Escape/undo/request-switch dismissal; Secret check/uncheck; shared Bearer execution and same-binary restart decryption; legacy explicit None retained.
 
-Native passed: loopback scoped/path/body/header substitution, Bearer, secret conversion, same-binary restart/decryption, ordinary edit/immediate quit, URL variable/path/missing colors, body undo across syntax changes, None retaining template cues, search path/arrow/Return/no-match/Escape restoring selection, compact syntax/response layout. Native row promotion lost focus and URL editing doubled glyphs; State focus/transition guards/idle drawing repairs passed full header entry and Tab, hidden-tab input isolation, and single-draw URL editing with missing cues. Bounded metadata-only variable source summary showed correct scope precedence.
+## Artifacts
 
-Actual new-service Keychain creation and same-binary restart passed. Resigned ad-hoc rebuild prompted for access; user reported approval. Unattended update continuity is not established. Never weaken ACLs; stable signing remains future work. No existing user keys queried.
+Normal output dist/Postie.app, release/ad-hoc signed. Build root /Volumes/Data/cache/postie-m34; logs /Volumes/Data/tmp/postie-m34/collection-functional-final.log and collection-dist-final.log. make app/test/fixture use Swift/Makefile/plist, no Python. Use verified make test only, never XCTest help/unverified flags.
 
-## Build and isolated artifacts
+Synthetic .build/collection-validation/Postie.app uses ID dev.postie.validation.collections.20261017b, matching new Keychain service suffix .workspace-encryption. Data/bodies are only under that ignored collection-validation folder; app closed. Fixture session12258 at127.0.0.1:54611 stopped intentionally. Do not delete synthetic Keychain items automatically. Any future launch must use explicit synthetic --data-directory/--body-directory; never default config.
 
-make app/test/fixture; override SWIFT/BUILD_DIR/APP_DIR/CONFIGURATION. Swift /Volumes/Data/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swift. Build root /Volumes/Data/cache/postie-m34, TMPDIR /Volumes/Data/tmp/postie-m34. Trusted builds need escalation for manifests/maps; Makefile disables credential stores. Implementation/tooling Swift/Makefile/plist only.
+## Limits and next scope
 
-dist/Postie.app is release, macOS27.0+, ad-hoc signed; final strict signature passed. Synthetic logs /Volumes/Data/tmp/postie-m34/independent-tests.log and release-build-final.log.
+M5/cURL/snapshots/T-42 request log/sync remain deferred. No TaskView project authorised; approved local roadmap. No worktree. IME/light-mode runtime/performance/distribution/TLS/proxy behavior not claimed. Completion matching is capped but effective metadata list construction still scales with configured names. Failed-secret UI fault paths were source-reviewed, not native fault-injected. Stable signing needed before promising Keychain continuity across changed binaries.
 
-Synthetic apps /Volumes/Data/cache/postie-m34-validation/Postie.app (dev.postie.validation.m34.20261017a; dedicated Keychain service suffix .workspace-encryption) and /Volumes/Data/cache/postie-m34-visual/Postie.app (dev.postie.validation.m34.visual; use ordinary Other request only) are closed. Matching data/bodies below /Volumes/Data/tmp/postie-m34-validation and postie-m34-visual. Always launch with explicit directory overrides, never default user config. Old validation cleanup had one automatic-review timeout then a successful verified retry. Do not delete synthetic Keychain items automatically.
-
-Fixture session57799 at127.0.0.1:57501 was intentionally stopped with Ctrl-C. No validation services remain running.
-
-## Next actions
-
-M5 is next when authorised: cURL export, later import and immutable snapshots per roadmap. Stable signing is needed before promising unattended Keychain continuity across updates. No further M3/M4 implementation task is pending; do not broaden tests or revisit TaskView without a new request.
-
-## Constraints and limits
-
-Never inspect environment, PII, existing runtime config/credentials, .env/.config/.aws/.ssh or enumerate Keychain. Synthetic stores/new exact services only. Never use XCTest help/unverified flags (historical baseline diagnostic violated environment ban; not repeated). Use make test.
-
-No IME/light-mode runtime/performance/distribution/TLS/proxy claim. Formatting cap5MiB input/output, highlight1MiB UTF-8, raw preview1MiB; response files remain complete. Cancellation/deletion test asserts model ownership but lacks endpoint-hit counter. API headers are not wire-exact. Config without its Keychain key cannot recover secrets.
+Never inspect environment, PII, existing runtime configuration/credentials, .env/.config/.aws/.ssh, or existing Keychain items. Only synthetic directories/fakekeys/loopback/exact new services. OS protected dialogs/passwords require user handoff. No comprehensive test expansion.

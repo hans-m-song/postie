@@ -445,6 +445,113 @@ final class AppModelTests: XCTestCase {
         XCTAssertTrue(terminated)
     }
 
+    func testSecretCheckboxRoundTripsAcrossScopesAndFailureKeepsOriginalValue() async throws {
+        let root = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = try makeModel(root: root, secretVault: SecretVault(keyStore: AppModelKeyStore()))
+        await model.createCollection(name: "Checkbox fixtures")
+        let collectionID = try XCTUnwrap(model.collections.first?.id)
+        await model.createRequest(in: collectionID)
+        let requestIdentity = try XCTUnwrap(model.selectedIdentity)
+        for owner in [VariableOwner.global, .collection(collectionID), .request(requestIdentity)] {
+            try model.setPlainVariable(name: "value", value: "synthetic toggle", owner: owner)
+            try await model.setVariableSecret(true, named: "value", owner: owner)
+            XCTAssertEqual(model.variables(for: owner)["value"]?.isEncrypted, true)
+            try await model.setVariableSecret(false, named: "value", owner: owner)
+            XCTAssertEqual(model.variables(for: owner)["value"], .plain("synthetic toggle"))
+        }
+        try await model.flushPendingSaves()
+        let terminated = await model.prepareForTermination()
+        XCTAssertTrue(terminated)
+
+        let deniedRoot = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: deniedRoot) }
+        let denied = try makeModel(root: deniedRoot, secretVault: SecretVault(keyStore: AppModelKeyStore(deniesAccess: true)))
+        try await waitUntil { denied.canEditVariables(.global) }
+        try denied.setPlainVariable(name: "value", value: "unchanged", owner: .global)
+        do {
+            try await denied.setVariableSecret(true, named: "value", owner: .global)
+            XCTFail("Conversion must fail when key access fails.")
+        } catch { XCTAssertEqual(error as? SecretVaultError, .keyUnavailable) }
+        XCTAssertEqual(denied.globalVariables["value"], .plain("unchanged"))
+        let deniedTerminated = await denied.prepareForTermination()
+        XCTAssertTrue(deniedTerminated)
+    }
+
+    func testCollectionDefaultsFlushAndExecuteWithRequestScopesWithoutMutatingDraft() async throws {
+        let root = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fixture = try AppHTTPFixture()
+        let model = try makeModel(root: root, secretVault: SecretVault(keyStore: AppModelKeyStore()))
+        await model.createCollection(name: "Shared defaults")
+        let collectionID = try XCTUnwrap(model.collections.first?.id)
+        await model.createRequest(in: collectionID)
+        let requestIdentity = try XCTUnwrap(model.selectedIdentity)
+        XCTAssertTrue(try XCTUnwrap(model.request(for: requestIdentity)).inheritsCollectionAuthentication)
+        try model.setPlainVariable(name: "scope", value: "collection", owner: .collection(collectionID))
+        try model.setPlainVariable(name: "scope", value: "request", owner: .request(requestIdentity))
+        model.updateCollectionHeaders([
+            HTTPField(name: "X-Shared", value: "{{scope}}"),
+            HTTPField(name: "X-Suppressed", value: "{{unused}}")
+        ], in: collectionID)
+        model.setAuthenticationKind(.basic, owner: .collection(collectionID))
+        model.updateAuthenticationUsername("{{scope}}", owner: .collection(collectionID))
+        try await model.setAuthenticationSecret("synthetic-password", field: .password, owner: .collection(collectionID))
+        model.updateDraft(requestIdentity) {
+            $0.url = fixture.baseURL + "/echo"
+            $0.headers = [HTTPField(name: "x-suppressed", value: "{{unused}}", isEnabled: false)]
+        }
+        model.showCollection(collectionID)
+        XCTAssertEqual(model.selectedCollectionID, collectionID)
+        model.openRequest(requestIdentity)
+        XCTAssertNil(model.selectedCollectionID)
+        model.startRequest(requestIdentity)
+        try await waitUntil { model.latestResponses[requestIdentity] != nil || model.runErrors[requestIdentity] != nil }
+        XCTAssertNil(model.runErrors[requestIdentity])
+        let response = try XCTUnwrap(model.latestResponses[requestIdentity]?.response)
+        XCTAssertEqual(response.requestHeaders.first { $0.name.lowercased() == "x-shared" }?.value, "request")
+        XCTAssertNil(response.requestHeaders.first { $0.name.lowercased() == "x-suppressed" })
+        XCTAssertEqual(response.requestHeaders.first { $0.name.lowercased() == "authorization" }?.value,
+                       "Basic " + Data("request:synthetic-password".utf8).base64EncodedString())
+        XCTAssertEqual(response.request.authentication.kind, .none)
+        XCTAssertTrue(response.request.inheritsCollectionAuthentication)
+        try await model.flushPendingSaves()
+        let path = root.appendingPathComponent("data/collections/\(collectionID.uuidString.lowercased())/collection.json")
+        let saved = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: path)) as? [String: Any])
+        XCTAssertEqual((saved["variables"] as? [String: String])?["scope"], "collection")
+        XCTAssertEqual((saved["headers"] as? [[String: Any]])?.count, 2)
+        XCTAssertFalse(try String(contentsOf: path, encoding: .utf8).contains("synthetic-password"))
+        let terminated = await model.prepareForTermination()
+        XCTAssertTrue(terminated)
+    }
+
+    func testCollectionOnlyCiphertextPreventsCreatingAReplacementKey() async throws {
+        let root = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let sourceVault = SecretVault(keyStore: AppModelKeyStore())
+        let token = try await sourceVault.encrypt("synthetic collection credential")
+        do {
+            let store = try CollectionStore(rootURL: root.appendingPathComponent("data"))
+            let collection = try await store.createCollection(name: "Missing collection key")
+            try await store.saveCollectionConfiguration(
+                CollectionRequestDefaults(authentication: RequestAuthentication(kind: .bearer, token: token)),
+                variables: [:], in: collection.id
+            )
+        }
+        let keyStore = MissingCollectionKeyStore()
+        let model = try makeModel(root: root, secretVault: SecretVault(keyStore: keyStore))
+        try await waitUntil { model.canEditVariables(.global) }
+        try model.setPlainVariable(name: "newValue", value: "preserved", owner: .global)
+        do {
+            try await model.setVariableSecret(true, named: "newValue", owner: .global)
+            XCTFail("Existing collection ciphertext must prevent replacement-key creation.")
+        } catch { XCTAssertEqual(error as? SecretVaultError, .keyCreationNotAllowed) }
+        XCTAssertEqual(keyStore.creationCount, 0)
+        XCTAssertEqual(model.globalVariables["newValue"], .plain("preserved"))
+        let terminated = await model.prepareForTermination()
+        XCTAssertTrue(terminated)
+    }
+
     private func makeModel(root: URL, secretVault: SecretVault? = nil) throws -> AppModel {
         let dataDirectory = root.appendingPathComponent("data", isDirectory: true)
         let bodyDirectory = root.appendingPathComponent("bodies", isDirectory: true)
@@ -493,6 +600,17 @@ final class AppModelTests: XCTestCase {
             try await Task.sleep(nanoseconds: 10_000_000)
         }
         XCTFail("Timed out waiting for the model to reach the expected state.")
+    }
+}
+
+private final class MissingCollectionKeyStore: ApplicationKeyStore, @unchecked Sendable {
+    private let lock = NSLock()
+    private var creations = 0
+    var creationCount: Int { lock.withLock { creations } }
+    func loadKey() throws -> Data? { nil }
+    func createKey(_ proposedKey: Data) throws -> Data {
+        lock.withLock { creations += 1 }
+        return proposedKey
     }
 }
 

@@ -18,7 +18,8 @@ public actor HTTPExecutionManager {
 public enum RequestPreparer {
     public static func prepare(_ configuration: HTTPRequestConfiguration) throws -> URLRequest
     public static func prepare(_ configuration: HTTPRequestConfiguration, context: VariableContext,
-                               decryptor: (any SecretValueDecrypting)?) async throws -> PreparedHTTPRequest
+                               decryptor: (any SecretValueDecrypting)?,
+                               collection: CollectionRequestDefaults = .init()) async throws -> PreparedHTTPRequest
     public static func pathParameterNames(in url: String) -> [String]
 }
 
@@ -45,6 +46,8 @@ public actor CollectionStore {
     public func load() throws -> WorkspaceLoad
     public func saveGlobalVariables(_ variables: VariableValues) throws
     public func saveCollectionVariables(_ variables: VariableValues, in collectionID: UUID) throws
+    public func saveCollectionConfiguration(_ defaults: CollectionRequestDefaults,
+                                           variables: VariableValues, in collectionID: UUID) throws
     public func createCollection(name: String) throws -> RequestCollection
     public func renameCollection(id: UUID, name: String) throws
     public func deleteCollection(id: UUID) throws
@@ -61,6 +64,8 @@ CollectionStore holds an exclusive OS lock for its lifetime. Unknown/malformed/i
 ## M3 preparation and encryption
 
 ConfigurationValues.swift defines VariableValue (plain string/encrypted SecretEnvelope), VariableContext and non-Codable PreparedHTTPRequest. Request > collection > global lookup is single pass, active/referenced inputs only. The async preparer supplements missing context.request entries from configuration.variables, preserving explicit context overrides. Original configuration remains templates/ciphertext; URLRequest/referencedInputs are transient. SecretVault owns AES-GCM and narrowly scoped ApplicationKeyStore access, with conservative explicit creation permission. See implementation-m3-m4.md for parsing/auth/failure rules.
+
+CollectionRequestDefaults carries captured collection headers/auth separately from the original request. Names resolve before case-insensitive override/suppression; only surviving active header values and the selected auth resolve. AppModel captures defaults/context at Send and retains original request intent in results. The synchronous legacy preparation path rejects inherited-auth configurations; app execution uses asynchronous preparation and prepared start.
 
 AppModel publishes workspace snapshots only after vault gating and revision checks, updates ordinary values synchronously before debounced disk save, and tracks accepted asynchronous secret commits for termination. Per-target tokens invalidate commits after removal/rename/navigation. Run-specific cancellation prevents obsolete work cancelling a newer run. Secret edit buffers use explicit Save/Cancel; navigation discards unsaved secret edits, tabs within the same request retain them.
 

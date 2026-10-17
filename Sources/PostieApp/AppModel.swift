@@ -44,6 +44,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var autosaveErrors: [RequestIdentity: String] = [:]
     @Published private(set) var storageIssues: [StorageIssue] = []
     @Published private(set) var selectedIdentity: RequestIdentity?
+    @Published private(set) var selectedCollectionID: UUID?
     @Published private(set) var showsOngoingRequests = false
     @Published private(set) var now = Date()
     @Published private(set) var startupError: String?
@@ -65,12 +66,12 @@ final class AppModel: ObservableObject {
 
     private enum SecretEditTarget: Hashable {
         case variable(VariableOwner, String)
-        case authentication(RequestIdentity, AuthenticationSecretField)
+        case authentication(VariableOwner, AuthenticationSecretField)
 
         var owner: VariableOwner {
             switch self {
             case let .variable(owner, _): owner
-            case let .authentication(identity, _): .request(identity)
+            case let .authentication(owner, _): owner
             }
         }
     }
@@ -170,16 +171,19 @@ final class AppModel: ObservableObject {
 
     func select(_ identity: RequestIdentity?) {
         selectedIdentity = identity
+        selectedCollectionID = nil
         showsOngoingRequests = false
         showsGlobalVariables = false
     }
 
     func showOngoingRequests() {
+        selectedCollectionID = nil
         showsGlobalVariables = false
         showsOngoingRequests = true
     }
 
     func showRequests() {
+        selectedCollectionID = nil
         showsOngoingRequests = false
         showsGlobalVariables = false
         if selectedIdentity == nil {
@@ -190,11 +194,13 @@ final class AppModel: ObservableObject {
     func openRequest(_ identity: RequestIdentity) {
         guard drafts[identity] != nil, !reconcilingRequests.contains(identity) else { return }
         selectedIdentity = identity
+        selectedCollectionID = nil
         showsOngoingRequests = false
         showsGlobalVariables = false
     }
 
     func showGlobalVariables() {
+        selectedCollectionID = nil
         showsGlobalVariables = true
         showsOngoingRequests = false
     }
@@ -202,6 +208,38 @@ final class AppModel: ObservableObject {
     func showRequestSearch() {
         guard !isTerminating else { return }
         showsRequestSearch = true
+    }
+
+    func showCollection(_ id: UUID) {
+        guard collections.contains(where: { $0.id == id }) else { return }
+        selectedCollectionID = id
+        showsGlobalVariables = false
+        showsOngoingRequests = false
+    }
+
+    func collection(id: UUID) -> RequestCollection? {
+        collections.first { $0.id == id }
+    }
+
+    func updateCollectionHeaders(_ headers: [HTTPField], in id: UUID) {
+        guard canEditVariables(.collection(id)), let index = collections.firstIndex(where: { $0.id == id }) else { return }
+        collections[index].headers = headers
+        markWorkspaceChanged()
+        scheduleVariableSave(.collection(id))
+    }
+
+    func setInheritsCollectionAuthentication(_ inherits: Bool, for identity: RequestIdentity) {
+        updateDraft(identity) { $0.inheritsCollectionAuthentication = inherits }
+    }
+
+    func variableCompletions(for identity: RequestIdentity) -> [VariableCompletion] {
+        let context = variableContext(for: identity)
+        let names = Set(context.global.keys).union(context.collection.keys).union(context.request.keys)
+        return names.sorted().map { name in
+            if let value = context.request[name] { return VariableCompletion(name: name, scope: .request, isSecret: value.isEncrypted) }
+            if let value = context.collection[name] { return VariableCompletion(name: name, scope: .collection, isSecret: value.isEncrypted) }
+            return VariableCompletion(name: name, scope: .global, isSecret: context.global[name]?.isEncrypted ?? false)
+        }
     }
 
     func variables(for owner: VariableOwner) -> VariableValues {
@@ -277,37 +315,99 @@ final class AppModel: ObservableObject {
         discardSecretEdit(.variable(owner, name))
     }
 
-    func setAuthenticationKind(_ kind: AuthenticationKind, for identity: RequestIdentity) {
-        updateDraft(identity) { $0.authentication.kind = kind }
-    }
-
-    func updateAuthenticationUsername(_ username: String, for identity: RequestIdentity) {
-        updateDraft(identity) { $0.authentication.username = username }
-    }
-
-    func setAuthenticationSecret(_ value: String, field: AuthenticationSecretField, for identity: RequestIdentity) async throws {
-        guard canEdit(identity) else { throw ConfigurationEditError.readOnly }
-        try await commitSecret(value, target: .authentication(identity, field)) { [weak self] envelope in
-            guard let self, var draft = self.drafts[identity] else { return }
-            switch field {
-            case .password: draft.authentication.password = envelope
-            case .token: draft.authentication.token = envelope
+    func setVariableSecret(_ isSecret: Bool, named name: String, owner: VariableOwner) async throws {
+        guard canEditVariables(owner) else { throw ConfigurationEditError.readOnly }
+        guard let value = variables(for: owner)[name] else { throw ConfigurationEditError.unavailable }
+        guard value.isEncrypted != isSecret else { return }
+        let vault = secretVault
+        try await commitProtectedValue(target: .variable(owner, name), blocksTerminationOnFailure: false, operation: {
+            switch value {
+            case let .plain(plain): return VariableValue.encrypted(try await vault.encrypt(plain))
+            case let .encrypted(envelope): return VariableValue.plain(try await vault.decrypt(envelope))
             }
-            self.drafts[identity] = draft
-            self.markWorkspaceChanged()
-            self.scheduleAutosave(for: identity)
+        }) { [weak self] converted in
+            self?.updateVariables(owner) { $0[name] = converted }
         }
     }
 
+    func setAuthenticationKind(_ kind: AuthenticationKind, for identity: RequestIdentity) {
+        setAuthenticationKind(kind, owner: .request(identity))
+    }
+
+    func updateAuthenticationUsername(_ username: String, for identity: RequestIdentity) {
+        updateAuthenticationUsername(username, owner: .request(identity))
+    }
+
+    func setAuthenticationSecret(_ value: String, field: AuthenticationSecretField, for identity: RequestIdentity) async throws {
+        try await setAuthenticationSecret(value, field: field, owner: .request(identity))
+    }
+
     func revealAuthenticationSecret(field: AuthenticationSecretField, for identity: RequestIdentity) async throws -> String {
-        guard let authentication = drafts[identity]?.authentication else { throw ConfigurationEditError.unavailable }
-        let envelope = field == .password ? authentication.password : authentication.token
-        guard let envelope else { return "" }
-        return try await secretVault.decrypt(envelope)
+        try await revealAuthenticationSecret(field: field, owner: .request(identity))
     }
 
     func discardAuthenticationSecretEdit(field: AuthenticationSecretField, for identity: RequestIdentity) {
-        discardSecretEdit(.authentication(identity, field))
+        discardAuthenticationSecretEdit(field: field, owner: .request(identity))
+    }
+
+    func authentication(for owner: VariableOwner) -> RequestAuthentication {
+        switch owner {
+        case let .request(identity): drafts[identity]?.authentication ?? .init()
+        case let .collection(id): collection(id: id)?.authentication ?? .init()
+        case .global: .init()
+        }
+    }
+
+    func setAuthenticationKind(_ kind: AuthenticationKind, owner: VariableOwner) {
+        guard canEditVariables(owner) else { return }
+        if case let .request(identity) = owner {
+            setInheritsCollectionAuthentication(false, for: identity)
+        }
+        updateAuthentication(owner) { $0.kind = kind }
+    }
+
+    func updateAuthenticationUsername(_ username: String, owner: VariableOwner) {
+        guard canEditVariables(owner) else { return }
+        updateAuthentication(owner) { $0.username = username }
+    }
+
+    func setAuthenticationSecret(_ value: String, field: AuthenticationSecretField, owner: VariableOwner) async throws {
+        guard owner != .global, canEditVariables(owner) else { throw ConfigurationEditError.readOnly }
+        try await commitSecret(value, target: .authentication(owner, field)) { [weak self] envelope in
+            self?.updateAuthentication(owner) {
+                switch field {
+                case .password: $0.password = envelope
+                case .token: $0.token = envelope
+                }
+            }
+        }
+    }
+
+    func revealAuthenticationSecret(field: AuthenticationSecretField, owner: VariableOwner) async throws -> String {
+        guard owner != .global else { throw ConfigurationEditError.unavailable }
+        let authentication = authentication(for: owner)
+        guard let envelope = field == .password ? authentication.password : authentication.token else { return "" }
+        return try await secretVault.decrypt(envelope)
+    }
+
+    func discardAuthenticationSecretEdit(field: AuthenticationSecretField, owner: VariableOwner) {
+        discardSecretEdit(.authentication(owner, field))
+    }
+
+    private func updateAuthentication(_ owner: VariableOwner, _ update: (inout RequestAuthentication) -> Void) {
+        switch owner {
+        case let .request(identity):
+            guard var draft = drafts[identity] else { return }
+            update(&draft.authentication)
+            drafts[identity] = draft
+            scheduleAutosave(for: identity)
+        case let .collection(id):
+            guard let index = collections.firstIndex(where: { $0.id == id }) else { return }
+            update(&collections[index].authentication)
+            scheduleVariableSave(owner)
+        case .global: return
+        }
+        markWorkspaceChanged()
     }
 
     private func canCommitVariables(_ owner: VariableOwner) -> Bool {
@@ -328,21 +428,35 @@ final class AppModel: ObservableObject {
         target: SecretEditTarget,
         apply: @escaping @MainActor (SecretEnvelope) -> Void
     ) async throws {
+        let vault = secretVault
+        try await commitProtectedValue(target: target, operation: {
+            let envelope = try await vault.encrypt(value)
+            await vault.setAllowsKeyCreation(false)
+            return envelope
+        }, apply: apply)
+    }
+
+    private func commitProtectedValue<Value: Sendable>(
+        target: SecretEditTarget,
+        blocksTerminationOnFailure: Bool = true,
+        operation: @escaping @Sendable () async throws -> Value,
+        apply: @escaping @MainActor (Value) -> Void
+    ) async throws {
         let token = UUID()
         secretEditTokens[target] = token
         let task = Task { @MainActor [self] () -> Result<Void, Error> in
             do {
-                let envelope = try await secretVault.encrypt(value)
+                let value = try await operation()
                 await secretVault.setAllowsKeyCreation(false)
                 guard secretEditTokens[target] == token, canCommitVariables(target.owner) else {
                     return .failure(CancellationError())
                 }
-                apply(envelope)
+                apply(value)
                 secretCommitErrors.removeValue(forKey: target)
                 refreshVariableError(target.owner)
                 return .success(())
             } catch {
-                if secretEditTokens[target] == token && canCommitVariables(target.owner) {
+                if blocksTerminationOnFailure && secretEditTokens[target] == token && canCommitVariables(target.owner) {
                     secretCommitErrors[target] = error.localizedDescription
                     refreshVariableError(target.owner)
                 }
@@ -596,6 +710,9 @@ final class AppModel: ObservableObject {
 
         let token = UUID()
         let context = variableContext(for: identity)
+        let collectionDefaults = collection(for: identity).map {
+            CollectionRequestDefaults(headers: $0.headers, authentication: $0.authentication)
+        } ?? CollectionRequestDefaults()
         let secretVault = secretVault
         activeRuns[identity] = ActiveRun(
             token: token,
@@ -612,7 +729,7 @@ final class AppModel: ObservableObject {
 
         preparationTasks[identity] = Task { [weak self] in
             do {
-                let prepared = try await RequestPreparer.prepare(configuration, context: context, decryptor: secretVault)
+                let prepared = try await RequestPreparer.prepare(configuration, context: context, decryptor: secretVault, collection: collectionDefaults)
                 try Task.checkCancellation()
                 guard let self, self.activeRuns[identity]?.token == token else { return }
                 guard self.canEdit(identity), self.activeRuns[identity]?.cancelRequested == false else {
@@ -815,11 +932,13 @@ final class AppModel: ObservableObject {
                 }
                 guard revision == workspaceRevision else { continue }
 
-                let retainedVariables = Dictionary(uniqueKeysWithValues: collections.map { ($0.id, $0.variables) })
+                let retainedCollections = Dictionary(uniqueKeysWithValues: collections.map { ($0.id, $0) })
                 let nextCollections = sorted(loaded.collections.map { collection in
                     var collection = collection
-                    if dirtyVariableOwners.contains(.collection(collection.id)), let values = retainedVariables[collection.id] {
-                        collection.variables = values
+                    if dirtyVariableOwners.contains(.collection(collection.id)), let retained = retainedCollections[collection.id] {
+                        collection.variables = retained.variables
+                        collection.headers = retained.headers
+                        collection.authentication = retained.authentication
                     }
                     return collection
                 })
@@ -830,8 +949,8 @@ final class AppModel: ObservableObject {
                 }
                 let hasCiphertext = nextGlobals.values.contains(where: \.isEncrypted) ||
                     loaded.globalVariables.values.contains(where: \.isEncrypted) ||
-                    nextCollections.contains { $0.variables.values.contains(where: \.isEncrypted) } ||
-                    loaded.collections.contains { $0.variables.values.contains(where: \.isEncrypted) } ||
+                    nextCollections.contains(where: Self.containsCiphertext) ||
+                    loaded.collections.contains(where: Self.containsCiphertext) ||
                     available.values.contains(where: Self.containsCiphertext) ||
                     nextDrafts.values.contains(where: Self.containsCiphertext)
                 await secretVault.setAllowsKeyCreation(!hasCiphertext && loaded.issues.isEmpty &&
@@ -845,6 +964,9 @@ final class AppModel: ObservableObject {
                     removeLocalRequestState(for: identity)
                 }
                 collections = nextCollections
+                if let selectedCollectionID, !nextCollections.contains(where: { $0.id == selectedCollectionID }) {
+                    self.selectedCollectionID = nil
+                }
                 globalVariables = nextGlobals
                 globalVariablesAreReadOnly = loaded.globalVariablesAreReadOnly
                 storageIssues = loaded.issues
@@ -913,6 +1035,11 @@ final class AppModel: ObservableObject {
             request.authentication.password != nil || request.authentication.token != nil
     }
 
+    private static func containsCiphertext(_ collection: RequestCollection) -> Bool {
+        collection.variables.values.contains(where: \.isEncrypted) ||
+            collection.authentication.password != nil || collection.authentication.token != nil
+    }
+
     private func scheduleVariableSave(_ owner: VariableOwner) {
         dirtyVariableOwners.insert(owner)
         variableVersions[owner, default: 0] &+= 1
@@ -933,13 +1060,19 @@ final class AppModel: ObservableObject {
 
     private func enqueueVariableSave(_ values: VariableValues, owner: VariableOwner, version: UInt64) {
         guard let store else { return }
+        let defaults: CollectionRequestDefaults?
+        if case let .collection(id) = owner, let collection = collection(id: id) {
+            defaults = CollectionRequestDefaults(headers: collection.headers, authentication: collection.authentication)
+        } else { defaults = nil }
         let previous = variableSaveChains[owner]
         variableSaveChains[owner] = Task { [weak self] in
             await previous?.value
             do {
                 switch owner {
                 case .global: try await store.saveGlobalVariables(values)
-                case let .collection(id): try await store.saveCollectionVariables(values, in: id)
+                case let .collection(id):
+                    guard let defaults else { return }
+                    try await store.saveCollectionConfiguration(defaults, variables: values, in: id)
                 case .request: return
                 }
                 guard let self, self.variableVersions[owner] == version else { return }
@@ -1138,6 +1271,7 @@ final class AppModel: ObservableObject {
                 removeLocalRequestState(for: identity)
             }
             collections.removeAll { $0.id == id }
+            if selectedCollectionID == id { selectedCollectionID = nil }
             removeVariableOwnerState(.collection(id))
             if selectedIdentity?.collectionID == id {
                 selectFirstRequest()
@@ -1152,6 +1286,7 @@ final class AppModel: ObservableObject {
         guard let store, collections.contains(where: { $0.id == collectionID && !$0.isReadOnly }) else { return }
         var request = HTTPRequestConfiguration()
         request.name = name
+        request.inheritsCollectionAuthentication = true
 
         do {
             try await store.createRequest(request, in: collectionID)

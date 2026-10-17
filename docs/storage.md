@@ -22,6 +22,8 @@ Collection and request IDs are UUIDs. A collection's directory name and a reques
 
 `globals.json` contains its format version and global variables. Each `collection.json` contains its format version, display name, collection variables, and an ordered `requests` array of request IDs. Each request file contains its format version, display name, method, URL, ordered query/header/path entries, body, authentication configuration, and request variables. Variable maps encode ordinary values as strings and secrets as `{ "version": 1, "combined": "Base64 sealed box" }`. Auth contains kind/username and optional encrypted password/token envelopes. Only the application key is in Keychain. See encryption.md.
 
+Collection settings add ordered `headers` and `authentication` fields, defaulting to empty/None when absent. Request `inheritsCollectionAuthentication` defaultsfalse when reading older files; AppModel explicitly sets it true for newly created requests. Existing explicit auth does not silently change. Collection variables/headers/auth save together in one atomic metadata replacement, preserving current name/index and unrelated metadata. See collection-settings.md for override and disabled-row suppression rules.
+
 Absent additive request/collection variable/auth fields default empty/None. Malformed globals load read-only with an issue while unrelated collections remain usable; malformed collection variables make that collection read-only. Owned maps replace deleted/renamed keys rather than recursively resurrecting them. Unrelated unknown metadata is preserved. Marking a variable secret seals it before updating the model and atomically replaces its plaintext representation at save.
 
 Illustrative collection metadata:

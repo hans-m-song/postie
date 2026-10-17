@@ -40,4 +40,6 @@ Implementation stays within native SwiftUI/AppKit. No external search service or
 
 ## Ongoing requests navigation
 
+Collection navigation: click its name to open the collection Variables/Headers/Auth page, use the disclosure arrow to expand/collapse requests, and right-click for settings/new request/rename/delete actions. There is no collection ellipsis control. Selecting a request or a search result leaves collection settings and opens that exact request without sending.
+
 A separate Ongoing Requests view lists active runs across collections with Cancel and Open Request actions; see execution.md. Opening a configuration does not create a new run. The command palette remains request search, not a duplicate activity log. User requested visual concepts for these views on 2026-10-17; mockups are proposals, not accepted UI or implemented functionality.

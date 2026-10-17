@@ -11,6 +11,7 @@ A lightweight native macOS HTTP client for personal use. Make requests, save the
 - HTTP and HTTPS requests: method, URL, ordered query parameters and headers, literal :name path-segment parameters, text and JSON bodies.
 - Flat collections containing named requests; create, rename, duplicate requests, and delete.
 - Global, collection, and request variables. Precedence: request overrides collection, which overrides global.
+- Collection settings page for Variables/Headers/Auth, opened from the collection name or right-click menu. Shared headers use request overrides/disabled-row suppression; new requests inherit collection auth, existing explicit auth is preserved. Current follow-up verification: collection-settings.md.
 - Literal `{{variable}}` substitution in URLs, query values, header values, authentication fields, and text bodies. Values are not recursively expanded. Missing references prevent sending and cURL copying.
 - None, Basic, and Bearer authentication.
 - Response status, elapsed time, headers, raw body, and formatted JSON where valid.

@@ -6,6 +6,12 @@ This document records the approved high-level breakdown. User agreed on 2026-10-
 
 ## Shared task contract
 
+## Approved collection settings follow-up — complete locally
+
+T-52 Collection Variables/Headers/Auth page and shared defaults; T-53 variable tables/trailing rows/reversible Secret checkbox; T-54 URL variable autocomplete; T-55 collection context menu without overflow icon and tighter request-method inset. Authorised2026-10-17. Inheritance, compatibility, ownership and acceptance: collection-settings.md. Depends on M3/M4. No M5 expansion.
+
+Verified2026-10-17: independent82 functional tests, release build, source reviews and isolated native collection/table/completion/inheritance/secret/restart checks passed. Existing request auth remains explicit; new requests inherit. Review repairs and residual limits are recorded in collection-settings.md. Local check-in only; no push.
+
 ## T-50 — Table alignment and input typography (complete locally)
 
 Align query/header headings, saved rows and trailing entry rows using matching rail widths/padding. Use monospace for method, URL, parameter/header names and values, and numeric settings inputs. Preserve focus/promotion and current storage behavior. Bounded presentation-only change; release build and isolated native visual/editing check, no new automated tests. Main owns verification/docs; table_alignment_typography owns RequestEditorView.swift.

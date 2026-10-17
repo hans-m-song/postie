@@ -290,6 +290,86 @@ final class PreparationTests: XCTestCase {
         }
     }
 
+    func testCollectionHeadersUseScopePrecedenceAndSuppressInheritedNamesCaseInsensitively() async throws {
+        let configuration = HTTPRequestConfiguration(
+            url: "https://example.test",
+            headers: [
+                HTTPField(name: "X-Override", value: "first"),
+                HTTPField(name: "x-override", value: "second"),
+                HTTPField(name: "x-disabled", value: "unused", isEnabled: false)
+            ]
+        )
+        let collection = CollectionRequestDefaults(headers: [
+            HTTPField(name: "X-Override", value: "inherited"),
+            HTTPField(name: "X-Collection", value: "{{winner}}"),
+            HTTPField(name: "X-Disabled", value: "must be suppressed")
+        ])
+        let context = VariableContext(
+            global: ["winner": .plain("global")],
+            collection: ["winner": .plain("collection")],
+            request: ["winner": .plain("request")]
+        )
+
+        let prepared = try await RequestPreparer.prepare(configuration, context: context, decryptor: nil, collection: collection)
+
+        XCTAssertEqual(headerValue("X-Override", in: prepared.request), "first,second")
+        XCTAssertEqual(headerValue("X-Collection", in: prepared.request), "request")
+        XCTAssertNil(headerValue("X-Disabled", in: prepared.request))
+    }
+
+    func testDisabledRequestNameSuppressesInheritedSecretWithoutResolvingEitherValue() async throws {
+        let configuration = HTTPRequestConfiguration(
+            url: "https://example.test",
+            headers: [HTTPField(name: "{{suppressedName}}", value: "{{missingDisabledValue}}", isEnabled: false)]
+        )
+        let collection = CollectionRequestDefaults(headers: [
+            HTTPField(name: "X-Private", value: "{{collectionSecret}}")
+        ])
+        let context = VariableContext(
+            collection: ["collectionSecret": .encrypted(SecretEnvelope(combined: "inactive-collection-header"))],
+            request: ["suppressedName": .plain("x-private")]
+        )
+        let decryptor = FakeDecryptor(values: [:])
+
+        let prepared = try await RequestPreparer.prepare(configuration, context: context, decryptor: decryptor, collection: collection)
+        let decryptedEnvelopes = await decryptor.requestedEnvelopes()
+
+        XCTAssertNil(headerValue("X-Private", in: prepared.request))
+        XCTAssertTrue(decryptedEnvelopes.isEmpty)
+        XCTAssertNil(prepared.referencedInputs["missingDisabledValue"])
+    }
+
+    func testCollectionAuthenticationInheritanceUsesOnlyTheSelectedCredential() async throws {
+        let requestToken = SecretEnvelope(combined: "request-token")
+        let collectionToken = SecretEnvelope(combined: "collection-token")
+        let configuration = HTTPRequestConfiguration(
+            url: "https://example.test",
+            authentication: RequestAuthentication(kind: .bearer, token: requestToken),
+            inheritsCollectionAuthentication: true
+        )
+        let defaults = CollectionRequestDefaults(
+            authentication: RequestAuthentication(kind: .bearer, token: collectionToken)
+        )
+        let collectionDecryptor = FakeDecryptor(values: [collectionToken.combined: "collection-secret"])
+
+        let inherited = try await RequestPreparer.prepare(configuration, context: VariableContext(), decryptor: collectionDecryptor, collection: defaults)
+        let inheritedEnvelopes = await collectionDecryptor.requestedEnvelopes()
+
+        XCTAssertEqual(headerValue("Authorization", in: inherited.request), "Bearer collection-secret")
+        XCTAssertEqual(Set(inheritedEnvelopes), Set([collectionToken.combined]))
+        XCTAssertEqual(inherited.configuration, configuration)
+        XCTAssertThrowsError(try RequestPreparer.prepare(configuration))
+
+        var explicitConfiguration = configuration
+        explicitConfiguration.inheritsCollectionAuthentication = false
+        let requestDecryptor = FakeDecryptor(values: [requestToken.combined: "request-secret"])
+        let explicit = try await RequestPreparer.prepare(explicitConfiguration, context: VariableContext(), decryptor: requestDecryptor, collection: defaults)
+        let explicitEnvelopes = await requestDecryptor.requestedEnvelopes()
+
+        XCTAssertEqual(headerValue("Authorization", in: explicit.request), "Bearer request-secret")
+        XCTAssertEqual(Set(explicitEnvelopes), Set([requestToken.combined]))
+    }
+
     private func headerValue(_ name: String, in request: URLRequest) -> String? {
         request.allHTTPHeaderFields?.first { $0.key.caseInsensitiveCompare(name) == .orderedSame }?.value
     }

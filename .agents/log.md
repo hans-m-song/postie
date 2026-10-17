@@ -1,5 +1,14 @@
 # Decision log
 
+## 2026-10-17 — T-52–T-55 collection settings follow-up completed locally
+
+- User approved collection page, shared headers/auth, reversible variable table, URL autocomplete and tighter request-method inset; additionally requested collection context-menu actions with no ellipsis. Name opens settings; arrow expands/collapses requests.
+- Collection JSON atomically stores headers/auth/variables, preserving membership/name/unknown fields. Header names resolve before case-insensitive request override; disabled request rows suppress inherited names without resolving unused values. Existing auth stays explicit; new requests inherit. Effective scope remains request > collection > global.
+- Secret conversion updates the model only after encrypt/decrypt succeeds. Conversion failure preserves old value/type without blocking Quit; explicit secret Save failures require retry/discard. Independent review found stale failed-save targets after rename/retry/plain promotion; centralized exact-owner/name discard repaired these paths. Trailing rows share structural identity and preserve native focus.
+- Autocomplete uses metadata only and native text editing/undo. Repaired replacement ranges so following paths/templates survive. Matcher work/results bounded; effective metadata construction still scales with configured names. No dynamic variables added.
+- Independent final82 functional tests passed (Core58/App24), zero failures. Release build passed. Final source review found no substantiated blocker; repository audit found no scope expansion. Native synthetic collection/table/completion/inheritance/checkbox/Bearer/restart checks passed. See docs/collection-settings.md for evidence and limits.
+- Only new synthetic Keychain service/data used; app and fixture closed. Keep commit local; no push. M5/cURL/snapshots/log/sync remain deferred.
+
 ## 2026-10-17 — T-50 table alignment and typography
 
 - User reported misaligned header columns and requested monospaced inputs. Matched query/header heading/row horizontalpadding8pt and checkbox/placeholder rails26pt, with equal flexible column constraints. Path headings match their row constraints.

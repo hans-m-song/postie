@@ -73,6 +73,8 @@ final class StoreTests: XCTestCase {
         let metadataURL = collectionURL(root, collectionID).appendingPathComponent("collection.json")
         var metadata = try readObject(at: metadataURL)
         metadata.removeValue(forKey: "variables")
+        metadata.removeValue(forKey: "headers")
+        metadata.removeValue(forKey: "authentication")
         try writeObject(metadata, to: metadataURL)
         let index = metadata["requests"] as! [String]
         let requestID = try XCTUnwrap(UUID(uuidString: try XCTUnwrap(index.first)))
@@ -81,6 +83,7 @@ final class StoreTests: XCTestCase {
         stored.removeValue(forKey: "pathParameters")
         stored.removeValue(forKey: "variables")
         stored.removeValue(forKey: "authentication")
+        stored.removeValue(forKey: "inheritsCollectionAuthentication")
         stored["futureRequestData"] = ["retained": ["value": 42]]
         try writeObject(stored, to: storedURL)
 
@@ -91,16 +94,23 @@ final class StoreTests: XCTestCase {
         XCTAssertTrue(request.pathParameters.isEmpty)
         XCTAssertTrue(request.variables.isEmpty)
         XCTAssertEqual(request.authentication, RequestAuthentication())
+        XCTAssertFalse(request.inheritsCollectionAuthentication)
         XCTAssertTrue(collection.variables.isEmpty)
+        XCTAssertTrue(collection.headers.isEmpty)
+        XCTAssertEqual(collection.authentication, RequestAuthentication())
 
         request.name = "Saved after loading old data"
+        request.inheritsCollectionAuthentication = true
         try await store.saveRequest(request, in: collectionID)
 
         let updated = try readObject(at: storedURL)
         XCTAssertEqual((updated["pathParameters"] as? [Any])?.count, 0)
+        XCTAssertEqual(updated["inheritsCollectionAuthentication"] as? Bool, true)
         let futureData = try XCTUnwrap(updated["futureRequestData"] as? [String: Any])
         let nestedFutureData = try XCTUnwrap(futureData["retained"] as? [String: Any])
         XCTAssertEqual(nestedFutureData["value"] as? Int, 42)
+        let reloaded = try await store.load()
+        XCTAssertTrue(reloaded.collections.first?.requests.first?.inheritsCollectionAuthentication ?? false)
     }
 
     func testVariableScopesAndEncryptedAuthenticationRoundTripWithoutPlaintextAfterConversion() async throws {
@@ -254,6 +264,112 @@ final class StoreTests: XCTestCase {
         XCTAssertEqual((authentication["password"] as? [String: Any])?["futureEnvelopeData"] as? [String: Bool], ["retained": true])
         XCTAssertEqual((authentication["futureAuthData"] as? [String: Bool])?["retained"], true)
         XCTAssertFalse(try String(contentsOf: storedRequestURL, encoding: .utf8).contains("synthetic obsolete token"))
+    }
+
+    func testCollectionConfigurationRoundTripsAndMergesOwnedSettingsAtomically() async throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let collectionID = try await createWorkspace(at: root, requestCount: 1)
+        let store = try CollectionStore(rootURL: root)
+        let headerID = UUID()
+        let originalDefaults = CollectionRequestDefaults(
+            headers: [HTTPField(id: headerID, name: "X-Shared", value: "original")],
+            authentication: RequestAuthentication(
+                kind: .basic,
+                username: "collection user",
+                password: SecretEnvelope(combined: "synthetic collection auth ciphertext")
+            )
+        )
+        try await store.saveCollectionConfiguration(
+            originalDefaults,
+            variables: ["oldVariable": .plain("old"), "keptVariable": .encrypted(SecretEnvelope(combined: "synthetic collection variable ciphertext"))],
+            in: collectionID
+        )
+
+        let metadataURL = collectionURL(root, collectionID).appendingPathComponent("collection.json")
+        var metadata = try readObject(at: metadataURL)
+        metadata["futureCollectionData"] = ["retained": true]
+        var headers = try XCTUnwrap(metadata["headers"] as? [[String: Any]])
+        headers[0]["futureHeaderData"] = ["retained": true]
+        metadata["headers"] = headers
+        var authentication = try XCTUnwrap(metadata["authentication"] as? [String: Any])
+        authentication["futureAuthData"] = ["retained": true]
+        var password = try XCTUnwrap(authentication["password"] as? [String: Any])
+        password["futureEnvelopeData"] = ["retained": true]
+        authentication["password"] = password
+        metadata["authentication"] = authentication
+        try writeObject(metadata, to: metadataURL)
+
+        try await store.saveCollectionVariables(["afterVariablesOnlySave": .plain("retained settings")], in: collectionID)
+        let afterVariablesOnlySave = try await store.load()
+        let unchangedCollection = try XCTUnwrap(afterVariablesOnlySave.collections.first { $0.id == collectionID })
+        XCTAssertEqual(unchangedCollection.headers, originalDefaults.headers)
+        XCTAssertEqual(unchangedCollection.authentication, originalDefaults.authentication)
+
+        let updatedDefaults = CollectionRequestDefaults(
+            headers: [
+                HTTPField(id: headerID, name: "X-Shared", value: "updated"),
+                HTTPField(name: "X-New", value: "new")
+            ],
+            authentication: RequestAuthentication(
+                kind: .basic,
+                username: "updated user",
+                password: SecretEnvelope(combined: "synthetic updated collection auth ciphertext")
+            )
+        )
+        try await store.saveCollectionConfiguration(updatedDefaults, variables: ["newVariable": .plain("new")], in: collectionID)
+
+        let reloadedWorkspace = try await store.load()
+        let reloaded = try XCTUnwrap(reloadedWorkspace.collections.first { $0.id == collectionID })
+        XCTAssertEqual(reloaded.headers, updatedDefaults.headers)
+        XCTAssertEqual(reloaded.authentication, updatedDefaults.authentication)
+        XCTAssertEqual(reloaded.variables, ["newVariable": .plain("new")])
+
+        metadata = try readObject(at: metadataURL)
+        XCTAssertEqual((metadata["futureCollectionData"] as? [String: Bool])?["retained"], true)
+        headers = try XCTUnwrap(metadata["headers"] as? [[String: Any]])
+        XCTAssertEqual(headers.count, 2)
+        XCTAssertEqual((headers[0]["futureHeaderData"] as? [String: Bool])?["retained"], true)
+        authentication = try XCTUnwrap(metadata["authentication"] as? [String: Any])
+        XCTAssertEqual((authentication["futureAuthData"] as? [String: Bool])?["retained"], true)
+        password = try XCTUnwrap(authentication["password"] as? [String: Any])
+        XCTAssertEqual(password["combined"] as? String, "synthetic updated collection auth ciphertext")
+        XCTAssertEqual((password["futureEnvelopeData"] as? [String: Bool])?["retained"], true)
+        let variables = try XCTUnwrap(metadata["variables"] as? [String: Any])
+        XCTAssertNil(variables["oldVariable"])
+        XCTAssertNil(variables["afterVariablesOnlySave"])
+        XCTAssertNotNil(variables["newVariable"])
+    }
+
+    func testMalformedCollectionSettingsAreReadOnlyAndPreserved() async throws {
+        let malformedSettings: [[String: Any]] = [
+            ["headers": ["malformed"]],
+            ["authentication": ["kind": "invalid", "username": ""]]
+        ]
+
+        for malformedSetting in malformedSettings {
+            let root = try makeRoot()
+            defer { try? FileManager.default.removeItem(at: root) }
+            let collectionID = try await createWorkspace(at: root, requestCount: 1)
+            let metadataURL = collectionURL(root, collectionID).appendingPathComponent("collection.json")
+            var metadata = try readObject(at: metadataURL)
+            for (key, value) in malformedSetting {
+                metadata[key] = value
+            }
+            try writeObject(metadata, to: metadataURL)
+            let before = try Data(contentsOf: metadataURL)
+
+            let store = try CollectionStore(rootURL: root)
+            let loaded = try await store.load()
+            XCTAssertEqual(loaded.collections.first?.isReadOnly, true)
+            XCTAssertTrue(loaded.issues.contains { $0.id.hasPrefix("store:collection-settings-malformed:") })
+            do {
+                try await store.saveCollectionConfiguration(.init(), variables: [:], in: collectionID)
+                XCTFail("Malformed collection settings must not be overwritten.")
+            } catch CollectionStoreError.collectionIsReadOnly {
+            }
+            XCTAssertEqual(try Data(contentsOf: metadataURL), before)
+        }
     }
 
     func testUnreadableGlobalsAreReadOnlyWithoutBlockingCollections() async throws {

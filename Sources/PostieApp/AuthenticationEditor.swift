@@ -3,27 +3,53 @@ import PostieCore
 
 struct AuthenticationEditor: View {
     @EnvironmentObject private var model: AppModel
-    let identity: RequestIdentity
+    let owner: VariableOwner
     @State private var isEditingPassword = false
     @State private var isEditingToken = false
     @State private var isPasswordBusy = false
     @State private var isTokenBusy = false
 
     private var authentication: RequestAuthentication {
-        model.request(for: identity)?.authentication ?? RequestAuthentication()
+        model.authentication(for: owner)
+    }
+
+    init(identity: RequestIdentity) { owner = .request(identity) }
+    init(collectionID: UUID) { owner = .collection(collectionID) }
+
+    private enum Choice: String, Hashable {
+        case inherit, none, basic, bearer
+    }
+
+    private var requestIdentity: RequestIdentity? {
+        if case let .request(identity) = owner { return identity }
+        return nil
+    }
+
+    private var inherits: Bool {
+        requestIdentity.flatMap { model.request(for: $0)?.inheritsCollectionAuthentication } ?? false
     }
 
     private var availableVariables: Set<String> {
-        let context = model.variableContext(for: identity)
-        return Set(context.global.keys)
-            .union(context.collection.keys)
-            .union(context.request.keys)
+        switch owner {
+        case let .request(identity):
+            let context = model.variableContext(for: identity)
+            return Set(context.global.keys).union(context.collection.keys).union(context.request.keys)
+        case let .collection(id):
+            return Set(model.globalVariables.keys).union(model.variables(for: .collection(id)).keys)
+        case .global: return []
+        }
     }
 
-    private var kindBinding: Binding<AuthenticationKind> {
+    private var kindBinding: Binding<Choice> {
         Binding(
-            get: { authentication.kind },
-            set: { model.setAuthenticationKind($0, for: identity) }
+            get: { inherits ? .inherit : Choice(rawValue: authentication.kind.rawValue) ?? .none },
+            set: { choice in
+                if let requestIdentity {
+                    model.setInheritsCollectionAuthentication(choice == .inherit, for: requestIdentity)
+                }
+                guard let kind = AuthenticationKind(rawValue: choice.rawValue) else { return }
+                model.setAuthenticationKind(kind, owner: owner)
+            }
         )
     }
 
@@ -34,32 +60,44 @@ struct AuthenticationEditor: View {
                     .font(.headline)
 
                 Picker("Authentication", selection: kindBinding) {
-                    Text("None").tag(AuthenticationKind.none)
-                    Text("Basic").tag(AuthenticationKind.basic)
-                    Text("Bearer").tag(AuthenticationKind.bearer)
+                    if requestIdentity != nil { Text("Inherit").tag(Choice.inherit) }
+                    Text("None").tag(Choice.none)
+                    Text("Basic").tag(Choice.basic)
+                    Text("Bearer").tag(Choice.bearer)
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
-                .disabled(!model.canEdit(identity) || activeSecretIsEditing || activeSecretIsBusy)
+                .disabled(!model.canEditVariables(owner) || activeSecretIsEditing || activeSecretIsBusy)
             }
 
-            switch authentication.kind {
-            case .none:
-                Label("Manual Authorization headers remain available in Request.", systemImage: "info.circle")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            case .basic:
-                basicFields
-            case .bearer:
-                AuthenticationSecretEditor(
-                    identity: identity,
-                    field: .token,
-                    title: "Bearer token",
-                    availableVariables: availableVariables,
-                    isEditing: $isEditingToken,
-                    isBusy: $isTokenBusy
-                )
+            if inherits {
+                Label("Uses collection authentication, resolved with this request’s variables.", systemImage: "arrow.turn.down.right")
+                    .font(.callout).foregroundStyle(.secondary)
+                if let requestIdentity {
+                    Button("Edit collection authentication") { model.showCollection(requestIdentity.collectionID) }
+                }
+            } else {
+                authenticationFields
             }
+        }
+        .onDisappear {
+            model.discardAuthenticationSecretEdit(field: .password, owner: owner)
+            model.discardAuthenticationSecretEdit(field: .token, owner: owner)
+        }
+    }
+
+    @ViewBuilder
+    private var authenticationFields: some View {
+        switch authentication.kind {
+        case .none:
+            Label("Authorization headers can be configured in Headers.", systemImage: "info.circle")
+                .font(.callout).foregroundStyle(.secondary)
+        case .basic:
+            basicFields
+        case .bearer:
+            AuthenticationSecretEditor(owner: owner, field: .token, title: "Bearer token",
+                                       availableVariables: availableVariables,
+                                       isEditing: $isEditingToken, isBusy: $isTokenBusy)
         }
     }
 
@@ -74,11 +112,11 @@ struct AuthenticationEditor: View {
                     availableVariables: availableVariables
                 )
                 .font(.system(.body, design: .monospaced))
-                .disabled(!model.canEdit(identity))
+                .disabled(!model.canEditVariables(owner))
             }
 
             AuthenticationSecretEditor(
-                identity: identity,
+                owner: owner,
                 field: .password,
                 title: "Password",
                 availableVariables: availableVariables,
@@ -91,7 +129,7 @@ struct AuthenticationEditor: View {
     private var usernameBinding: Binding<String> {
         Binding(
             get: { authentication.username },
-            set: { model.updateAuthenticationUsername($0, for: identity) }
+            set: { model.updateAuthenticationUsername($0, owner: owner) }
         )
     }
 
@@ -120,7 +158,7 @@ struct AuthenticationEditor: View {
 
 private struct AuthenticationSecretEditor: View {
     @EnvironmentObject private var model: AppModel
-    let identity: RequestIdentity
+    let owner: VariableOwner
     let field: AuthenticationSecretField
     let title: String
     let availableVariables: Set<String>
@@ -132,12 +170,12 @@ private struct AuthenticationSecretEditor: View {
     @State private var errorMessage: String?
 
     private var hasSavedSecret: Bool {
-        let authentication = model.request(for: identity)?.authentication
+        let authentication = model.authentication(for: owner)
         switch field {
         case .password:
-            return authentication?.password != nil
+            return authentication.password != nil
         case .token:
-            return authentication?.token != nil
+            return authentication.token != nil
         }
     }
 
@@ -150,7 +188,7 @@ private struct AuthenticationSecretEditor: View {
                 secretInput
                     .disabled(isBusy)
 
-                Text("Secret changes are saved with Save. Leaving this request discards unsaved secret edits.")
+                Text("Secret changes are saved with Save. Leaving this editor discards unsaved secret edits.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
@@ -183,16 +221,16 @@ private struct AuthenticationSecretEditor: View {
                         Button("Reveal & edit") {
                             revealSavedSecret()
                         }
-                        .disabled(isBusy || !model.canEdit(identity))
+                        .disabled(isBusy || !model.canEditVariables(owner))
                         Button("Replace") {
                             beginReplacement()
                         }
-                        .disabled(isBusy || !model.canEdit(identity))
+                        .disabled(isBusy || !model.canEditVariables(owner))
                     } else {
                         Button("Set secret") {
                             beginReplacement()
                         }
-                        .disabled(isBusy || !model.canEdit(identity))
+                        .disabled(isBusy || !model.canEditVariables(owner))
                     }
                 }
             }
@@ -252,7 +290,7 @@ private struct AuthenticationSecretEditor: View {
 
         Task {
             do {
-                secretDraft = try await model.revealAuthenticationSecret(field: field, for: identity)
+                secretDraft = try await model.revealAuthenticationSecret(field: field, owner: owner)
                 isRevealed = true
                 isEditing = true
             } catch {
@@ -269,7 +307,7 @@ private struct AuthenticationSecretEditor: View {
 
         Task {
             do {
-                try await model.setAuthenticationSecret(secretDraft, field: field, for: identity)
+                try await model.setAuthenticationSecret(secretDraft, field: field, owner: owner)
                 secretDraft = ""
                 isRevealed = false
                 isEditing = false
@@ -281,7 +319,7 @@ private struct AuthenticationSecretEditor: View {
     }
 
     private func cancel() {
-        model.discardAuthenticationSecretEdit(field: field, for: identity)
+        model.discardAuthenticationSecretEdit(field: field, owner: owner)
         secretDraft = ""
         isRevealed = false
         isEditing = false

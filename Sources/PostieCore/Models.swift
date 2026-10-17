@@ -52,6 +52,7 @@ public struct HTTPRequestConfiguration: Identifiable, Codable, Equatable, Sendab
     public var options: HTTPOptions
     public var variables: VariableValues
     public var authentication: RequestAuthentication
+    public var inheritsCollectionAuthentication: Bool
 
     public init(
         id: UUID = UUID(),
@@ -66,7 +67,8 @@ public struct HTTPRequestConfiguration: Identifiable, Codable, Equatable, Sendab
         bodySyntax: BodySyntax = .none,
         options: HTTPOptions = HTTPOptions(),
         variables: VariableValues = [:],
-        authentication: RequestAuthentication = RequestAuthentication()
+        authentication: RequestAuthentication = RequestAuthentication(),
+        inheritsCollectionAuthentication: Bool = false
     ) {
         self.id = id
         self.name = name
@@ -81,6 +83,7 @@ public struct HTTPRequestConfiguration: Identifiable, Codable, Equatable, Sendab
         self.options = options
         self.variables = variables
         self.authentication = authentication
+        self.inheritsCollectionAuthentication = inheritsCollectionAuthentication
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -97,6 +100,7 @@ public struct HTTPRequestConfiguration: Identifiable, Codable, Equatable, Sendab
         case options
         case variables
         case authentication
+        case inheritsCollectionAuthentication
     }
 
     public init(from decoder: Decoder) throws {
@@ -114,6 +118,7 @@ public struct HTTPRequestConfiguration: Identifiable, Codable, Equatable, Sendab
         options = try container.decode(HTTPOptions.self, forKey: .options)
         variables = try container.decodeIfPresent(VariableValues.self, forKey: .variables) ?? [:]
         authentication = try container.decodeIfPresent(RequestAuthentication.self, forKey: .authentication) ?? RequestAuthentication()
+        inheritsCollectionAuthentication = try container.decodeIfPresent(Bool.self, forKey: .inheritsCollectionAuthentication) ?? false
     }
 }
 
@@ -133,13 +138,25 @@ public struct RequestCollection: Identifiable, Equatable, Sendable {
     public var requests: [HTTPRequestConfiguration]
     public var isReadOnly: Bool
     public var variables: VariableValues
+    public var headers: [HTTPField]
+    public var authentication: RequestAuthentication
 
-    public init(id: UUID = UUID(), name: String, requests: [HTTPRequestConfiguration] = [], isReadOnly: Bool = false, variables: VariableValues = [:]) {
+    public init(
+        id: UUID = UUID(),
+        name: String,
+        requests: [HTTPRequestConfiguration] = [],
+        isReadOnly: Bool = false,
+        variables: VariableValues = [:],
+        headers: [HTTPField] = [],
+        authentication: RequestAuthentication = .init()
+    ) {
         self.id = id
         self.name = name
         self.requests = requests
         self.isReadOnly = isReadOnly
         self.variables = variables
+        self.headers = headers
+        self.authentication = authentication
     }
 }
 
