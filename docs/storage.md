@@ -71,3 +71,7 @@ T-29 verifies ordering, stable identities across renames, duplicate display name
 ## Saved JSON formatting
 
 Configuration JSON is pretty-printed with sorted keys on write. Existing compact files are reformatted on their next ordinary save; no bulk rewrite is performed.
+
+## Appearance preference
+
+Settings → Appearance offers System, Light and Dark. System is the default. The theme applies immediately and is stored as the app-local `appTheme` UserDefaults preference across launches, independently of workspace HTTP settings.

@@ -222,3 +222,18 @@ T82 captures header origin during preparation and propagates it per observed hop
 - Added read-only inherited type/public fields and masked derived header with explicit Reveal/Hide; request-scoped variable context, existing preview guards and local reveal reset on scope changes retained.
 - Verified release build, 173 existing functional tests, strict signature/diff checks and isolated native 335-point summary/destination/Back navigation. Synthetic malformed envelope reveal fails safely; no real Keychain credential or user workspace accessed. Successful credential reveal not exercised natively.
 - Changes remain local and uncommitted. Selected parameter polish, Copy as cURL and native snapshots remain next.
+
+## 2026-10-18 — Adaptive slate blue template highlighting
+Approved template palette: dark #7D9DC7, light #45658F. Shared dynamic NSColor now colours variable/path syntax and path table names; referenced-variable names use the same palette, missing/invalid markers retain red. Release built successfully, signature/diff checks passed. Isolated native screenshots verified URL path, table path name and variable value in both dark and forced-light appearance. No new automated tests for this colour-only change. Changes uncommitted; .vscode remains unrelated/untracked.
+
+## 2026-10-18 — Appearance preference
+Added global Settings > Appearance > Theme (System/Light/Dark), default System. AppTheme maps to preferredColorScheme; AppStorage persists the app-local UI preference in UserDefaults, independently of workspace HTTP configuration. Native isolated checks verified immediate Light/Dark switching, Light persistence after process relaunch and System returning to macOS dark appearance. Release build/signature/diff checks passed. No new automated tests for this small native preference UI. Validation app closed; changes uncommitted.
+
+## 2026-10-18 — Template colour saturation refinement
+User approved more saturated shared template colours: dark #6F9DD8, light #365F96. Changed only the existing dynamic palette RGB values; variable/path consumers and missing/invalid red unchanged.
+
+## 2026-10-18 — Further template palette refinement
+User approved trial palette dark #5B9FEF and light #245BA8. Updated the existing shared dynamic template colour only; all variable/path consumers inherit the change.
+
+## 2026-10-18 — Appearance check-in
+User accepted final palette dark #5B9FEF / light #245BA8 and authorized local check-in. Includes shared variable/path colours, table path-name tint and persistent System/Light/Dark preference. Latest release build and signature/diff checks passed; native appearance switching and relaunch persistence previously verified. No push. Next selected slice remains parameter polish, followed by Copy as cURL and native snapshots.

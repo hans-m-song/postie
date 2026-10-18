@@ -4,6 +4,7 @@ import PostieCore
 
 struct GlobalSettingsPage: View {
     @EnvironmentObject private var model: AppModel
+    @AppStorage(AppTheme.preferenceKey) private var theme = AppTheme.system
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -15,6 +16,19 @@ struct GlobalSettingsPage: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Appearance")
+                            .font(.headline)
+                        Picker("Theme", selection: $theme) {
+                            ForEach(AppTheme.allCases, id: \.self) { theme in
+                                Text(theme.title).tag(theme)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                    }
+
+                    Divider()
+
                     if let error = model.variableSaveErrors[.global] {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Settings were not saved")

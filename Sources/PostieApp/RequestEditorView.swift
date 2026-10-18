@@ -868,6 +868,7 @@ private struct PathParameterTable: View {
                         Color.clear.frame(width: 26)
                         Text(":\(name)")
                             .font(.system(.body, design: .monospaced))
+                            .foregroundStyle(Color(nsColor: SyntaxHighlighting.templateColor))
                             .lineLimit(1)
                             .truncationMode(.middle)
                             .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)

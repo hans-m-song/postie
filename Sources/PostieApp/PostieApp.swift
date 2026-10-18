@@ -21,6 +21,7 @@ private final class PostieAppDelegate: NSObject, NSApplicationDelegate {
 struct PostieApp: App {
     @NSApplicationDelegateAdaptor(PostieAppDelegate.self) private var appDelegate
     @StateObject private var model: AppModel
+    @AppStorage(AppTheme.preferenceKey) private var theme = AppTheme.system
 
     init() {
         _model = StateObject(wrappedValue: AppModel.shared)
@@ -29,6 +30,7 @@ struct PostieApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .preferredColorScheme(theme.colorScheme)
                 .environmentObject(model)
                 .frame(minWidth: 900, minHeight: 600)
         }

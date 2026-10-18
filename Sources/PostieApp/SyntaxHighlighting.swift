@@ -5,6 +5,14 @@ import PostieCore
 enum SyntaxHighlighting {
     static let maximumInputBytes = 1_048_576
 
+    @MainActor
+    static let templateColor = NSColor(name: "PostieTemplate") { appearance in
+        if appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua {
+            return NSColor(srgbRed: 91 / 255, green: 159 / 255, blue: 239 / 255, alpha: 1)
+        }
+        return NSColor(srgbRed: 36 / 255, green: 91 / 255, blue: 168 / 255, alpha: 1)
+    }
+
     struct Request: Hashable, Sendable {
         let text: String
         let syntax: BodySyntax
@@ -27,8 +35,7 @@ enum SyntaxHighlighting {
         @MainActor
         var appKitColor: NSColor {
             switch self {
-            case .variable: .systemTeal
-            case .pathParameter: .systemPurple
+            case .variable, .pathParameter: SyntaxHighlighting.templateColor
             case .missing, .invalid: .systemRed
             case .jsonKey: .systemBlue
             case .jsonString: .systemGreen

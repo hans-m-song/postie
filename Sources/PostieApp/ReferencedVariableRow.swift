@@ -54,7 +54,7 @@ struct ReferencedVariableRow: View {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text("{{\(name)}}")
                     .font(.system(size: NSFont.systemFontSize, design: .monospaced))
-                    .foregroundStyle(details == nil ? Color.red : Color.teal)
+                    .foregroundStyle(details == nil ? Color.red : Color(nsColor: SyntaxHighlighting.templateColor))
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
