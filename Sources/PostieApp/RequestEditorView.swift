@@ -331,7 +331,8 @@ struct RequestEditorView: View {
                     keyPlaceholder: "Name",
                     valuePlaceholder: "Value",
                     availableVariables: availableVariableNames,
-                    completionVariables: model.variableCompletions(for: identity)
+                    completionVariables: model.variableCompletions(for: identity),
+                    parameterWrapping: true
                 )
                 .id(identity)
             }
@@ -368,7 +369,8 @@ struct RequestEditorView: View {
                             model.showCollection(identity.collectionID, section: .headers)
                         },
                         derivedRows: derivedAuthenticationHeaders,
-                        derivedRowsResetKey: authenticationHeaderResetID
+                        derivedRowsResetKey: authenticationHeaderResetID,
+                        parameterWrapping: true
                     )
                     .id(identity)
                 }
@@ -864,16 +866,17 @@ private struct PathParameterTable: View {
                 .background(.quaternary)
 
                 ForEach(names, id: \.self) { name in
-                    HStack(spacing: 8) {
-                        Color.clear.frame(width: 26)
-                        Text(":\(name)")
-                            .font(.system(.body, design: .monospaced))
-                            .foregroundStyle(Color(nsColor: SyntaxHighlighting.templateColor))
-                            .lineLimit(1)
-                            .truncationMode(.middle)
+                    HStack(alignment: .top, spacing: 8) {
+                        Color.clear.frame(width: 26, height: 22)
+                        ParameterTextField(
+                            "Path parameter name",
+                            text: .constant(":\(name)"),
+                            isReadOnly: true,
+                            foregroundColor: SyntaxHighlighting.templateColor
+                        )
                             .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
                         Divider().frame(height: 22)
-                        HighlightedTextField(
+                        ParameterTextField(
                             "Value",
                             text: valueBinding(for: name),
                             availableVariables: availableVariables,
@@ -881,7 +884,7 @@ private struct PathParameterTable: View {
                         )
                             .font(.system(.body, design: .monospaced))
                             .frame(minWidth: 0, maxWidth: .infinity)
-                        Color.clear.frame(width: 26)
+                        Color.clear.frame(width: 26, height: 22)
                     }
                     .padding(.horizontal, 8)
                     .padding(.vertical, 6)

@@ -16,6 +16,7 @@ struct FieldTable: View {
     var onOpenInheritedSource: (() -> Void)?
     var derivedRows: [DerivedHeaderRowPresentation] = []
     var derivedRowsResetKey: UUID?
+    var parameterWrapping = false
     @State private var trailingField = HTTPField()
     @State private var focusedField: FieldFocus?
 
@@ -70,9 +71,9 @@ struct FieldTable: View {
 
     @ViewBuilder
     private func editableRow(_ field: HTTPField, isTrailingField: Bool = false) -> some View {
-        HStack(spacing: 8) {
+        HStack(alignment: parameterWrapping ? .top : .center, spacing: 8) {
             if isTrailingField {
-                Color.clear.frame(width: 26)
+                Color.clear.frame(width: 26, height: parameterWrapping ? 22 : nil)
             } else {
                 Toggle("Enabled", isOn: enabledBinding(for: field.id))
                     .labelsHidden()
@@ -80,27 +81,25 @@ struct FieldTable: View {
                     .frame(width: 26)
                     .help("Enable this row")
             }
-            HighlightedTextField(
+            editableField(
                 keyPlaceholder,
-                text: textBinding(for: field.id, keyPath: \.name),
-                availableVariables: availableVariables,
-                completionVariables: completionVariables,
-                focused: focusBinding(for: .name(field.id))
+                fieldID: field.id,
+                keyPath: \.name,
+                focus: .name(field.id)
             )
                 .font(.system(.body, design: .monospaced))
                 .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
             Divider().frame(height: 22)
-            HighlightedTextField(
+            editableField(
                 valuePlaceholder,
-                text: textBinding(for: field.id, keyPath: \.value),
-                availableVariables: availableVariables,
-                completionVariables: completionVariables,
-                focused: focusBinding(for: .value(field.id))
+                fieldID: field.id,
+                keyPath: \.value,
+                focus: .value(field.id)
             )
                 .font(.system(.body, design: .monospaced))
                 .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
             if isTrailingField {
-                Color.clear.frame(width: 26)
+                Color.clear.frame(width: 26, height: parameterWrapping ? 22 : nil)
             } else {
                 Button(role: .destructive) {
                     fields.removeAll { $0.id == field.id }
@@ -119,10 +118,36 @@ struct FieldTable: View {
     }
 
     @ViewBuilder
+    private func editableField(
+        _ placeholder: String,
+        fieldID: UUID,
+        keyPath: WritableKeyPath<HTTPField, String>,
+        focus: FieldFocus
+    ) -> some View {
+        if parameterWrapping {
+            ParameterTextField(
+                placeholder,
+                text: textBinding(for: fieldID, keyPath: keyPath),
+                availableVariables: availableVariables,
+                completionVariables: completionVariables,
+                focused: focusBinding(for: focus)
+            )
+        } else {
+            HighlightedTextField(
+                placeholder,
+                text: textBinding(for: fieldID, keyPath: keyPath),
+                availableVariables: availableVariables,
+                completionVariables: completionVariables,
+                focused: focusBinding(for: focus)
+            )
+        }
+    }
+
+    @ViewBuilder
     private func inheritedRow(_ field: HTTPField) -> some View {
         let status = inheritedFieldStatus(field)
 
-        HStack(spacing: 8) {
+        HStack(alignment: parameterWrapping ? .top : .center, spacing: 8) {
             Image(systemName: inheritedStatusSymbol(status))
                 .foregroundStyle(.secondary)
                 .frame(width: 26)
@@ -132,7 +157,8 @@ struct FieldTable: View {
                 ReadOnlyHighlightedText(
                     "Inherited header name",
                     text: field.name,
-                    availableVariables: availableVariables
+                    availableVariables: availableVariables,
+                    wrapping: parameterWrapping ? .unbounded : .singleLine
                 )
                     .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
                 Text(HeaderPresentation.sourceStatusLabel(source: inheritedFieldSourceLabel, status: status))
@@ -147,7 +173,8 @@ struct FieldTable: View {
             ReadOnlyHighlightedText(
                 "Inherited header value",
                 text: field.value,
-                availableVariables: availableVariables
+                availableVariables: availableVariables,
+                wrapping: parameterWrapping ? .unbounded : .singleLine
             )
                 .font(.system(size: NSFont.systemFontSize, design: .monospaced))
                 .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
@@ -162,7 +189,7 @@ struct FieldTable: View {
                 .environment(\.isEnabled, true)
                 .focusable(false)
             } else {
-                Color.clear.frame(width: 26)
+                Color.clear.frame(width: 26, height: parameterWrapping ? 22 : nil)
             }
         }
         .padding(.horizontal, 8)
@@ -235,11 +262,18 @@ private struct ReadOnlyHighlightedText: View {
     let accessibilityLabel: String
     let text: String
     let availableVariables: Set<String>
+    let wrapping: HighlightedTextFieldWrapping
 
-    init(_ accessibilityLabel: String, text: String, availableVariables: Set<String>) {
+    init(
+        _ accessibilityLabel: String,
+        text: String,
+        availableVariables: Set<String>,
+        wrapping: HighlightedTextFieldWrapping = .singleLine
+    ) {
         self.accessibilityLabel = accessibilityLabel
         self.text = text
         self.availableVariables = availableVariables
+        self.wrapping = wrapping
     }
 
     var body: some View {
@@ -248,7 +282,8 @@ private struct ReadOnlyHighlightedText: View {
             text: .constant(text),
             availableVariables: availableVariables,
             isReadOnly: true,
-            truncationMode: .byTruncatingMiddle
+            truncationMode: .byTruncatingMiddle,
+            wrapping: wrapping
         )
         .environment(\.isEnabled, true)
     }

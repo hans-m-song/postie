@@ -8,6 +8,18 @@ Latest scope, 2026-10-18: parameter polish, Copy as cURL and native snapshots ar
 
 ## Shared task contract
 
+## T-85 — Header wrapping and top-aligned rows (complete locally)
+
+Approved 2026-10-19: extend automatic wrapping and vertical growth to request headers, including inherited/auth rows. Align names and values at the top of query, path and header rows. Preserve masking, explicit Reveal/Hide, variable inspection/completion and source navigation. No response, storage or credential behavior changes. Verify narrow-pane long headers and mixed-height rows.
+
+Verified: release/signature/diff checks and independent source review passed. Isolated native 335-point dark/light checks covered long inherited/auth header names, wrapped inherited/editable values, top-aligned query/path/header rows, editable header shrink/highlighting and collection header source navigation/editing. Credentials remained masked; no successful secret decryption exercised. No new/rerun tests for this presentation-only change.
+
+## T-84 — Long parameter cells (complete locally)
+
+Revised 2026-10-19: query names/values and path names/values wrap automatically and grow vertically to fit all content. Remove the three-line cap, expand controls and popovers from the initial 2026-10-18 implementation. Keep short rows compact, path names read-only, template colours and variable completion, existing query URL synchronization and exact parameter bytes. Header/auth/URL editors retain their existing layout. The request pane owns scrolling.
+
+The initial implementation passed 173 existing functional tests. The 2026-10-19 refinement passed release/signature/diff checks, independent source review and isolated native long-input wrapping, growth/shrink, URL synchronization, outer scrolling and light/dark checks. See parameter-polish.md.
+
 ## T-83 — Inherited authentication summary and navigation (complete locally)
 
 Request Auth now displays inherited collection authentication type, relevant public fields and a masked derived header with explicit Reveal/Hide. Both source actions open collection Auth directly. Preview uses request-scoped variables and retains identity, configuration and navigation stale-result checks. Verified on 2026-10-18: 173 existing functional tests, release build, strict signature/diff checks, and isolated 335-point native summary, destination, Back navigation and safe malformed-credential reveal checks. Successful credential reveal was not exercised against a real Keychain item.

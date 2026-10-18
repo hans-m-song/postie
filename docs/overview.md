@@ -66,6 +66,8 @@ User clarification, 2026-10-17: sensitive values may be accessible to the local 
 
 ## Workflow and decisions still required
 
+As of 19 October 2026, commit verified changes locally after the user confirms that they work. That confirmation authorizes the local check-in without another permission request. Do not push unless explicitly requested. Keep unrelated local files out of the commit.
+
 Follow the vertical slices in roadmap.md. M1/M2 are implemented; see implementation.md for evidence and limitations. User subsequently authorised M3/M4 on 2026-10-17; implementation-m3-m4.md tracks that work. M5 remains unimplemented.
 
 Before M1, verify the primary-Mac deployment/signing target and approved execution defaults, and settle cache behaviour, duplicate headers/query representation, disabled-limit semantics, non-text handling and temporary-file lifecycle. Redirect following is configurable; automatic cookie storage is deferred. Concurrent requests with one in-flight run per identity and accessible cancellation are required. Late callbacks must not overwrite/misattribute results or another run's files. Before M2, settle literal-field persistence boundaries and save failure/recovery. Before M3, settle header/auth conflicts, template parsing/encoding and basic at-rest key lifecycle. Before M5, settle snapshot sidecar publication/reconstruction and explicit secret copying behaviour. Body types beyond text remain deferred unless specifically approved. These are unresolved design details, not implemented capabilities.

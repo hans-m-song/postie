@@ -2,6 +2,16 @@ import AppKit
 import PostieCore
 import SwiftUI
 
+enum HighlightedTextFieldWrapping: Equatable {
+    case singleLine
+    case unbounded
+
+    var isWrapped: Bool {
+        if case .singleLine = self { return false }
+        return true
+    }
+}
+
 struct HighlightedTextField: View {
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.variableInspectionOwner) private var inspectionOwner
@@ -16,6 +26,8 @@ struct HighlightedTextField: View {
     private let isReadOnly: Bool
     private let truncationMode: NSLineBreakMode
     private let rounded: Bool
+    private let wrapping: HighlightedTextFieldWrapping
+    private let foregroundColor: NSColor?
     private let focused: Binding<Bool>?
 
     init(
@@ -28,7 +40,9 @@ struct HighlightedTextField: View {
         truncationMode: NSLineBreakMode = .byTruncatingTail,
         rounded: Bool = false,
         completionVariables: [VariableCompletion] = [],
-        focused: Binding<Bool>? = nil
+        focused: Binding<Bool>? = nil,
+        wrapping: HighlightedTextFieldWrapping = .singleLine,
+        foregroundColor: NSColor? = nil
     ) {
         self.placeholder = placeholder
         _text = text
@@ -39,6 +53,8 @@ struct HighlightedTextField: View {
         self.isReadOnly = isReadOnly
         self.truncationMode = truncationMode
         self.rounded = rounded
+        self.wrapping = wrapping
+        self.foregroundColor = foregroundColor
         self.focused = focused
     }
 
@@ -53,6 +69,8 @@ struct HighlightedTextField: View {
             isReadOnly: isReadOnly,
             truncationMode: truncationMode,
             rounded: rounded,
+            wrapping: wrapping,
+            foregroundColor: foregroundColor,
             focused: focused,
             isEnabled: isEnabled,
             model: model,
@@ -73,6 +91,8 @@ private struct NativeHighlightedTextField: NSViewRepresentable {
     let isReadOnly: Bool
     let truncationMode: NSLineBreakMode
     let rounded: Bool
+    let wrapping: HighlightedTextFieldWrapping
+    let foregroundColor: NSColor?
     let focused: Binding<Bool>?
     let isEnabled: Bool
     let model: AppModel
@@ -87,6 +107,7 @@ private struct NativeHighlightedTextField: NSViewRepresentable {
             validPathParameters: validPathParameters,
             isURL: isURL,
             isReadOnly: isReadOnly,
+            wrapping: wrapping,
             isEnabled: isEnabled,
             model: model,
             inspectionOwner: inspectionOwner
@@ -102,8 +123,7 @@ private struct NativeHighlightedTextField: NSViewRepresentable {
         textField.isEditable = isEnabled && !isReadOnly
         textField.isSelectable = true
         textField.allowsEditingTextAttributes = false
-        textField.usesSingleLineMode = true
-        textField.lineBreakMode = truncationMode
+        configureWrapping(on: textField)
         textField.isBordered = rounded
         textField.isBezeled = rounded
         updateHorizontalPriorities(of: textField)
@@ -125,6 +145,7 @@ private struct NativeHighlightedTextField: NSViewRepresentable {
             validPathParameters: validPathParameters,
             isURL: isURL,
             isReadOnly: isReadOnly,
+            wrapping: wrapping,
             isEnabled: isEnabled,
             inspectionOwner: inspectionOwner
         )
@@ -132,11 +153,55 @@ private struct NativeHighlightedTextField: NSViewRepresentable {
         textField.placeholderString = placeholder
         textField.isEnabled = isEnabled
         textField.isEditable = isEnabled && !isReadOnly
-        textField.lineBreakMode = truncationMode
+        configureWrapping(on: textField)
         updateHorizontalPriorities(of: textField)
         context.coordinator.updateTextIfNeeded(text, in: textField)
         context.coordinator.scheduleHighlighting(in: textField)
         context.coordinator.updateFocus(in: textField)
+    }
+
+    func sizeThatFits(
+        _ proposal: ProposedViewSize,
+        nsView textField: SyntaxHighlightedTextField,
+        context: Context
+    ) -> CGSize? {
+        guard wrapping.isWrapped else { return nil }
+
+        let width = proposal.width ?? textField.bounds.width
+        guard width.isFinite, width > 0 else { return nil }
+
+        let font = textField.font ?? NSFont.monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+        let lineHeight = ceil(font.ascender - font.descender + font.leading)
+        let sampleHeight = lineHeight + 6
+        let textRect = textField.highlightedCell.titleRect(
+            forBounds: NSRect(x: 0, y: 0, width: width, height: sampleHeight)
+        )
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.alignment = textField.alignment
+        paragraphStyle.lineBreakMode = .byCharWrapping
+        let measuredText = text.isEmpty ? placeholder : text
+        let attributedText = NSAttributedString(
+            string: measuredText,
+            attributes: [.font: font, .paragraphStyle: paragraphStyle]
+        )
+        let textBounds = attributedText.boundingRect(
+            with: NSSize(width: max(1, textRect.width), height: CGFloat.greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin],
+            context: nil
+        )
+        let measuredHeight = max(lineHeight, ceil(textBounds.height))
+        return CGSize(width: width, height: measuredHeight + 6)
+    }
+
+    private func configureWrapping(on textField: SyntaxHighlightedTextField) {
+        let wraps = wrapping.isWrapped
+        let lineBreakMode: NSLineBreakMode = wraps ? .byCharWrapping : truncationMode
+        textField.usesSingleLineMode = !wraps
+        textField.lineBreakMode = lineBreakMode
+        textField.highlightedCell.wraps = wraps
+        textField.highlightedCell.lineBreakMode = lineBreakMode
+        textField.highlightedCell.wrapping = wrapping
+        textField.highlightedCell.foregroundColor = foregroundColor
     }
 
     private func updateHorizontalPriorities(of textField: NSTextField) {
@@ -159,6 +224,7 @@ private struct NativeHighlightedTextField: NSViewRepresentable {
         private var validPathParameters: Set<String>
         private var isURL: Bool
         private var isReadOnly: Bool
+        private var wrapping: HighlightedTextFieldWrapping
         private var isEnabled: Bool
         private let model: AppModel
         private var inspectionOwner: VariableOwner?
@@ -188,6 +254,7 @@ private struct NativeHighlightedTextField: NSViewRepresentable {
             validPathParameters: Set<String>,
             isURL: Bool,
             isReadOnly: Bool,
+            wrapping: HighlightedTextFieldWrapping,
             isEnabled: Bool,
             model: AppModel,
             inspectionOwner: VariableOwner?
@@ -199,6 +266,7 @@ private struct NativeHighlightedTextField: NSViewRepresentable {
             self.validPathParameters = validPathParameters
             self.isURL = isURL
             self.isReadOnly = isReadOnly
+            self.wrapping = wrapping
             self.isEnabled = isEnabled
             self.model = model
             self.inspectionOwner = inspectionOwner
@@ -226,6 +294,7 @@ private struct NativeHighlightedTextField: NSViewRepresentable {
             validPathParameters: Set<String>,
             isURL: Bool,
             isReadOnly: Bool,
+            wrapping: HighlightedTextFieldWrapping,
             isEnabled: Bool,
             inspectionOwner: VariableOwner?
         ) {
@@ -240,9 +309,11 @@ private struct NativeHighlightedTextField: NSViewRepresentable {
                 self.isURL != isURL || self.isReadOnly != isReadOnly
             let wasEnabled = self.isEnabled
             let wasReadOnly = self.isReadOnly
+            let wrappingChanged = self.wrapping != wrapping
             let inputsChanged = self.availableVariables != availableVariables ||
                     self.validPathParameters != validPathParameters ||
                     completionContextChanged ||
+                    wrappingChanged ||
                     wasEnabled != isEnabled ||
                     wasReadOnly != isReadOnly
             guard inputsChanged else {
@@ -253,9 +324,13 @@ private struct NativeHighlightedTextField: NSViewRepresentable {
             self.validPathParameters = validPathParameters
             self.isURL = isURL
             self.isReadOnly = isReadOnly
+            self.wrapping = wrapping
             self.isEnabled = isEnabled
             lastScheduledRequest = nil
             lastAppliedRequest = nil
+            if wrappingChanged, let activeFieldEditor {
+                configureFieldEditor(activeFieldEditor)
+            }
             if completionContextChanged || !isEnabled || isReadOnly {
                 dismissCompletion()
             }
@@ -535,12 +610,26 @@ private struct NativeHighlightedTextField: NSViewRepresentable {
 
             stopObservingSelectionChanges()
             activeFieldEditor = fieldEditor
+            configureFieldEditor(fieldEditor)
             observeSelectionChanges(in: fieldEditor)
             SyntaxHighlighting.clearTemporaryAttributes(from: fieldEditor)
             lastScheduledRequest = nil
             lastAppliedRequest = nil
             scheduleHighlighting(in: textField)
             refreshCompletion(in: textField, fieldEditor: fieldEditor)
+        }
+
+        private func configureFieldEditor(_ fieldEditor: NSTextView) {
+            let wraps = wrapping.isWrapped
+            fieldEditor.isHorizontallyResizable = !wraps
+            fieldEditor.isVerticallyResizable = false
+            guard let textContainer = fieldEditor.textContainer else { return }
+            textContainer.widthTracksTextView = wraps
+            textContainer.heightTracksTextView = false
+            textContainer.containerSize = NSSize(
+                width: wraps ? max(1, fieldEditor.bounds.width) : CGFloat.greatestFiniteMagnitude,
+                height: CGFloat.greatestFiniteMagnitude
+            )
         }
 
         private func stopObservingSelectionChanges(in fieldEditor: NSTextView? = nil) {
@@ -690,6 +779,8 @@ private final class SyntaxHighlightedTextField: NSTextField {
 private final class SyntaxHighlightedTextFieldCell: NSTextFieldCell {
     var spans: [SyntaxHighlighting.Span] = []
     var onFieldEditorSelected: ((NSText) -> Void)?
+    var wrapping: HighlightedTextFieldWrapping = .singleLine
+    var foregroundColor: NSColor?
 
     override func edit(
         withFrame rect: NSRect,
@@ -745,7 +836,9 @@ private final class SyntaxHighlightedTextFieldCell: NSTextFieldCell {
 
         let text = NSMutableAttributedString(string: stringValue)
         let textRange = NSRange(location: 0, length: text.length)
-        let foregroundColor = textField.isEnabled ? NSColor.labelColor : .disabledControlTextColor
+        let foregroundColor = textField.isEnabled
+            ? self.foregroundColor ?? .labelColor
+            : .disabledControlTextColor
         let paragraphStyle = NSMutableParagraphStyle()
         paragraphStyle.alignment = alignment
         paragraphStyle.lineBreakMode = lineBreakMode
@@ -762,7 +855,9 @@ private final class SyntaxHighlightedTextFieldCell: NSTextFieldCell {
         let options: NSString.DrawingOptions = [.usesLineFragmentOrigin, .truncatesLastVisibleLine]
         let textBounds = text.boundingRect(with: titleRect.size, options: options, context: nil)
         var drawRect = titleRect
-        drawRect.origin.y += max(0, (titleRect.height - textBounds.height) / 2)
+        if !wrapping.isWrapped {
+            drawRect.origin.y += max(0, (titleRect.height - textBounds.height) / 2)
+        }
 
         NSGraphicsContext.saveGraphicsState()
         defer { NSGraphicsContext.restoreGraphicsState() }

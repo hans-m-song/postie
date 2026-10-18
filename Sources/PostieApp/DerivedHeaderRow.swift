@@ -13,7 +13,7 @@ struct DerivedHeaderRow: View {
     private var isRevealed: Bool { revealedValue != nil }
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(alignment: .top, spacing: 8) {
             Image(systemName: statusSymbol)
                 .foregroundStyle(.secondary)
                 .frame(width: 26)
@@ -26,7 +26,8 @@ struct DerivedHeaderRow: View {
                     text: .constant(presentation.name),
                     availableVariables: presentation.availableVariables,
                     isReadOnly: true,
-                    truncationMode: .byTruncatingMiddle
+                    truncationMode: .byTruncatingMiddle,
+                    wrapping: .unbounded
                 )
                 .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
                 .environment(\.isEnabled, true)
@@ -47,8 +48,7 @@ struct DerivedHeaderRow: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(revealedValue ?? presentation.maskedValue)
                     .font(.system(.body, design: .monospaced))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                    .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 if let revealError {
@@ -80,7 +80,7 @@ struct DerivedHeaderRow: View {
                 .environment(\.isEnabled, true)
                 .focusable(false)
             } else {
-                Color.clear.frame(width: 26)
+                Color.clear.frame(width: 26, height: 22)
             }
         }
         .padding(.horizontal, 8)
