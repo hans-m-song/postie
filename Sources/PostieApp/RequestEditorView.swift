@@ -139,11 +139,30 @@ struct RequestEditorView: View {
 
     private var selectedSection: RequestEditorSection { model.requestEditorSection(for: identity) }
 
-    private var sectionBinding: Binding<RequestEditorSection> {
-        Binding(
-            get: { model.requestEditorSection(for: identity) },
-            set: { model.setRequestEditorSection($0, for: identity) }
+    private var expansionState: RequestEditorExpansionState {
+        model.requestEditorExpansionState(for: identity)
+    }
+
+    private var expansionContent: RequestEditorContentSnapshot {
+        RequestEditorContentSnapshot(
+            queryCount: model.request(for: identity)?.query.count ?? 0,
+            pathNames: Set(pathParameterNames)
         )
+    }
+
+    private var initiallyExpandedSections: Set<RequestEditorAccordion> {
+        guard let request = model.request(for: identity) else { return [] }
+        var expanded: Set<RequestEditorAccordion> = []
+        if !request.query.isEmpty { expanded.insert(.query) }
+        if !pathParameterNames.isEmpty { expanded.insert(.path) }
+        if !request.headers.isEmpty { expanded.insert(.headers) }
+        if request.bodyEnabled || !request.body.isEmpty { expanded.insert(.body) }
+        if !request.inheritsCollectionAuthentication && isAuthenticationConfigured(request.authentication) {
+            expanded.insert(.authentication)
+        }
+        if !request.variables.isEmpty { expanded.insert(.variables) }
+        if request.options != HTTPOptions() { expanded.insert(.settings) }
+        return expanded
     }
 
     var body: some View {
@@ -178,12 +197,7 @@ struct RequestEditorView: View {
         }
         .onChange(of: identity) { oldIdentity, _ in
             discardSecretEdits(for: oldIdentity)
-        }
-        .onAppear {
-            selectVariablesForDefinitionRequest()
-        }
-        .onChange(of: model.variableDefinitionRequest?.id) { _, _ in
-            selectVariablesForDefinitionRequest()
+            referencedVariableNames = []
         }
         .onDisappear {
             discardSecretEdits(for: identity)
@@ -192,22 +206,11 @@ struct RequestEditorView: View {
 
     private var editor: some View {
         VStack(spacing: 0) {
-            VStack(spacing: 8) {
-                Picker("Request editor section", selection: sectionBinding) {
-                    Text("Request").tag(RequestEditorSection.request)
-                    Text("Auth").tag(RequestEditorSection.authentication)
-                    Text("Variables").tag(RequestEditorSection.variables)
-                    Text("Settings").tag(RequestEditorSection.settings)
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-
-                if let active = model.activeRuns[identity] {
-                    activeRunSummary(active)
-                }
+            if let active = model.activeRuns[identity] {
+                activeRunSummary(active)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 10)
             }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 10)
 
             if let error = model.autosaveErrors[identity] {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -227,72 +230,315 @@ struct RequestEditorView: View {
 
             Divider()
 
-            ScrollView {
-                sectionContent
-                    .padding(18)
-                    .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    sectionContent(using: proxy)
+                        .padding(18)
+                        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+                }
+                .onAppear {
+                    reconcileExpansion()
+                    scrollToNavigationSection(selectedSection, using: proxy, animated: false)
+                    consumeRestoration(using: proxy, animated: false)
+                    selectVariablesForDefinitionRequest(using: proxy)
+                }
+                .onChange(of: identity) { _, _ in
+                    reconcileExpansion()
+                    referencedVariableNames = []
+                    scrollToNavigationSection(selectedSection, using: proxy, animated: false)
+                    consumeRestoration(using: proxy, animated: false)
+                    selectVariablesForDefinitionRequest(using: proxy)
+                }
+                .onChange(of: expansionContent) { _, _ in
+                    reconcileExpansion()
+                }
+                .onChange(of: model.requestEditorRestoration?.id) { _, _ in
+                    consumeRestoration(using: proxy, animated: true)
+                }
+                .onChange(of: model.variableDefinitionRequest?.id) { _, _ in
+                    selectVariablesForDefinitionRequest(using: proxy)
+                }
             }
-            .disabled(!model.canEdit(identity))
         }
         .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private var sectionContent: some View {
-        ZStack(alignment: .topLeading) {
-            retainedSection(requestContent, isActive: selectedSection == .request)
-            retainedSection(AuthenticationEditor(identity: identity).id(identity), isActive: selectedSection == .authentication)
-            retainedSection(
-                VStack(alignment: .leading, spacing: 18) {
-                    VariableEditorView(owner: .request(identity), isActive: selectedSection == .variables)
-                        .id(VariableOwner.request(identity))
-                    referencedVariables
-                },
-                isActive: selectedSection == .variables
-            )
-            retainedSection(settingsEditor, isActive: selectedSection == .settings)
-        }
-    }
+    private func sectionContent(using proxy: ScrollViewProxy) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            accordion(.query, title: "Query", summary: rowCount(model.request(for: identity)?.query.count ?? 0), using: proxy) {
+                FieldTable(
+                    title: "Query parameters",
+                    showsTitle: false,
+                    fields: fieldsBinding(\.query),
+                    keyPlaceholder: "Name",
+                    valuePlaceholder: "Value",
+                    availableVariables: availableVariableNames,
+                    completionVariables: model.variableCompletions(for: identity)
+                )
+                .id(identity)
+            }
 
-    private var requestContent: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            FieldTable(
-                title: "Query parameters",
-                fields: fieldsBinding(\.query),
-                keyPlaceholder: "Name",
-                valuePlaceholder: "Value",
-                availableVariables: availableVariableNames,
-                completionVariables: model.variableCompletions(for: identity)
-            )
-            if !pathParameterNames.isEmpty {
+            accordion(.path, title: "Path", summary: parameterCount(pathParameterNames.count), using: proxy) {
                 PathParameterTable(
                     names: pathParameterNames,
                     fields: fieldsBinding(\.pathParameters),
                     availableVariables: availableVariableNames,
                     completionVariables: model.variableCompletions(for: identity)
                 )
+                .id(identity)
             }
-            FieldTable(
+
+            accordion(
+                .headers,
                 title: "Headers",
-                fields: fieldsBinding(\.headers),
-                keyPlaceholder: "Header",
-                valuePlaceholder: "Value",
-                availableVariables: availableVariableNames,
-                completionVariables: model.variableCompletions(for: identity),
-                inheritedFields: model.collection(for: identity)?.headers ?? [],
-                inheritedFieldStatus: { inheritedHeaderStatus(for: $0) },
-                onOpenInheritedSource: {
-                    model.showCollection(identity.collectionID, section: .headers)
+                summary: headerSummary,
+                retainsContent: false,
+                using: proxy
+            ) {
+                FieldTable(
+                    title: "Request headers",
+                    showsTitle: false,
+                    fields: fieldsBinding(\.headers),
+                    keyPlaceholder: "Header",
+                    valuePlaceholder: "Value",
+                    availableVariables: availableVariableNames,
+                    completionVariables: model.variableCompletions(for: identity),
+                    inheritedFields: model.collection(for: identity)?.headers ?? [],
+                    inheritedFieldStatus: { inheritedHeaderStatus(for: $0) },
+                    onOpenInheritedSource: {
+                        model.showCollection(identity.collectionID, section: .headers)
+                    }
+                )
+                .id(identity)
+            }
+
+            accordion(.body, title: "Body", summary: bodySummary, using: proxy) {
+                bodyEditor
+            }
+
+            accordion(
+                .authentication,
+                title: "Authentication",
+                summary: authenticationSummary,
+                retainsContent: false,
+                using: proxy
+            ) {
+                AuthenticationEditor(identity: identity).id(identity)
+            }
+
+            accordion(
+                .variables,
+                title: "Variables",
+                summary: variableSummary,
+                using: proxy
+            ) {
+                VStack(alignment: .leading, spacing: 18) {
+                    VariableEditorView(
+                        owner: .request(identity),
+                        isActive: expansionState.isExpanded(.variables)
+                    )
+                        .id(VariableOwner.request(identity))
+                    referencedVariables
                 }
-            )
-            bodyEditor
+            }
+
+            accordion(.settings, title: "Settings", summary: settingsSummary, using: proxy) {
+                settingsEditor
+            }
         }
     }
 
-    private func selectVariablesForDefinitionRequest() {
+    private func selectVariablesForDefinitionRequest(using proxy: ScrollViewProxy) {
         guard let definitionRequest = model.variableDefinitionRequest,
               definitionRequest.owner == .request(identity) else { return }
-        model.setRequestEditorSection(.variables, for: identity)
+        model.expandRequestEditorAccordion(.variables, for: identity)
         model.consumeVariableDefinitionRequest(definitionRequest.id)
+        scrollToAccordion(.variables, using: proxy, animated: true, requireExpanded: true)
+    }
+
+    private func reconcileExpansion() {
+        model.reconcileRequestEditorExpansion(
+            for: identity,
+            initiallyExpanded: initiallyExpandedSections,
+            content: expansionContent
+        )
+    }
+
+    private func scrollToNavigationSection(
+        _ section: RequestEditorSection,
+        using proxy: ScrollViewProxy,
+        animated: Bool,
+        requireExpanded: Bool = false
+    ) {
+        let accordion: RequestEditorAccordion
+        switch section {
+        case .request: accordion = .query
+        case .authentication: accordion = .authentication
+        case .variables: accordion = .variables
+        case .settings: accordion = .settings
+        }
+        scrollToAccordion(
+            accordion,
+            using: proxy,
+            animated: animated,
+            requireExpanded: requireExpanded
+        )
+    }
+
+    private func consumeRestoration(using proxy: ScrollViewProxy, animated: Bool) {
+        guard let restoration = model.requestEditorRestoration,
+              restoration.identity == identity else { return }
+        model.consumeRequestEditorRestoration(restoration.id)
+        scrollToNavigationSection(
+            restoration.section,
+            using: proxy,
+            animated: animated,
+            requireExpanded: restoration.section != .request
+        )
+    }
+
+    private func scrollToAccordion(
+        _ section: RequestEditorAccordion,
+        using proxy: ScrollViewProxy,
+        animated: Bool,
+        requireExpanded: Bool
+    ) {
+        let targetIdentity = identity
+        DispatchQueue.main.async {
+            guard model.selectedIdentity == targetIdentity,
+                  model.selectedCollectionID == nil,
+                  !model.showsGlobalVariables,
+                  !model.showsOngoingRequests else { return }
+            if requireExpanded,
+               !model.requestEditorExpansionState(for: targetIdentity).isExpanded(section) { return }
+            if animated {
+                withAnimation { proxy.scrollTo(section, anchor: .top) }
+            } else {
+                proxy.scrollTo(section, anchor: .top)
+            }
+        }
+    }
+
+    private func toggleAccordion(_ section: RequestEditorAccordion, using proxy: ScrollViewProxy) {
+        let isExpanding = !expansionState.isExpanded(section)
+        model.setRequestEditorAccordionExpanded(
+            section,
+            isExpanded: isExpanding,
+            for: identity
+        )
+        guard isExpanding else { return }
+        scrollToAccordion(section, using: proxy, animated: true, requireExpanded: true)
+    }
+
+    @ViewBuilder
+    private func accordion<Content: View>(
+        _ section: RequestEditorAccordion,
+        title: String,
+        summary: String,
+        retainsContent: Bool = true,
+        using proxy: ScrollViewProxy,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        let isExpanded = expansionState.isExpanded(section)
+        VStack(spacing: 0) {
+            Button { toggleAccordion(section, using: proxy) } label: {
+                HStack(spacing: 9) {
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 12)
+                    Text(title)
+                        .font(.headline)
+                    Spacer(minLength: 12)
+                    Text(summary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 11)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint(isExpanded ? "Collapse section" : "Expand section")
+            .id(section)
+
+            if retainsContent || isExpanded {
+                content()
+                    .padding(.horizontal, 12)
+                    .padding(.top, 2)
+                    .padding(.bottom, 12)
+                    .accessibilityHidden(!isExpanded)
+                    .allowsHitTesting(isExpanded)
+                    .disabled(!isExpanded || !model.canEdit(identity))
+                    .frame(height: isExpanded ? nil : 0, alignment: .top)
+                    .clipped()
+            }
+        }
+        .background(.background, in: RoundedRectangle(cornerRadius: 8))
+        .overlay { RoundedRectangle(cornerRadius: 8).stroke(.quaternary, lineWidth: 1) }
+    }
+
+    private var headerSummary: String {
+        let ownCount = model.request(for: identity)?.headers.count ?? 0
+        let inheritedCount = model.collection(for: identity)?.headers.count ?? 0
+        let parts = [
+            ownCount > 0 ? "\(ownCount) own" : nil,
+            inheritedCount > 0 ? "\(inheritedCount) inherited" : nil
+        ].compactMap { $0 }
+        return parts.isEmpty ? "No headers" : parts.joined(separator: " · ")
+    }
+
+    private var bodySummary: String {
+        guard let request = model.request(for: identity) else { return "Disabled" }
+        if request.bodyEnabled {
+            return request.bodySyntax == .json ? "JSON" : "Enabled"
+        }
+        return request.body.isEmpty ? "Disabled" : "Content saved"
+    }
+
+    private var authenticationSummary: String {
+        guard let request = model.request(for: identity) else { return "None" }
+        if request.inheritsCollectionAuthentication { return "Inherited" }
+        return switch request.authentication.kind {
+        case .none: "None"
+        case .basic: "Basic"
+        case .bearer: "Bearer"
+        }
+    }
+
+    private var variableSummary: String {
+        "\(model.request(for: identity)?.variables.count ?? 0) local · \(referencedVariableNames.count) referenced"
+    }
+
+    private var settingsSummary: String {
+        guard let options = model.request(for: identity)?.options else { return "" }
+        var parts = [options.followRedirects ? "Redirects on" : "Redirects off"]
+        parts.append("\(String(format: "%.1f", options.inactivityTimeout))s idle")
+        if let overallTimeout = options.overallTimeout {
+            parts.append("\(String(format: "%.1f", overallTimeout))s deadline")
+        }
+        if let maximumResponseBytes = options.maximumResponseBytes {
+            parts.append("\(byteCount(maximumResponseBytes)) max")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private func rowCount(_ count: Int) -> String {
+        "\(count) \(count == 1 ? "row" : "rows")"
+    }
+
+    private func parameterCount(_ count: Int) -> String {
+        "\(count) \(count == 1 ? "parameter" : "parameters")"
+    }
+
+    private func isAuthenticationConfigured(_ authentication: RequestAuthentication) -> Bool {
+        authentication.kind != .none ||
+            !authentication.username.isEmpty ||
+            authentication.password != nil ||
+            authentication.token != nil
     }
 
     private func inheritedHeaderStatus(for field: HTTPField) -> String {
@@ -325,7 +571,7 @@ struct RequestEditorView: View {
                             name: name,
                             details: variableDetails(name),
                             isActive: Binding(
-                                get: { selectedSection == .variables },
+                                get: { expansionState.isExpanded(.variables) },
                                 set: { _ in }
                             )
                         )
@@ -358,16 +604,6 @@ struct RequestEditorView: View {
     private func variableDetails(_ name: String) -> ReferencedVariableDetails? {
         let context = model.variableContext(for: identity)
         return ReferencedVariableDetails.resolve(name: name, identity: identity, context: context)
-    }
-
-    private func retainedSection<Content: View>(_ content: Content, isActive: Bool) -> some View {
-        content
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .accessibilityHidden(!isActive)
-            .allowsHitTesting(isActive)
-            .disabled(!isActive)
-            .frame(height: isActive ? nil : 0, alignment: .top)
-            .clipped()
     }
 
     private var pathParameterNames: [String] {
@@ -408,7 +644,7 @@ struct RequestEditorView: View {
             GrowingBodyEditor(
                 text: binding(\.body),
                 isEditable: model.canEdit(identity) && (model.request(for: identity)?.bodyEnabled ?? false),
-                isActive: selectedSection == .request,
+                isActive: expansionState.isExpanded(.body),
                 syntax: model.request(for: identity)?.bodySyntax ?? .none,
                 availableVariables: availableVariableNames,
                 completionVariables: model.variableCompletions(for: identity)

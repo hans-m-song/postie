@@ -49,3 +49,5 @@ A separate Ongoing Requests view lists active runs across collections with Cance
 ## Session Back/Forward
 
 Implemented 2026-10-18: toolbar Back/Forward and Command-[ / Command-] restore request, collection, global-variable and ongoing-request destinations, including request/collection sections and definition jumps. History retains at most 100 destinations, skips deleted targets and clears Forward after new navigation. It preserves configuration drafts without executing requests. History, caret and scroll positions are not persisted. See navigation-and-editor-polish.md for verification.
+
+Request section tabs were replaced by accordions on 2026-10-18. Ordinary request switching preserves manual collapse choices; explicit history restoration and definition jumps open the destination accordion. Future request tabs must activate the destination request tab during Back/Forward; tab lifetime/persistence is not specified yet. See request-accordions.md.

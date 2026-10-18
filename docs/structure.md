@@ -62,6 +62,7 @@ Sources/PostieApp/
   SyntaxHighlighting.swift      Bounded lexical spans and adaptive colors
   HighlightedTextField.swift    Native URL/header/value template presentation
   NavigationHistory.swift      Bounded session navigation identities and sections
+  RequestEditorExpansion.swift Session-only accordion expansion and query/path additions
   VariableCompletion.swift     Bounded token matching and ordinary-value previews
   VariableCompletionPopover.swift Native completion list and positioning
   VariableInspection.swift     Scoped token inspector, explicit reveal and navigation

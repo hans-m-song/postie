@@ -13,6 +13,8 @@ struct HighlightedTextField: View {
     private let completionVariables: [VariableCompletion]
     private let validPathParameters: Set<String>
     private let isURL: Bool
+    private let isReadOnly: Bool
+    private let truncationMode: NSLineBreakMode
     private let rounded: Bool
     private let focused: Binding<Bool>?
 
@@ -22,6 +24,8 @@ struct HighlightedTextField: View {
         availableVariables: Set<String> = [],
         validPathParameters: Set<String> = [],
         isURL: Bool = false,
+        isReadOnly: Bool = false,
+        truncationMode: NSLineBreakMode = .byTruncatingTail,
         rounded: Bool = false,
         completionVariables: [VariableCompletion] = [],
         focused: Binding<Bool>? = nil
@@ -32,6 +36,8 @@ struct HighlightedTextField: View {
         self.completionVariables = completionVariables
         self.validPathParameters = validPathParameters
         self.isURL = isURL
+        self.isReadOnly = isReadOnly
+        self.truncationMode = truncationMode
         self.rounded = rounded
         self.focused = focused
     }
@@ -44,6 +50,8 @@ struct HighlightedTextField: View {
             completionVariables: completionVariables,
             validPathParameters: validPathParameters,
             isURL: isURL,
+            isReadOnly: isReadOnly,
+            truncationMode: truncationMode,
             rounded: rounded,
             focused: focused,
             isEnabled: isEnabled,
@@ -62,6 +70,8 @@ private struct NativeHighlightedTextField: NSViewRepresentable {
     let completionVariables: [VariableCompletion]
     let validPathParameters: Set<String>
     let isURL: Bool
+    let isReadOnly: Bool
+    let truncationMode: NSLineBreakMode
     let rounded: Bool
     let focused: Binding<Bool>?
     let isEnabled: Bool
@@ -76,6 +86,7 @@ private struct NativeHighlightedTextField: NSViewRepresentable {
             completionVariables: completionVariables,
             validPathParameters: validPathParameters,
             isURL: isURL,
+            isReadOnly: isReadOnly,
             isEnabled: isEnabled,
             model: model,
             inspectionOwner: inspectionOwner
@@ -88,13 +99,14 @@ private struct NativeHighlightedTextField: NSViewRepresentable {
         textField.placeholderString = placeholder
         textField.font = NSFont.monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
         textField.isEnabled = isEnabled
-        textField.isEditable = isEnabled
+        textField.isEditable = isEnabled && !isReadOnly
         textField.isSelectable = true
         textField.allowsEditingTextAttributes = false
         textField.usesSingleLineMode = true
-        textField.lineBreakMode = .byTruncatingTail
+        textField.lineBreakMode = truncationMode
         textField.isBordered = rounded
         textField.isBezeled = rounded
+        updateHorizontalPriorities(of: textField)
         if rounded {
             textField.bezelStyle = .roundedBezel
         }
@@ -112,16 +124,25 @@ private struct NativeHighlightedTextField: NSViewRepresentable {
             completionVariables: completionVariables,
             validPathParameters: validPathParameters,
             isURL: isURL,
+            isReadOnly: isReadOnly,
             isEnabled: isEnabled,
             inspectionOwner: inspectionOwner
         )
         textField.delegate = context.coordinator
         textField.placeholderString = placeholder
         textField.isEnabled = isEnabled
-        textField.isEditable = isEnabled
+        textField.isEditable = isEnabled && !isReadOnly
+        textField.lineBreakMode = truncationMode
+        updateHorizontalPriorities(of: textField)
         context.coordinator.updateTextIfNeeded(text, in: textField)
         context.coordinator.scheduleHighlighting(in: textField)
         context.coordinator.updateFocus(in: textField)
+    }
+
+    private func updateHorizontalPriorities(of textField: NSTextField) {
+        let priority: NSLayoutConstraint.Priority = isReadOnly ? .defaultLow : .defaultHigh
+        textField.setContentHuggingPriority(priority, for: .horizontal)
+        textField.setContentCompressionResistancePriority(priority, for: .horizontal)
     }
 
     static func dismantleNSView(_ textField: SyntaxHighlightedTextField, coordinator: Coordinator) {
@@ -137,6 +158,7 @@ private struct NativeHighlightedTextField: NSViewRepresentable {
         private var completionVariables: [VariableCompletion]
         private var validPathParameters: Set<String>
         private var isURL: Bool
+        private var isReadOnly: Bool
         private var isEnabled: Bool
         private let model: AppModel
         private var inspectionOwner: VariableOwner?
@@ -165,6 +187,7 @@ private struct NativeHighlightedTextField: NSViewRepresentable {
             completionVariables: [VariableCompletion],
             validPathParameters: Set<String>,
             isURL: Bool,
+            isReadOnly: Bool,
             isEnabled: Bool,
             model: AppModel,
             inspectionOwner: VariableOwner?
@@ -175,6 +198,7 @@ private struct NativeHighlightedTextField: NSViewRepresentable {
             self.completionVariables = completionVariables
             self.validPathParameters = validPathParameters
             self.isURL = isURL
+            self.isReadOnly = isReadOnly
             self.isEnabled = isEnabled
             self.model = model
             self.inspectionOwner = inspectionOwner
@@ -201,22 +225,26 @@ private struct NativeHighlightedTextField: NSViewRepresentable {
             completionVariables: [VariableCompletion],
             validPathParameters: Set<String>,
             isURL: Bool,
+            isReadOnly: Bool,
             isEnabled: Bool,
             inspectionOwner: VariableOwner?
         ) {
             self.text = text
             self.focused = focused
-            if self.inspectionOwner != inspectionOwner || !isEnabled ||
+            if self.inspectionOwner != inspectionOwner || self.isReadOnly != isReadOnly || !isEnabled ||
                 inspectedVariable.map({ !model.isCurrent($0) }) == true {
                 dismissInspection()
             }
             self.inspectionOwner = inspectionOwner
-            let completionContextChanged = self.completionVariables != completionVariables || self.isURL != isURL
+            let completionContextChanged = self.completionVariables != completionVariables ||
+                self.isURL != isURL || self.isReadOnly != isReadOnly
             let wasEnabled = self.isEnabled
+            let wasReadOnly = self.isReadOnly
             let inputsChanged = self.availableVariables != availableVariables ||
                     self.validPathParameters != validPathParameters ||
                     completionContextChanged ||
-                    wasEnabled != isEnabled
+                    wasEnabled != isEnabled ||
+                    wasReadOnly != isReadOnly
             guard inputsChanged else {
                 return
             }
@@ -224,10 +252,11 @@ private struct NativeHighlightedTextField: NSViewRepresentable {
             self.completionVariables = completionVariables
             self.validPathParameters = validPathParameters
             self.isURL = isURL
+            self.isReadOnly = isReadOnly
             self.isEnabled = isEnabled
             lastScheduledRequest = nil
             lastAppliedRequest = nil
-            if completionContextChanged || !isEnabled {
+            if completionContextChanged || !isEnabled || isReadOnly {
                 dismissCompletion()
             }
         }
@@ -250,16 +279,22 @@ private struct NativeHighlightedTextField: NSViewRepresentable {
         }
 
         func updateTextIfNeeded(_ value: String, in textField: SyntaxHighlightedTextField) {
-            guard textField.stringValue != value else {
-                return
-            }
             if let fieldEditor = textField.currentEditor() as? NSTextView {
-                guard !fieldEditor.hasMarkedText() else {
-                    return
-                }
-                return
+                guard isReadOnly,
+                      !fieldEditor.hasMarkedText(),
+                      fieldEditor.string != value else { return }
+                let selection = fieldEditor.selectedRange()
+                let length = (value as NSString).length
+                let location = min(selection.location, length)
+                let end = min(NSMaxRange(selection), length)
+                textField.stringValue = value
+                fieldEditor.string = value
+                fieldEditor.setSelectedRange(NSRange(location: location, length: max(0, end - location)))
+                dismissInspection()
+            } else {
+                guard textField.stringValue != value else { return }
+                textField.stringValue = value
             }
-            textField.stringValue = value
             textField.highlightedCell.spans = []
             lastScheduledRequest = nil
             lastAppliedRequest = nil
@@ -295,6 +330,7 @@ private struct NativeHighlightedTextField: NSViewRepresentable {
         }
 
         func controlTextDidBeginEditing(_ notification: Notification) {
+            guard !isReadOnly else { return }
             guard let textField = notification.object as? SyntaxHighlightedTextField else {
                 return
             }
@@ -317,6 +353,7 @@ private struct NativeHighlightedTextField: NSViewRepresentable {
         }
 
         func controlTextDidChange(_ notification: Notification) {
+            guard !isReadOnly else { return }
             guard let textField = notification.object as? SyntaxHighlightedTextField else {
                 return
             }
@@ -334,7 +371,7 @@ private struct NativeHighlightedTextField: NSViewRepresentable {
             guard let textField = notification.object as? SyntaxHighlightedTextField else {
                 return
             }
-            if text.wrappedValue != textField.stringValue {
+            if !isReadOnly, text.wrappedValue != textField.stringValue {
                 text.wrappedValue = textField.stringValue
             }
             let endingFieldEditor = activeFieldEditor ?? (textField.currentEditor() as? NSTextView)
@@ -355,7 +392,8 @@ private struct NativeHighlightedTextField: NSViewRepresentable {
         }
 
         func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
-            guard let textField,
+            guard !isReadOnly,
+                  let textField,
                   control === textField,
                   completionPopover.isShown,
                   !completionSuggestions.isEmpty else {
@@ -423,7 +461,8 @@ private struct NativeHighlightedTextField: NSViewRepresentable {
                 return
             }
             dismissInspection()
-            guard isEnabled,
+            guard !isReadOnly,
+                  isEnabled,
                   textField.isEnabled,
                   !completionVariables.isEmpty,
                   let fieldEditor,
@@ -526,7 +565,8 @@ private struct NativeHighlightedTextField: NSViewRepresentable {
         }
 
         private func acceptCompletion(at index: Int) {
-            guard completionSuggestions.indices.contains(index),
+            guard !isReadOnly,
+                  completionSuggestions.indices.contains(index),
                   let fieldEditor = activeFieldEditor,
                   let context = completionContext,
                   let textField,
@@ -723,6 +763,10 @@ private final class SyntaxHighlightedTextFieldCell: NSTextFieldCell {
         let textBounds = text.boundingRect(with: titleRect.size, options: options, context: nil)
         var drawRect = titleRect
         drawRect.origin.y += max(0, (titleRect.height - textBounds.height) / 2)
+
+        NSGraphicsContext.saveGraphicsState()
+        defer { NSGraphicsContext.restoreGraphicsState() }
+        NSBezierPath(rect: titleRect).addClip()
         text.draw(with: drawRect, options: options, context: nil)
     }
 }

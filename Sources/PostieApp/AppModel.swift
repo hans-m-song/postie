@@ -16,6 +16,12 @@ struct VariableDefinitionRequest: Identifiable {
     let name: String
 }
 
+struct RequestEditorRestoration: Identifiable, Equatable {
+    let id = UUID()
+    let identity: RequestIdentity
+    let section: RequestEditorSection
+}
+
 @MainActor
 final class AppModel: ObservableObject {
     static let shared = AppModel()
@@ -61,6 +67,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var selectedCollectionID: UUID?
     @Published private(set) var collectionEditorSection: CollectionEditorSection = .variables
     @Published private(set) var requestEditorSections: [RequestIdentity: RequestEditorSection] = [:]
+    @Published private(set) var requestEditorExpansionStates: [RequestIdentity: RequestEditorExpansionState] = [:]
+    @Published private(set) var requestEditorRestoration: RequestEditorRestoration?
     @Published private(set) var variableDefinitionRequest: VariableDefinitionRequest?
     @Published private(set) var showsOngoingRequests = false
     @Published private(set) var now = Date()
@@ -177,6 +185,53 @@ final class AppModel: ObservableObject {
         recordNavigation(.request(identity, section: section))
     }
 
+    func requestEditorExpansionState(for identity: RequestIdentity) -> RequestEditorExpansionState {
+        requestEditorExpansionStates[identity] ?? RequestEditorExpansionState()
+    }
+
+    func reconcileRequestEditorExpansion(
+        for identity: RequestIdentity,
+        initiallyExpanded: Set<RequestEditorAccordion>,
+        content: RequestEditorContentSnapshot
+    ) {
+        guard drafts[identity] != nil else { return }
+        let previous = requestEditorExpansionState(for: identity)
+        var state = requestEditorExpansionState(for: identity)
+        state.reconcile(initiallyExpanded: initiallyExpanded, content: content)
+        guard state != previous else { return }
+        requestEditorExpansionStates[identity] = state
+    }
+
+    func setRequestEditorAccordionExpanded(
+        _ section: RequestEditorAccordion,
+        isExpanded: Bool,
+        for identity: RequestIdentity
+    ) {
+        guard drafts[identity] != nil else { return }
+        let previous = requestEditorExpansionState(for: identity)
+        var state = requestEditorExpansionState(for: identity)
+        state.setExpanded(section, isExpanded)
+        if state != previous {
+            requestEditorExpansionStates[identity] = state
+        }
+        guard isExpanded else { return }
+        setRequestEditorSection(section.navigationSection, for: identity)
+    }
+
+    func expandRequestEditorAccordion(_ section: RequestEditorAccordion, for identity: RequestIdentity) {
+        guard drafts[identity] != nil else { return }
+        let previous = requestEditorExpansionState(for: identity)
+        var state = requestEditorExpansionState(for: identity)
+        state.expand(section)
+        guard state != previous else { return }
+        requestEditorExpansionStates[identity] = state
+    }
+
+    func consumeRequestEditorRestoration(_ id: UUID) {
+        guard requestEditorRestoration?.id == id else { return }
+        requestEditorRestoration = nil
+    }
+
     func request(for identity: RequestIdentity) -> HTTPRequestConfiguration? {
         drafts[identity]
     }
@@ -213,6 +268,7 @@ final class AppModel: ObservableObject {
     }
 
     func select(_ identity: RequestIdentity?) {
+        requestEditorRestoration = nil
         variableDefinitionRequest = nil
         selectedIdentity = identity
         selectedCollectionID = nil
@@ -290,6 +346,7 @@ final class AppModel: ObservableObject {
     }
 
     private func showRequest(_ identity: RequestIdentity) {
+        requestEditorRestoration = nil
         variableDefinitionRequest = nil
         selectedIdentity = identity
         selectedCollectionID = nil
@@ -298,6 +355,7 @@ final class AppModel: ObservableObject {
     }
 
     private func recordNavigation(_ location: NavigationLocation) {
+        requestEditorRestoration = nil
         guard isAvailableNavigationLocation(location) else { return }
         navigationHistory.visit(location)
     }
@@ -332,12 +390,17 @@ final class AppModel: ObservableObject {
 
     private func restoreNavigation(to location: NavigationLocation) {
         guard isAvailableNavigationLocation(location) else { return }
+        requestEditorRestoration = nil
         variableDefinitionRequest = nil
 
         switch location {
         case let .request(identity, section):
             showRequest(identity)
             requestEditorSections[identity] = section
+            if let accordion = RequestEditorAccordion.restored(for: section) {
+                expandRequestEditorAccordion(accordion, for: identity)
+            }
+            requestEditorRestoration = RequestEditorRestoration(identity: identity, section: section)
         case let .requestVariableDefinition(identity, name):
             showRequest(identity)
             requestEditorSections[identity] = .variables
@@ -475,12 +538,18 @@ final class AppModel: ObservableObject {
         return nil
     }
 
-    func setVariable(name: String, value: String, isSecret: Bool, owner: VariableOwner) async throws {
+    func setVariable(
+        name: String,
+        value: String,
+        isSecret: Bool,
+        owner: VariableOwner,
+        operationID: UUID = UUID()
+    ) async throws {
         guard TemplateEngine.isValidVariableName(name) else { throw ConfigurationEditError.invalidName }
         guard canEditVariables(owner) else { throw ConfigurationEditError.readOnly }
         let target = SecretEditTarget.variable(owner, name)
         if isSecret {
-            try await commitSecret(value, target: target) { [weak self] envelope in
+            try await commitSecret(value, target: target, operationID: operationID) { [weak self] envelope in
                 self?.updateVariables(owner) { $0[name] = .encrypted(envelope) }
             }
         } else {
@@ -524,8 +593,10 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func discardVariableSecretEdit(named name: String, owner: VariableOwner) {
-        discardSecretEdit(.variable(owner, name))
+    func discardVariableSecretEdit(named name: String, owner: VariableOwner, operationID: UUID? = nil) {
+        let target = SecretEditTarget.variable(owner, name)
+        if let operationID, secretEditTokens[target] != operationID { return }
+        discardSecretEdit(target)
     }
 
     func setVariableSecret(_ isSecret: Bool, named name: String, owner: VariableOwner) async throws {
@@ -639,10 +710,11 @@ final class AppModel: ObservableObject {
     private func commitSecret(
         _ value: String,
         target: SecretEditTarget,
+        operationID: UUID = UUID(),
         apply: @escaping @MainActor (SecretEnvelope) -> Void
     ) async throws {
         let vault = secretVault
-        try await commitProtectedValue(target: target, operation: {
+        try await commitProtectedValue(target: target, operationID: operationID, operation: {
             let envelope = try await vault.encrypt(value)
             await vault.setAllowsKeyCreation(false)
             return envelope
@@ -651,11 +723,12 @@ final class AppModel: ObservableObject {
 
     private func commitProtectedValue<Value: Sendable>(
         target: SecretEditTarget,
+        operationID: UUID = UUID(),
         blocksTerminationOnFailure: Bool = true,
         operation: @escaping @Sendable () async throws -> Value,
         apply: @escaping @MainActor (Value) -> Void
     ) async throws {
-        let token = UUID()
+        let token = operationID
         secretEditTokens[target] = token
         let task = Task { @MainActor [self] () -> Result<Void, Error> in
             do {
@@ -1181,6 +1254,7 @@ final class AppModel: ObservableObject {
                     self.selectedCollectionID = nil
                 }
                 requestEditorSections = requestEditorSections.filter { workspaceMembers.contains($0.key) }
+                requestEditorExpansionStates = requestEditorExpansionStates.filter { workspaceMembers.contains($0.key) }
                 globalVariables = nextGlobals
                 globalVariablesAreReadOnly = loaded.globalVariablesAreReadOnly
                 storageIssues = loaded.issues
@@ -1684,6 +1758,7 @@ final class AppModel: ObservableObject {
         }
         previewTasks.removeValue(forKey: identity)
         requestEditorSections.removeValue(forKey: identity)
+        requestEditorExpansionStates.removeValue(forKey: identity)
     }
 
     private func replaceCollection(_ collection: RequestCollection) {

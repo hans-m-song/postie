@@ -1,6 +1,6 @@
 # Handoff
 
-Updated 2026-10-18. M1–M4 and follow-ups T-52–T-73 are complete locally. Keep commits local; never push without a new request. Prior commits:8e0a6eb referenced values,66c4443 memory assessment/explicit deferral. Main alone edits .agents documents. No incomplete worker or worktree.
+Updated 2026-10-18. M1–M4 and follow-ups T-52–T-75 are complete locally. Keep commits local; never push without a new request. Prior commits:8e0a6eb referenced values,66c4443 memory assessment/explicit deferral. Main alone edits .agents documents. No incomplete worker or worktree.
 
 ## Latest: T-64–T-67 inherited headers, inspection and editor fixes
 
@@ -43,3 +43,13 @@ See docs/variable-popover-polish.md and docs/navigation-and-editor-polish.md. Or
 Initial getApp attached to an instance without synthetic-directory args, stopped at workspace lock. Closed it; final isolated PID arguments verified before UI. No user runtime config/real Keychain items accessed. New synthetic validation key created for dev.postie.validation.compact.20261018a; never delete automatically. App .build/compact-validation/Postie.app and explicit data/bodies beneath same ignored root. App closed, caffeinate session26318 stopped. Reuse compactValidation after explicit isolated launch; avoid getApp lookup stalls.
 
 Final test/release/dist logs: /Volumes/Data/tmp/postie-m34/navigation-polish-{tests,release,dist}.log. Output dist/Postie.app. Keep commit local, never push. No incomplete workers/worktree. M5, snapshots/cURL/import/log/sync/drag-drop and memory changes remain deferred.
+
+## Latest: T-74–T-75 completed locally — 2026-10-18
+
+User-approved counted request accordions replace section tabs; per-request session expansion state stays separate from navigation. New query/path additions expand relevant panel; ordinary switching preserves manual collapse; explicit history/definition opens destination. Inherited header names/values reuse noneditable native field/compact inspector with explicit request-scope injection across RequestPaneRoot. Narrow-column clipping/compression repaired after native check. Variables retain ordinary drafts; secret buffers clear, accepted saves continue and stale failure cleanup is operation-token matched.
+
+Independent final exact-source119 tests (Core61/App58) passed, zero failures/warnings. Reviewer clear after fixing restore/remount/scroll/async callbacks and failed-save cleanup; initial auth summary compile error fixed. Native final checks passed defaults/counts/whole-heading hit/path autoexpand/session collapse/Back Auth/Settings single scroll; truncated inherited name/value popup, collection/request precedence, GoDef collection and opening/scrolling collapsed request Variables, masked malformed-secret Reveal/error resize. Earlier missing AX actions resolved after final relaunch; no remaining popup action blocker. Successful decrypt not repeated (previous shared inspector native pass); delayed Keychain/IME/lightmode/performance unverified. No sends/userconfig/env/PII/Keychain reads or new key.
+
+Output dist/Postie.app, strict signature checked. Logs /Volumes/Data/tmp/postie-m34/accordion-{tests,release,dist}.log; initial compile log preserved separately. Validation app .build/compact-validation/Postie.app, ID dev.postie.validation.compact.20261018a, explicitly launched with .build/accordion-validation/data and bodies (fake malformed envelope fails before Keychain); app closed and caffeinate8735 stopped. Reuse compactValidation binding only after isolated launch; avoid getApp stalls. Keep prior synthetic key items.
+
+T-76 bulk editing and T-77 request tabs deferred/documented, future Back/Forward must activate destination tab. M5/memory/snapshots/import/cURL/log/sync/drag-drop remain deferred. Keep commit local; never push. No worktree/incomplete workers.

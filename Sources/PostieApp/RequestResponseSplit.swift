@@ -63,6 +63,7 @@ private struct RequestPaneRoot: View {
     var body: some View {
         RequestEditorView(identity: identity)
             .environmentObject(model)
+            .environment(\.variableInspectionOwner, .request(identity))
     }
 }
 

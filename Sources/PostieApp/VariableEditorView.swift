@@ -11,6 +11,7 @@ struct VariableEditorView: View {
     @State private var activeOwner: VariableOwner
     @State private var isVisible = false
     @State private var focusedField: VariableFieldFocus?
+    @State private var activeSession = UUID()
 
     init(owner: VariableOwner, isActive: Bool = true) {
         self.owner = owner
@@ -64,7 +65,7 @@ struct VariableEditorView: View {
             table
         }
         .onAppear {
-            isVisible = true
+            isVisible = isActive
             if activeOwner != owner {
                 changeOwner(to: owner)
             } else {
@@ -72,6 +73,13 @@ struct VariableEditorView: View {
             }
         }
         .onDisappear(perform: editorDidDisappear)
+        .onChange(of: isActive) { _, active in
+            if active {
+                isVisible = true
+            } else {
+                editorBecameInactive()
+            }
+        }
         .onChange(of: owner) { _, newOwner in
             changeOwner(to: newOwner)
         }
@@ -510,12 +518,17 @@ struct VariableEditorView: View {
               currentValue.isEncrypted != isSecret else { return }
 
         let targetOwner = activeOwner
+        let session = activeSession
         updateRow(id) { $0.isBusy = true; $0.errorMessage = nil }
 
         Task { @MainActor in
             do {
                 try await model.setVariableSecret(isSecret, named: row.name, owner: targetOwner)
-                guard isVisible, activeOwner == targetOwner else { return }
+                guard activeOwner == targetOwner, rowState(for: id) != nil else { return }
+                guard isVisible, activeSession == session else {
+                    updateRow(id) { $0.isBusy = false; $0.errorMessage = nil }
+                    return
+                }
                 updateRow(id) {
                     $0.isBusy = false
                     $0.errorMessage = nil
@@ -526,7 +539,11 @@ struct VariableEditorView: View {
                     }
                 }
             } catch {
-                guard isVisible, activeOwner == targetOwner else { return }
+                guard activeOwner == targetOwner, rowState(for: id) != nil else { return }
+                guard isVisible, activeSession == session else {
+                    updateRow(id) { $0.isBusy = false; $0.errorMessage = nil }
+                    return
+                }
                 updateRow(id) {
                     $0.isBusy = false
                     $0.errorMessage = error.localizedDescription
@@ -538,12 +555,17 @@ struct VariableEditorView: View {
     private func revealSecret(for row: VariableEditorRowState) {
         guard isEditable, !row.isBusy, row.nameDraft == row.name else { return }
         let targetOwner = activeOwner
+        let session = activeSession
         updateRow(row.id) { $0.isBusy = true; $0.errorMessage = nil }
 
         Task { @MainActor in
             do {
                 let value = try await model.revealVariable(named: row.name, owner: targetOwner)
-                guard isVisible, activeOwner == targetOwner else { return }
+                guard activeOwner == targetOwner, rowState(for: row.id) != nil else { return }
+                guard isVisible, activeSession == session else {
+                    updateRow(row.id) { $0.isBusy = false }
+                    return
+                }
                 updateRow(row.id) {
                     $0.secretDraft = value
                     $0.isSecretRevealed = true
@@ -552,7 +574,11 @@ struct VariableEditorView: View {
                     $0.errorMessage = nil
                 }
             } catch {
-                guard isVisible, activeOwner == targetOwner else { return }
+                guard activeOwner == targetOwner, rowState(for: row.id) != nil else { return }
+                guard isVisible, activeSession == session else {
+                    updateRow(row.id) { $0.isBusy = false }
+                    return
+                }
                 updateRow(row.id) {
                     $0.isBusy = false
                     $0.errorMessage = error.localizedDescription
@@ -579,21 +605,32 @@ struct VariableEditorView: View {
 
         let value = row.isTrailing ? row.valueDraft : row.secretDraft
         let targetOwner = activeOwner
+        let session = activeSession
+        let operationID = UUID()
         updateRow(row.id) {
             $0.isBusy = true
             $0.errorMessage = nil
             $0.secretSaveInFlightName = name
             $0.secretSaveTargetName = nil
             $0.secretSaveTargetOwner = nil
+            $0.secretSaveTargetOperationID = nil
         }
 
         Task { @MainActor in
             discardFailedSecretSaveTarget(row)
             do {
-                try await model.setVariable(name: name, value: value, isSecret: true, owner: targetOwner)
-                guard isVisible,
-                      activeOwner == targetOwner,
-                      rowState(for: row.id) != nil else { return }
+                try await model.setVariable(
+                    name: name,
+                    value: value,
+                    isSecret: true,
+                    owner: targetOwner,
+                    operationID: operationID
+                )
+                guard activeOwner == targetOwner, rowState(for: row.id) != nil else { return }
+                guard isVisible, activeSession == session else {
+                    finishInactiveSecretSave(for: row.id, name: name, didSave: true)
+                    return
+                }
                 if row.isTrailing {
                     promoteTrailingRow(id: row.id, name: name)
                 } else {
@@ -606,13 +643,22 @@ struct VariableEditorView: View {
                         $0.secretSaveInFlightName = nil
                         $0.secretSaveTargetName = nil
                         $0.secretSaveTargetOwner = nil
+                        $0.secretSaveTargetOperationID = nil
                     }
                 }
             } catch {
                 guard isVisible,
+                      activeSession == session,
                       activeOwner == targetOwner,
                       rowState(for: row.id) != nil else {
-                    model.discardVariableSecretEdit(named: name, owner: targetOwner)
+                    model.discardVariableSecretEdit(
+                        named: name,
+                        owner: targetOwner,
+                        operationID: operationID
+                    )
+                    if activeOwner == targetOwner {
+                        finishInactiveSecretSave(for: row.id, name: name, didSave: false)
+                    }
                     return
                 }
                 updateRow(row.id) {
@@ -621,8 +667,28 @@ struct VariableEditorView: View {
                     $0.secretSaveInFlightName = nil
                     $0.secretSaveTargetName = name
                     $0.secretSaveTargetOwner = targetOwner
+                    $0.secretSaveTargetOperationID = operationID
                 }
             }
+        }
+    }
+
+    private func finishInactiveSecretSave(for id: UUID, name: String, didSave: Bool) {
+        guard let row = rowState(for: id) else { return }
+        if didSave, row.isTrailing, variables[name] != nil {
+            promoteTrailingRow(id: id, name: name)
+            return
+        }
+        updateRow(id) {
+            $0.secretDraft = ""
+            $0.isSecretRevealed = false
+            $0.isEditingSecret = false
+            $0.isBusy = false
+            $0.errorMessage = nil
+            $0.secretSaveInFlightName = nil
+            $0.secretSaveTargetName = nil
+            $0.secretSaveTargetOwner = nil
+            $0.secretSaveTargetOperationID = nil
         }
     }
 
@@ -649,6 +715,7 @@ struct VariableEditorView: View {
             $0.errorMessage = nil
             $0.secretSaveTargetName = nil
             $0.secretSaveTargetOwner = nil
+            $0.secretSaveTargetOperationID = nil
         }
     }
 
@@ -678,6 +745,7 @@ struct VariableEditorView: View {
         promoted.secretSaveInFlightName = nil
         promoted.secretSaveTargetName = nil
         promoted.secretSaveTargetOwner = nil
+        promoted.secretSaveTargetOperationID = nil
         rows.removeAll { $0.name == name }
         rows.append(promoted)
         sortRows()
@@ -744,10 +812,45 @@ struct VariableEditorView: View {
 
     private func editorDidDisappear() {
         isVisible = false
+        activeSession = UUID()
         discardFailedSecretEdits()
         rows = []
         trailingRow = VariableEditorRowState(name: "", isTrailing: true)
         focusedField = nil
+    }
+
+    private func editorBecameInactive() {
+        guard isVisible else { return }
+        isVisible = false
+        activeSession = UUID()
+        focusedField = nil
+        discardFailedSecretEdits()
+
+        for index in rows.indices {
+            let row = rows[index]
+            if row.isEditingSecret && row.secretSaveInFlightName == nil && row.secretSaveTargetOperationID == nil {
+                model.discardVariableSecretEdit(named: row.name, owner: activeOwner)
+            }
+            rows[index].secretDraft = ""
+            rows[index].isEditingSecret = false
+            rows[index].isSecretRevealed = false
+            rows[index].errorMessage = nil
+            rows[index].secretSaveTargetName = nil
+            rows[index].secretSaveTargetOwner = nil
+            rows[index].secretSaveTargetOperationID = nil
+        }
+
+        if trailingRow.isSecretDraft {
+            trailingRow.valueDraft = ""
+            trailingRow.isSecretDraft = false
+        }
+        trailingRow.secretDraft = ""
+        trailingRow.isEditingSecret = false
+        trailingRow.isSecretRevealed = false
+        trailingRow.errorMessage = nil
+        trailingRow.secretSaveTargetName = nil
+        trailingRow.secretSaveTargetOwner = nil
+        trailingRow.secretSaveTargetOperationID = nil
     }
 
     private func discardFailedSecretEdits() {
@@ -762,13 +865,18 @@ struct VariableEditorView: View {
         updateRow(id) {
             $0.secretSaveTargetName = nil
             $0.secretSaveTargetOwner = nil
+            $0.secretSaveTargetOperationID = nil
         }
     }
 
     private func discardFailedSecretSaveTarget(_ row: VariableEditorRowState) {
         guard let name = row.secretSaveTargetName,
               let targetOwner = row.secretSaveTargetOwner else { return }
-        model.discardVariableSecretEdit(named: name, owner: targetOwner)
+        model.discardVariableSecretEdit(
+            named: name,
+            owner: targetOwner,
+            operationID: row.secretSaveTargetOperationID
+        )
     }
 
     private func inlineError(_ message: String) -> some View {
@@ -797,6 +905,7 @@ private struct VariableEditorRowState: Identifiable {
     var secretSaveInFlightName: String?
     var secretSaveTargetName: String?
     var secretSaveTargetOwner: VariableOwner?
+    var secretSaveTargetOperationID: UUID?
 
     init(id: UUID = UUID(), name: String, isTrailing: Bool = false) {
         self.id = id

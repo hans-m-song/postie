@@ -160,6 +160,47 @@ final class AppModelTests: XCTestCase {
         try await model.flushPendingSaves()
     }
 
+    func testRequestAccordionRestorationReopensCollapsedSectionButOrdinaryOpenDoesNot() async throws {
+        let root = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = try makeModel(root: root)
+        await model.createCollection(name: "Accordion navigation")
+        let collectionID = try XCTUnwrap(model.collections.first?.id)
+        await model.createRequest(in: collectionID, name: "First")
+        let first = try XCTUnwrap(model.selectedIdentity)
+        await model.createRequest(in: collectionID, name: "Second")
+        let second = try XCTUnwrap(model.selectedIdentity)
+        let content = RequestEditorContentSnapshot(queryCount: 0, pathNames: [])
+        model.reconcileRequestEditorExpansion(
+            for: first,
+            initiallyExpanded: [.variables],
+            content: content
+        )
+        model.setRequestEditorAccordionExpanded(.variables, isExpanded: false, for: first)
+
+        model.openRequest(first)
+        XCTAssertFalse(model.requestEditorExpansionState(for: first).isExpanded(.variables))
+        XCTAssertNil(model.requestEditorRestoration)
+
+        model.setRequestEditorAccordionExpanded(.variables, isExpanded: true, for: first)
+        model.setRequestEditorAccordionExpanded(.variables, isExpanded: false, for: first)
+        XCTAssertFalse(model.requestEditorExpansionState(for: first).isExpanded(.variables))
+        model.openRequest(second)
+        XCTAssertNil(model.requestEditorRestoration)
+
+        model.navigateBack()
+
+        XCTAssertEqual(model.selectedIdentity, first)
+        XCTAssertEqual(model.requestEditorSection(for: first), .variables)
+        XCTAssertTrue(model.requestEditorExpansionState(for: first).isExpanded(.variables))
+        let restoration = try XCTUnwrap(model.requestEditorRestoration)
+        XCTAssertEqual(restoration.identity, first)
+        XCTAssertEqual(restoration.section, .variables)
+        model.consumeRequestEditorRestoration(restoration.id)
+        XCTAssertNil(model.requestEditorRestoration)
+        try await model.flushPendingSaves()
+    }
+
     func testNavigationSkipsADeletedRequestDestination() async throws {
         let root = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -500,8 +541,15 @@ final class AppModelTests: XCTestCase {
         let model = try makeModel(root: root, secretVault: SecretVault(keyStore: AppModelKeyStore(deniesAccess: true)))
         try await waitUntil { model.canEditVariables(.global) }
         try await model.setVariable(name: "credential", value: "original literal", isSecret: false, owner: .global)
+        let operationID = UUID()
         do {
-            try await model.setVariable(name: "credential", value: "synthetic failed secret", isSecret: true, owner: .global)
+            try await model.setVariable(
+                name: "credential",
+                value: "synthetic failed secret",
+                isSecret: true,
+                owner: .global,
+                operationID: operationID
+            )
             XCTFail("Denied key access must fail the accepted secret commit.")
         } catch {
             XCTAssertEqual(error as? SecretVaultError, .keyUnavailable)
@@ -510,7 +558,11 @@ final class AppModelTests: XCTestCase {
         XCTAssertNotNil(model.variableSaveErrors[.global])
         let failedTermination = await model.prepareForTermination()
         XCTAssertFalse(failedTermination)
-        model.discardVariableSecretEdit(named: "credential", owner: .global)
+        model.discardVariableSecretEdit(named: "credential", owner: .global, operationID: UUID())
+        XCTAssertNotNil(model.variableSaveErrors[.global])
+        let stillBlocked = await model.prepareForTermination()
+        XCTAssertFalse(stillBlocked)
+        model.discardVariableSecretEdit(named: "credential", owner: .global, operationID: operationID)
         XCTAssertNil(model.variableSaveErrors[.global])
         let terminated = await model.prepareForTermination()
         XCTAssertTrue(terminated)
