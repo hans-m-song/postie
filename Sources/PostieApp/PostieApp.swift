@@ -33,6 +33,10 @@ struct PostieApp: App {
                 .frame(minWidth: 900, minHeight: 600)
         }
         .commands {
+            CommandGroup(replacing: .appSettings) {
+                Button("Settings…") { model.showGlobalSettings() }
+                    .keyboardShortcut(",", modifiers: [.command])
+            }
             CommandGroup(after: .sidebar) {
                 Button("Back") { model.navigateBack() }
                     .keyboardShortcut("[", modifiers: [.command])

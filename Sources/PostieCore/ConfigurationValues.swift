@@ -43,6 +43,7 @@ public enum AuthenticationKind: String, Codable, CaseIterable, Sendable {
     case none
     case basic
     case bearer
+    case apiKey
 }
 
 public struct RequestAuthentication: Codable, Equatable, Sendable {
@@ -50,12 +51,23 @@ public struct RequestAuthentication: Codable, Equatable, Sendable {
     public var username: String
     public var password: SecretEnvelope?
     public var token: SecretEnvelope?
+    public var apiKeyHeaderName: String?
+    public var apiKey: SecretEnvelope?
 
-    public init(kind: AuthenticationKind = .none, username: String = "", password: SecretEnvelope? = nil, token: SecretEnvelope? = nil) {
+    public init(
+        kind: AuthenticationKind = .none,
+        username: String = "",
+        password: SecretEnvelope? = nil,
+        token: SecretEnvelope? = nil,
+        apiKeyHeaderName: String? = nil,
+        apiKey: SecretEnvelope? = nil
+    ) {
         self.kind = kind
         self.username = username
         self.password = password
         self.token = token
+        self.apiKeyHeaderName = apiKeyHeaderName
+        self.apiKey = apiKey
     }
 }
 
@@ -99,25 +111,38 @@ public struct ResolvedVariable: Equatable, Sendable {
     }
 }
 
+public enum HTTPHeaderSource: String, Codable, Equatable, Sendable {
+    case request
+    case collection
+    case requestAuth
+    case collectionAuth
+    case automatic
+}
+
 public struct PreparedHTTPRequest: Sendable {
     public let configuration: HTTPRequestConfiguration
     public let request: URLRequest
     public let referencedInputs: [String: ResolvedVariable]
     public let sensitiveRequestHeaderNames: Set<String>
     public let secretRequestHeaderNames: Set<String>
+    public let requestHeaderSources: [String: HTTPHeaderSource]
 
     public init(
         configuration: HTTPRequestConfiguration,
         request: URLRequest,
         referencedInputs: [String: ResolvedVariable],
         sensitiveRequestHeaderNames: Set<String> = [],
-        secretRequestHeaderNames: Set<String> = []
+        secretRequestHeaderNames: Set<String> = [],
+        requestHeaderSources: [String: HTTPHeaderSource] = [:]
     ) {
         self.configuration = configuration
         self.request = request
         self.referencedInputs = referencedInputs
         self.sensitiveRequestHeaderNames = Set(sensitiveRequestHeaderNames.map { $0.lowercased() })
         self.secretRequestHeaderNames = Set(secretRequestHeaderNames.map { $0.lowercased() })
+        self.requestHeaderSources = requestHeaderSources.reduce(into: [:]) { result, entry in
+            result[entry.key.lowercased()] = entry.value
+        }
     }
 }
 

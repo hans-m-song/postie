@@ -143,7 +143,7 @@ struct VariableEditorView: View {
                         isRevealed: secretRevealedBinding(for: row.id),
                         isSecret: true
                     )
-                    .frame(minWidth: 0, maxWidth: .infinity)
+                    .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
                     .disabled(!canEditValue)
 
                     Divider().frame(height: 22)
@@ -171,12 +171,12 @@ struct VariableEditorView: View {
             } else {
                 HStack(spacing: 8) {
                     nameField(for: row)
-                        .frame(minWidth: 0, maxWidth: .infinity)
+                        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
 
                     Divider().frame(height: 22)
 
                     valueCell(for: row, canEditRow: canEditValue)
-                        .frame(minWidth: 0, maxWidth: .infinity)
+                        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
 
                     Divider().frame(height: 22)
 
@@ -232,7 +232,7 @@ struct VariableEditorView: View {
         if row.isTrailing {
             HStack(spacing: 6) {
                 nameField(for: row)
-                    .frame(minWidth: 0, maxWidth: .infinity)
+                    .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
 
                 Toggle("Secret", isOn: secretBinding(for: row.id))
                     .labelsHidden()
@@ -324,7 +324,7 @@ struct VariableEditorView: View {
                 focused: focusBinding(for: .value(row.id))
             )
             .font(.system(.body, design: .monospaced))
-            .frame(minWidth: 0, maxWidth: .infinity)
+            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
             .disabled(!canEditRow)
         }
     }
@@ -935,7 +935,7 @@ private struct SecretValueInput: View {
                     TextField(placeholder, text: $value)
                 }
             }
-            .frame(minWidth: 0, maxWidth: .infinity)
+            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
             .textFieldStyle(.plain)
             .font(.system(.body, design: .monospaced))
 

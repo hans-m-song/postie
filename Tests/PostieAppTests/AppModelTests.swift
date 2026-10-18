@@ -107,6 +107,263 @@ final class AppModelTests: XCTestCase {
         XCTAssertNil(model.autosaveErrors[first])
     }
 
+    func testRequestURLAndQueryTableEditsRoundTripAndPersistInOrder() async throws {
+        let root = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let expectedURL = "https://example.test/items?tag=a%2Fb&first=a%20%2B%20b&fresh=x%2Fy#frag%2Fvalue?tail"
+        let keyStore = AppModelKeyStore()
+        var savedIdentity: RequestIdentity?
+        weak var firstModel: AppModel?
+        do {
+            let model = try makeModel(root: root, secretVault: SecretVault(keyStore: keyStore))
+            firstModel = model
+            await model.createCollection(name: "Query editing")
+            let collectionID = try XCTUnwrap(model.collections.first?.id)
+            await model.createRequest(in: collectionID)
+            let requestIdentity = try XCTUnwrap(model.selectedIdentity)
+            savedIdentity = requestIdentity
+            let source = "https://example.test/items?first=one&tag=a%2Fb&tag=two+words&remove=gone#frag%2Fvalue?tail"
+
+            model.updateURL(source, for: requestIdentity)
+
+            XCTAssertEqual(model.displayURL(for: requestIdentity), source)
+            var request = try XCTUnwrap(model.request(for: requestIdentity))
+            XCTAssertEqual(request.url, "https://example.test/items#frag%2Fvalue?tail")
+            XCTAssertEqual(request.query.map(\.name), ["first", "tag", "tag", "remove"])
+            XCTAssertEqual(request.query.map(\.value), ["one", "a/b", "two+words", "gone"])
+
+            var rows = request.query
+            rows[0].value = "a + b"
+            rows[2].isEnabled = false
+            rows.remove(at: 3)
+            rows.append(HTTPField(name: "fresh", value: "x/y", isEnabled: false))
+            rows.swapAt(0, 1)
+            model.updateQuery(rows, for: requestIdentity)
+
+            XCTAssertEqual(
+                model.displayURL(for: requestIdentity),
+                "https://example.test/items?tag=a%2Fb&first=a%20%2B%20b#frag%2Fvalue?tail"
+            )
+            request = try XCTUnwrap(model.request(for: requestIdentity))
+            XCTAssertEqual(request.query.map(\.name), ["tag", "first", "tag", "fresh"])
+            XCTAssertEqual(request.query.map(\.isEnabled), [true, true, false, false])
+
+            rows = request.query
+            rows[3].isEnabled = true
+            model.updateQuery(rows, for: requestIdentity)
+
+            XCTAssertEqual(model.displayURL(for: requestIdentity), expectedURL)
+            try await model.flushPendingSaves()
+
+            let stored = try readRequest(root: root, identity: requestIdentity)
+            XCTAssertEqual(stored["url"] as? String, "https://example.test/items#frag%2Fvalue?tail")
+            let storedQuery = try XCTUnwrap(stored["query"] as? [[String: Any]])
+            XCTAssertEqual(storedQuery.compactMap { $0["name"] as? String }, ["tag", "first", "tag", "fresh"])
+            XCTAssertEqual(storedQuery.compactMap { $0["isEnabled"] as? Bool }, [true, true, false, true])
+
+            let terminated = await model.prepareForTermination()
+            XCTAssertTrue(terminated)
+        }
+
+        try await waitUntil { firstModel == nil }
+        let requestIdentity = try XCTUnwrap(savedIdentity)
+        let reloaded = try makeModel(root: root, secretVault: SecretVault(keyStore: keyStore))
+        try await waitUntil { reloaded.request(for: requestIdentity) != nil }
+        XCTAssertEqual(reloaded.displayURL(for: requestIdentity), expectedURL)
+        XCTAssertEqual(reloaded.request(for: requestIdentity)?.query.map(\.isEnabled), [true, true, false, true])
+        _ = await reloaded.prepareForTermination()
+    }
+
+    func testBareAndEscapedQueryValuesSurviveURLEditingAndReload() async throws {
+        let root = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let keyStore = AppModelKeyStore()
+        var savedBareIdentity: RequestIdentity?
+        var savedEscapedIdentity: RequestIdentity?
+        weak var firstModel: AppModel?
+        let editedURL = "https://example.test/edited?raw=\\{{literal}}"
+        let context = VariableContext(request: ["literal": .plain("must remain literal")])
+        do {
+            let model = try makeModel(root: root, secretVault: SecretVault(keyStore: keyStore))
+            firstModel = model
+            await model.createCollection(name: "Query value round trips")
+            let collectionID = try XCTUnwrap(model.collections.first?.id)
+
+            await model.createRequest(in: collectionID, name: "Bare query")
+            let bareIdentity = try XCTUnwrap(model.selectedIdentity)
+            savedBareIdentity = bareIdentity
+            model.updateURL("https://example.test?key=value", for: bareIdentity)
+            try await model.flushPendingSaves()
+            model.updateURL("https://example.test?key", for: bareIdentity)
+            XCTAssertEqual(model.displayURL(for: bareIdentity), "https://example.test?key")
+
+            await model.createRequest(in: collectionID, name: "Escaped query")
+            let escapedIdentity = try XCTUnwrap(model.selectedIdentity)
+            savedEscapedIdentity = escapedIdentity
+            let source = "https://example.test/original?raw=\\{{literal}}"
+            model.updateURL(source, for: escapedIdentity)
+            model.updateURL(editedURL, for: escapedIdentity)
+            XCTAssertEqual(model.displayURL(for: escapedIdentity), editedURL)
+            try await model.flushPendingSaves()
+
+            let request = try XCTUnwrap(model.request(for: escapedIdentity))
+            let prepared = try await RequestPreparer.prepare(request, context: context, decryptor: nil)
+            XCTAssertEqual(prepared.request.url?.absoluteString, "https://example.test/edited?raw=%7B%7Bliteral%7D%7D")
+            let terminated = await model.prepareForTermination()
+            XCTAssertTrue(terminated)
+        }
+
+        try await waitUntil { firstModel == nil }
+        let bareIdentity = try XCTUnwrap(savedBareIdentity)
+        let escapedIdentity = try XCTUnwrap(savedEscapedIdentity)
+        let reloaded = try makeModel(root: root, secretVault: SecretVault(keyStore: keyStore))
+        try await waitUntil {
+            reloaded.request(for: bareIdentity) != nil && reloaded.request(for: escapedIdentity) != nil
+        }
+        XCTAssertEqual(reloaded.displayURL(for: bareIdentity), "https://example.test?key")
+        XCTAssertEqual(reloaded.displayURL(for: escapedIdentity), editedURL)
+        let reloadedEscapedRequest = try XCTUnwrap(reloaded.request(for: escapedIdentity))
+        let reloadedPrepared = try await RequestPreparer.prepare(reloadedEscapedRequest, context: context, decryptor: nil)
+        XCTAssertEqual(reloadedPrepared.request.url?.absoluteString, "https://example.test/edited?raw=%7B%7Bliteral%7D%7D")
+        _ = await reloaded.prepareForTermination()
+    }
+
+    func testGlobalOptionsPersistAndClearedRequestOverridesInheritPerField() async throws {
+        let root = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let defaults = HTTPOptions(
+            followRedirects: true,
+            inactivityTimeout: 30,
+            overallTimeout: 120,
+            maximumResponseBytes: 1_000_000
+        )
+        let keyStore = AppModelKeyStore()
+        var savedInheritedIdentity: RequestIdentity?
+        var savedLegacyIdentity: RequestIdentity?
+        weak var firstModel: AppModel?
+        var overrides = HTTPOptionsOverrides(
+            followRedirects: false,
+            inactivityTimeout: 9,
+            maximumResponseBytes: 1_000,
+            overallTimeoutIsUnlimited: true
+        )
+        let legacyOptions = HTTPOptions(followRedirects: false, inactivityTimeout: 17, overallTimeout: nil, maximumResponseBytes: nil)
+        do {
+            let model = try makeModel(root: root, secretVault: SecretVault(keyStore: keyStore))
+            firstModel = model
+            try await waitUntil { !model.globalOptionsAreReadOnly }
+            model.updateGlobalOptions(defaults)
+            await model.createCollection(name: "HTTP defaults")
+            let collectionID = try XCTUnwrap(model.collections.first?.id)
+            await model.createRequest(in: collectionID, name: "Inherited")
+            let inheritedIdentity = try XCTUnwrap(model.selectedIdentity)
+            savedInheritedIdentity = inheritedIdentity
+            model.updateRequestOptionOverrides(overrides, for: inheritedIdentity)
+            XCTAssertEqual(
+                model.requestOptionOverrides(for: inheritedIdentity).resolve(against: defaults),
+                HTTPOptions(followRedirects: false, inactivityTimeout: 9, overallTimeout: nil, maximumResponseBytes: 1_000)
+            )
+
+            overrides.followRedirects = nil
+            overrides.inactivityTimeout = nil
+            model.updateRequestOptionOverrides(overrides, for: inheritedIdentity)
+            XCTAssertEqual(model.requestOptionOverrides(for: inheritedIdentity), overrides)
+            XCTAssertEqual(
+                model.requestOptionOverrides(for: inheritedIdentity).resolve(against: defaults),
+                HTTPOptions(followRedirects: true, inactivityTimeout: 30, overallTimeout: nil, maximumResponseBytes: 1_000)
+            )
+
+            await model.createRequest(in: collectionID, name: "Legacy explicit")
+            let legacyIdentity = try XCTUnwrap(model.selectedIdentity)
+            savedLegacyIdentity = legacyIdentity
+            model.updateDraft(legacyIdentity) {
+                $0.optionOverrides = nil
+                $0.options = legacyOptions
+            }
+            XCTAssertEqual(model.requestOptionOverrides(for: legacyIdentity), .explicit(legacyOptions))
+            try await model.flushPendingSaves()
+
+            let storedLegacy = try readRequest(root: root, identity: legacyIdentity)
+            XCTAssertNil(storedLegacy["optionOverrides"])
+            let terminated = await model.prepareForTermination()
+            XCTAssertTrue(terminated)
+        }
+
+        try await waitUntil { firstModel == nil }
+        let inheritedIdentity = try XCTUnwrap(savedInheritedIdentity)
+        let legacyIdentity = try XCTUnwrap(savedLegacyIdentity)
+        let reloaded = try makeModel(root: root, secretVault: SecretVault(keyStore: keyStore))
+        try await waitUntil { !reloaded.globalOptionsAreReadOnly && reloaded.request(for: inheritedIdentity) != nil }
+        XCTAssertEqual(reloaded.globalOptions, defaults)
+        XCTAssertEqual(reloaded.requestOptionOverrides(for: inheritedIdentity), overrides)
+        XCTAssertEqual(
+            reloaded.requestOptionOverrides(for: inheritedIdentity).resolve(against: reloaded.globalOptions),
+            HTTPOptions(followRedirects: true, inactivityTimeout: 30, overallTimeout: nil, maximumResponseBytes: 1_000)
+        )
+        XCTAssertEqual(reloaded.requestOptionOverrides(for: legacyIdentity), .explicit(legacyOptions))
+        XCTAssertEqual(
+            reloaded.requestOptionOverrides(for: legacyIdentity).resolve(against: reloaded.globalOptions),
+            legacyOptions
+        )
+        _ = await reloaded.prepareForTermination()
+    }
+
+    func testHTTPSettingsInputsRejectInvalidTimeoutsAndSizeOverflow() {
+        XCTAssertNil(HTTPSettingsInput.timeout(from: "0", decimalSeparator: "."))
+        XCTAssertNil(HTTPSettingsInput.timeout(from: "2s", decimalSeparator: "."))
+        XCTAssertNil(HTTPSettingsInput.responseBytes(from: "1.5 MB", multiplier: 1_000_000, decimalSeparator: "."))
+        XCTAssertEqual(HTTPSettingsInput.responseBytes(from: "1.5", multiplier: 1_000_000, decimalSeparator: "."), 1_500_000)
+        XCTAssertNil(HTTPSettingsInput.responseBytes(from: "9223372036855", multiplier: 1_000_000, decimalSeparator: "."))
+    }
+
+    func testNewRequestInheritsGlobalOptionsThroughSettingsNavigationAndExecution() async throws {
+        let fixture = try AppHTTPFixture()
+        let root = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = try makeModel(root: root, secretVault: SecretVault(keyStore: AppModelKeyStore()))
+        try await waitUntil { !model.globalOptionsAreReadOnly }
+        let defaults = HTTPOptions(
+            followRedirects: true,
+            inactivityTimeout: 5,
+            overallTimeout: 60,
+            maximumResponseBytes: 1_000_000
+        )
+        model.updateGlobalOptions(defaults)
+        await model.createCollection(name: "Inherited execution")
+        let collectionID = try XCTUnwrap(model.collections.first?.id)
+        await model.createRequest(in: collectionID)
+        let requestIdentity = try XCTUnwrap(model.selectedIdentity)
+        XCTAssertEqual(model.requestOptionOverrides(for: requestIdentity), HTTPOptionsOverrides())
+        XCTAssertEqual(model.requestOptionOverrides(for: requestIdentity).resolve(against: model.globalOptions), defaults)
+        let redirectURL = try fixture.url(path: "/redirect", query: [URLQueryItem(name: "to", value: "/echo")])
+        model.updateDraft(requestIdentity) {
+            $0.url = redirectURL
+        }
+        try await model.flushPendingSaves()
+
+        model.showGlobalSettings()
+        XCTAssertTrue(model.showsGlobalSettings)
+        XCTAssertTrue(model.canNavigateBack)
+        model.navigateBack()
+        XCTAssertFalse(model.showsGlobalSettings)
+        XCTAssertEqual(model.selectedIdentity, requestIdentity)
+        XCTAssertTrue(model.canNavigateForward)
+        model.navigateForward()
+        XCTAssertTrue(model.showsGlobalSettings)
+        model.navigateBack()
+
+        model.startRequest(requestIdentity)
+        let active = try XCTUnwrap(model.activeRuns[requestIdentity])
+        XCTAssertEqual(active.request.options, defaults)
+        try await waitUntil {
+            model.activeRuns[requestIdentity] == nil && model.latestResponses[requestIdentity] != nil
+        }
+        let response = try XCTUnwrap(model.latestResponses[requestIdentity]?.response)
+        XCTAssertEqual(response.finalURL.path, "/echo")
+        XCTAssertNil(model.runErrors[requestIdentity])
+        _ = await model.prepareForTermination()
+    }
+
     func testNavigationHistoryRestoresTabsAndVariableDefinitionsWithoutSending() async throws {
         let root = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -744,6 +1001,134 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(keyStore.creationCount, 0)
         XCTAssertEqual(model.globalVariables["newValue"], .plain("preserved"))
         let terminated = await model.prepareForTermination()
+        XCTAssertTrue(terminated)
+    }
+
+    func testAPIKeyOnlyCiphertextPreventsCreatingAReplacementKey() async throws {
+        let root = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let sourceVault = SecretVault(keyStore: AppModelKeyStore())
+        let apiKey = try await sourceVault.encrypt("synthetic API key ciphertext")
+        do {
+            let store = try CollectionStore(rootURL: root.appendingPathComponent("data"))
+            let collection = try await store.createCollection(name: "Missing API key key")
+            try await store.saveCollectionConfiguration(
+                CollectionRequestDefaults(authentication: RequestAuthentication(
+                    kind: .apiKey,
+                    apiKeyHeaderName: "X-Service-Key",
+                    apiKey: apiKey
+                )),
+                variables: [:],
+                in: collection.id
+            )
+        }
+
+        let keyStore = MissingCollectionKeyStore()
+        let model = try makeModel(root: root, secretVault: SecretVault(keyStore: keyStore))
+        try await waitUntil { model.canEditVariables(.global) }
+        try model.setPlainVariable(name: "newValue", value: "preserved", owner: .global)
+        do {
+            try await model.setVariableSecret(true, named: "newValue", owner: .global)
+            XCTFail("API-key-only ciphertext must prevent replacement-key creation.")
+        } catch {
+            XCTAssertEqual(error as? SecretVaultError, .keyCreationNotAllowed)
+        }
+        XCTAssertEqual(keyStore.creationCount, 0)
+        XCTAssertEqual(model.globalVariables["newValue"], .plain("preserved"))
+        let terminated = await model.prepareForTermination()
+        XCTAssertTrue(terminated)
+    }
+
+    func testAPIKeyAuthenticationEncryptsEditsAndReloadsForCollectionAndRequest() async throws {
+        let root = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let keyStore = AppModelKeyStore()
+        var savedIdentity: RequestIdentity?
+        weak var firstModel: AppModel?
+
+        do {
+            let model = try makeModel(root: root, secretVault: SecretVault(keyStore: keyStore))
+            firstModel = model
+            await model.createCollection(name: "API key persistence")
+            let collectionID = try XCTUnwrap(model.collections.first?.id)
+            try await waitUntil { model.canEditVariables(.collection(collectionID)) }
+
+            model.setAuthenticationKind(.apiKey, owner: .collection(collectionID))
+            model.updateAPIKeyHeaderName("X-Collection-Key", owner: .collection(collectionID))
+            try await model.setAuthenticationSecret(
+                "synthetic collection API key",
+                field: .apiKey,
+                owner: .collection(collectionID)
+            )
+
+            await model.createRequest(in: collectionID, name: "Request API key")
+            let requestIdentity = try XCTUnwrap(model.selectedIdentity)
+            savedIdentity = requestIdentity
+            try await waitUntil { model.canEditVariables(.request(requestIdentity)) }
+            XCTAssertTrue(try XCTUnwrap(model.request(for: requestIdentity)).inheritsCollectionAuthentication)
+
+            model.setAuthenticationKind(.apiKey, owner: .request(requestIdentity))
+            model.updateAPIKeyHeaderName("X-Request-Key", owner: .request(requestIdentity))
+            try await model.setAuthenticationSecret(
+                "synthetic request API key",
+                field: .apiKey,
+                owner: .request(requestIdentity)
+            )
+
+            model.updateAPIKeyHeaderName("X-Collection-Key-Edited", owner: .collection(collectionID))
+            try await model.setAuthenticationSecret(
+                "synthetic collection API key edited",
+                field: .apiKey,
+                owner: .collection(collectionID)
+            )
+            model.updateAPIKeyHeaderName("X-Request-Key-Edited", owner: .request(requestIdentity))
+            try await model.setAuthenticationSecret(
+                "synthetic request API key edited",
+                field: .apiKey,
+                owner: .request(requestIdentity)
+            )
+            try await model.flushPendingSaves()
+
+            let collectionPath = root.appendingPathComponent(
+                "data/collections/\(collectionID.uuidString.lowercased())/collection.json"
+            )
+            let collectionJSON = try String(contentsOf: collectionPath, encoding: .utf8)
+            let requestJSON = try String(
+                contentsOf: requestFileURL(root: root, identity: requestIdentity),
+                encoding: .utf8
+            )
+            XCTAssertFalse(collectionJSON.contains("synthetic collection API key"))
+            XCTAssertFalse(collectionJSON.contains("synthetic collection API key edited"))
+            XCTAssertFalse(requestJSON.contains("synthetic request API key"))
+            XCTAssertFalse(requestJSON.contains("synthetic request API key edited"))
+            XCTAssertEqual(model.authentication(for: .collection(collectionID)).apiKeyHeaderName, "X-Collection-Key-Edited")
+            XCTAssertEqual(model.authentication(for: .request(requestIdentity)).apiKeyHeaderName, "X-Request-Key-Edited")
+
+            let terminated = await model.prepareForTermination()
+            XCTAssertTrue(terminated)
+        }
+
+        try await waitUntil { firstModel == nil }
+        let requestIdentity = try XCTUnwrap(savedIdentity)
+        let reloaded = try makeModel(root: root, secretVault: SecretVault(keyStore: keyStore))
+        try await waitUntil {
+            reloaded.request(for: requestIdentity) != nil &&
+                reloaded.canEditVariables(.collection(requestIdentity.collectionID))
+        }
+
+        let collectionAuthentication = reloaded.authentication(for: .collection(requestIdentity.collectionID))
+        let requestAuthentication = reloaded.authentication(for: .request(requestIdentity))
+        XCTAssertEqual(collectionAuthentication.kind, .apiKey)
+        XCTAssertEqual(collectionAuthentication.apiKeyHeaderName, "X-Collection-Key-Edited")
+        XCTAssertEqual(requestAuthentication.kind, .apiKey)
+        XCTAssertEqual(requestAuthentication.apiKeyHeaderName, "X-Request-Key-Edited")
+        XCTAssertFalse(try XCTUnwrap(reloaded.request(for: requestIdentity)).inheritsCollectionAuthentication)
+
+        let collectionSecret = try await reloaded.revealAuthenticationSecret(field: .apiKey, owner: .collection(requestIdentity.collectionID))
+        let requestSecret = try await reloaded.revealAuthenticationSecret(field: .apiKey, owner: .request(requestIdentity))
+        XCTAssertEqual(collectionSecret, "synthetic collection API key edited")
+        XCTAssertEqual(requestSecret, "synthetic request API key edited")
+        let terminated = await reloaded.prepareForTermination()
         XCTAssertTrue(terminated)
     }
 

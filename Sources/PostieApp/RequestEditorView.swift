@@ -2,7 +2,11 @@ import SwiftUI
 import PostieCore
 
 enum InheritedHeaderStatus {
-    static func label(for field: HTTPField, requestHeaders: [HTTPField]) -> String {
+    static func label(
+        for field: HTTPField,
+        requestHeaders: [HTTPField],
+        selectedAuthenticationHeaderName: String? = nil
+    ) -> String {
         guard field.isEnabled else { return "Disabled" }
         guard !(field.name.isEmpty && field.value.isEmpty) else { return "Inactive" }
 
@@ -19,17 +23,25 @@ enum InheritedHeaderStatus {
         if literalMatches.contains(where: \.isEnabled) {
             return "Overridden"
         }
+        if let selectedAuthenticationHeaderName,
+           !selectedAuthenticationHeaderName.isEmpty,
+           !hasTemplateSyntax(in: selectedAuthenticationHeaderName),
+           !collectionNameIsTemplated,
+           selectedAuthenticationHeaderName.caseInsensitiveCompare(field.name) == .orderedSame {
+            return "Overridden"
+        }
         let requestNameIsTemplated = namedRequestHeaders.contains {
             hasTemplateSyntax(in: $0.name)
         }
-        if (collectionNameIsTemplated && !namedRequestHeaders.isEmpty) || requestNameIsTemplated {
+        let authenticationNameIsTemplated = selectedAuthenticationHeaderName.map {
+            hasTemplateSyntax(in: $0)
+        } ?? false
+        if collectionNameIsTemplated || requestNameIsTemplated || authenticationNameIsTemplated {
             return "Variable dependent"
         }
-        if !literalMatches.isEmpty {
-            return "Suppressed"
-        }
+        if !literalMatches.isEmpty { return "Suppressed" }
 
-        return "Inherited"
+        return "Effective"
     }
 
     private static func hasTemplateSyntax(in name: String) -> Bool {
@@ -51,7 +63,8 @@ struct RequestToolbar: View {
 
     private var validPathParameters: Set<String> {
         guard let request = model.request(for: identity) else { return [] }
-        return Set(RequestPreparer.pathParameterNames(in: request.url).filter { name in
+        let displayURL = model.displayURL(for: identity)
+        return Set(RequestPreparer.pathParameterNames(in: displayURL).filter { name in
             let matching = request.pathParameters.filter { $0.name == name && $0.isEnabled }
             return matching.count == 1 && matching[0].value.isEmpty == false
         })
@@ -85,7 +98,7 @@ struct RequestToolbar: View {
                     .disabled(!model.canEdit(identity))
                 HighlightedTextField(
                     "https://example.com",
-                    text: binding(\.url),
+                    text: urlBinding,
                     availableVariables: availableVariables,
                     validPathParameters: validPathParameters,
                     isURL: true,
@@ -130,6 +143,13 @@ struct RequestToolbar: View {
             set: { value in model.updateDraft(identity) { $0[keyPath: keyPath] = value } }
         )
     }
+
+    private var urlBinding: Binding<String> {
+        Binding(
+            get: { model.displayURL(for: identity) },
+            set: { model.updateURL($0, for: identity) }
+        )
+    }
 }
 
 private struct RequestEditorReferenceSourcesKey: Hashable {
@@ -141,6 +161,7 @@ struct RequestEditorView: View {
     @EnvironmentObject private var model: AppModel
     let identity: RequestIdentity
     @State private var referencedVariableNames: [String] = []
+    @State private var authenticationHeaderResetID = UUID()
 
     private var selectedSection: RequestEditorSection { model.requestEditorSection(for: identity) }
 
@@ -192,6 +213,9 @@ struct RequestEditorView: View {
         .onChange(of: identity) { oldIdentity, _ in
             discardSecretEdits(for: oldIdentity)
             referencedVariableNames = []
+        }
+        .onChange(of: authenticationHeaderResetKey) { _, _ in
+            authenticationHeaderResetID = UUID()
         }
         .onDisappear {
             discardSecretEdits(for: identity)
@@ -246,7 +270,9 @@ struct RequestEditorView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     sectionContent(using: proxy)
-                        .padding(18)
+                        .padding(.horizontal, 18)
+                        .padding(.top, selectedSection == .request ? 8 : 18)
+                        .padding(.bottom, 18)
                         .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
                 }
                 .onAppear {
@@ -297,13 +323,11 @@ struct RequestEditorView: View {
 
     private func requestTabContent(using proxy: ScrollViewProxy) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            tabAnchor(.request)
-
             accordion(.query, title: "Query", summary: rowCount(model.request(for: identity)?.query.count ?? 0), using: proxy) {
                 FieldTable(
                     title: "Query parameters",
                     showsTitle: false,
-                    fields: fieldsBinding(\.query),
+                    fields: queryFieldsBinding,
                     keyPlaceholder: "Name",
                     valuePlaceholder: "Value",
                     availableVariables: availableVariableNames,
@@ -342,7 +366,9 @@ struct RequestEditorView: View {
                         inheritedFieldStatus: { inheritedHeaderStatus(for: $0) },
                         onOpenInheritedSource: {
                             model.showCollection(identity.collectionID, section: .headers)
-                        }
+                        },
+                        derivedRows: derivedAuthenticationHeaders,
+                        derivedRowsResetKey: authenticationHeaderResetID
                     )
                     .id(identity)
                 }
@@ -352,6 +378,7 @@ struct RequestEditorView: View {
                 bodyEditor
             }
         }
+        .background(alignment: .topLeading) { tabAnchor(.request) }
     }
 
     private var authenticationTabContent: some View {
@@ -434,6 +461,7 @@ struct RequestEditorView: View {
             guard model.selectedIdentity == targetIdentity,
                   model.selectedCollectionID == nil,
                   !model.showsGlobalVariables,
+                  !model.showsGlobalSettings,
                   !model.showsOngoingRequests,
                   model.requestEditorSection(for: targetIdentity) == section else { return }
             if animated {
@@ -455,6 +483,7 @@ struct RequestEditorView: View {
             guard model.selectedIdentity == targetIdentity,
                   model.selectedCollectionID == nil,
                   !model.showsGlobalVariables,
+                  !model.showsGlobalSettings,
                   !model.showsOngoingRequests,
                   model.requestEditorSection(for: targetIdentity) == .request else { return }
             if requireExpanded,
@@ -504,8 +533,7 @@ struct RequestEditorView: View {
                         .lineLimit(1)
                         .truncationMode(.tail)
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 11)
+                .padding(.vertical, 4)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
             }
@@ -515,9 +543,7 @@ struct RequestEditorView: View {
 
             if retainsContent || isExpanded {
                 content()
-                    .padding(.horizontal, 12)
-                    .padding(.top, 2)
-                    .padding(.bottom, 12)
+                    .padding(.top, 8)
                     .accessibilityHidden(!isExpanded)
                     .allowsHitTesting(isExpanded)
                     .disabled(!isExpanded || !model.canEdit(identity))
@@ -525,8 +551,6 @@ struct RequestEditorView: View {
                     .clipped()
             }
         }
-        .background(.background, in: RoundedRectangle(cornerRadius: 8))
-        .overlay { RoundedRectangle(cornerRadius: 8).stroke(.quaternary, lineWidth: 1) }
     }
 
     private var headerSummary: String {
@@ -534,7 +558,8 @@ struct RequestEditorView: View {
         let inheritedCount = model.collection(for: identity)?.headers.count ?? 0
         let parts = [
             ownCount > 0 ? "\(ownCount) own" : nil,
-            inheritedCount > 0 ? "\(inheritedCount) inherited" : nil
+            inheritedCount > 0 ? "\(inheritedCount) inherited" : nil,
+            !derivedAuthenticationHeaders.isEmpty ? "auth" : nil
         ].compactMap { $0 }
         return parts.isEmpty ? "No headers" : parts.joined(separator: " · ")
     }
@@ -556,9 +581,55 @@ struct RequestEditorView: View {
     }
 
     private func inheritedHeaderStatus(for field: HTTPField) -> String {
-        InheritedHeaderStatus.label(
+        let request = model.request(for: identity)
+        let collection = model.collection(for: identity)
+        let authentication = request?.inheritsCollectionAuthentication == true
+            ? collection?.authentication
+            : request?.authentication
+        return InheritedHeaderStatus.label(
             for: field,
-            requestHeaders: model.request(for: identity)?.headers ?? []
+            requestHeaders: request?.headers ?? [],
+            selectedAuthenticationHeaderName: authentication.flatMap(HeaderPresentation.authenticationHeaderName)
+        )
+    }
+
+    private var derivedAuthenticationHeaders: [DerivedHeaderRowPresentation] {
+        guard let request = model.request(for: identity),
+              let collection = model.collection(for: identity) else { return [] }
+
+        let source: HTTPHeaderSource = request.inheritsCollectionAuthentication ? .collectionAuth : .requestAuth
+        let authentication = request.inheritsCollectionAuthentication ? collection.authentication : request.authentication
+        let openSource: () -> Void = {
+            switch source {
+            case .requestAuth:
+                model.setRequestEditorSection(.authentication, for: identity)
+            case .collectionAuth:
+                model.showCollection(identity.collectionID, section: .authentication)
+            default:
+                break
+            }
+        }
+
+        guard let row = HeaderPresentation.authenticationRow(
+            authentication: authentication,
+            source: source,
+            requestHeaders: request.headers,
+            availableVariables: availableVariableNames,
+            onReveal: { try await model.previewAuthenticationHeader(for: identity, source: source) },
+            onOpenSource: openSource
+        ) else { return [] }
+
+        return [row]
+    }
+
+    private var authenticationHeaderResetKey: HeaderPreviewResetKey {
+        let collection = model.collection(for: identity)
+        return HeaderPreviewResetKey(
+            identity: identity,
+            request: model.request(for: identity),
+            collectionHeaders: collection?.headers ?? [],
+            collectionAuthentication: collection?.authentication,
+            variableContext: model.variableContext(for: identity)
         )
     }
 
@@ -601,8 +672,9 @@ struct RequestEditorView: View {
 
     private var referenceSources: [String] {
         guard let request = model.request(for: identity) else { return [] }
-        let pathNames = Set(RequestPreparer.pathParameterNames(in: request.url))
-        var sources = [request.url]
+        let displayURL = model.displayURL(for: identity)
+        let pathNames = Set(RequestPreparer.pathParameterNames(in: displayURL))
+        var sources = [displayURL]
         if let collection = model.collection(for: identity) {
             if request.inheritsCollectionAuthentication && collection.authentication.kind == .basic {
                 sources.append(collection.authentication.username)
@@ -621,8 +693,8 @@ struct RequestEditorView: View {
     }
 
     private var pathParameterNames: [String] {
-        guard let request = model.request(for: identity) else { return [] }
-        return RequestPreparer.pathParameterNames(in: request.url)
+        guard model.request(for: identity) != nil else { return [] }
+        return RequestPreparer.pathParameterNames(in: model.displayURL(for: identity))
     }
 
     private var availableVariableNames: Set<String> {
@@ -635,6 +707,7 @@ struct RequestEditorView: View {
     private func discardSecretEdits(for identity: RequestIdentity) {
         model.discardAuthenticationSecretEdit(field: .password, for: identity)
         model.discardAuthenticationSecretEdit(field: .token, for: identity)
+        model.discardAuthenticationSecretEdit(field: .apiKey, for: identity)
         for name in model.variables(for: .request(identity)).keys {
             model.discardVariableSecretEdit(named: name, owner: .request(identity))
         }
@@ -675,101 +748,13 @@ struct RequestEditorView: View {
     }
 
     private var settingsEditor: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Toggle("Follow redirects", isOn: binding(\.options.followRedirects))
-                .toggleStyle(.checkbox)
-                .disabled(!model.canEdit(identity))
-
-            Divider()
-
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Timeouts and response limit")
-                    .font(.headline)
-
-                HStack {
-                    Text("Inactivity timeout")
-                    Spacer()
-                    TextField("Seconds", value: binding(\.options.inactivityTimeout), format: .number.precision(.fractionLength(0...1)))
-                        .font(.system(.body, design: .monospaced))
-                        .multilineTextAlignment(.trailing)
-                        .frame(width: 92)
-                    Text("seconds")
-                        .foregroundStyle(.secondary)
-                }
-
-                Toggle("Overall deadline", isOn: overallTimeoutEnabled)
-                if model.request(for: identity)?.options.overallTimeout != nil {
-                    HStack {
-                        Text("Overall timeout")
-                        Spacer()
-                        TextField("Seconds", value: overallTimeoutBinding, format: .number.precision(.fractionLength(0...1)))
-                            .font(.system(.body, design: .monospaced))
-                            .multilineTextAlignment(.trailing)
-                            .frame(width: 92)
-                        Text("seconds")
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(.leading, 20)
-                }
-
-                Toggle("Maximum response size", isOn: responseLimitEnabled)
-                if model.request(for: identity)?.options.maximumResponseBytes != nil {
-                    HStack {
-                        Text("Response limit")
-                        Spacer()
-                        TextField("Bytes", value: responseLimitBinding, format: .number)
-                            .font(.system(.body, design: .monospaced))
-                            .multilineTextAlignment(.trailing)
-                            .frame(width: 120)
-                        Text("bytes")
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(.leading, 20)
-                }
-            }
+        HTTPSettingsEditor(
+            overrides: model.requestOptionOverrides(for: identity),
+            globalOptions: model.globalOptions,
+            isReadOnly: !model.canEdit(identity)
+        ) { overrides in
+            model.updateRequestOptionOverrides(overrides, for: identity)
         }
-    }
-
-    private var overallTimeoutEnabled: Binding<Bool> {
-        Binding(
-            get: { model.request(for: identity)?.options.overallTimeout != nil },
-            set: { enabled in
-                model.updateDraft(identity) {
-                    $0.options.overallTimeout = enabled ? HTTPOptions().overallTimeout : nil
-                }
-            }
-        )
-    }
-
-    private var overallTimeoutBinding: Binding<Double> {
-        Binding(
-            get: { model.request(for: identity)?.options.overallTimeout ?? HTTPOptions().overallTimeout ?? 1800 },
-            set: { value in
-                guard value.isFinite, value > 0 else { return }
-                model.updateDraft(identity) { $0.options.overallTimeout = value }
-            }
-        )
-    }
-
-    private var responseLimitEnabled: Binding<Bool> {
-        Binding(
-            get: { model.request(for: identity)?.options.maximumResponseBytes != nil },
-            set: { enabled in
-                model.updateDraft(identity) {
-                    $0.options.maximumResponseBytes = enabled ? HTTPOptions().maximumResponseBytes : nil
-                }
-            }
-        )
-    }
-
-    private var responseLimitBinding: Binding<Int64> {
-        Binding(
-            get: { model.request(for: identity)?.options.maximumResponseBytes ?? HTTPOptions().maximumResponseBytes ?? 1_073_741_824 },
-            set: { value in
-                guard value >= 0 else { return }
-                model.updateDraft(identity) { $0.options.maximumResponseBytes = value }
-            }
-        )
     }
 
     private func activeRunSummary(_ active: AppModel.ActiveRun) -> some View {
@@ -827,6 +812,13 @@ struct RequestEditorView: View {
         Binding(
             get: { model.request(for: identity)?[keyPath: keyPath] ?? [] },
             set: { value in model.updateDraft(identity) { $0[keyPath: keyPath] = value } }
+        )
+    }
+
+    private var queryFieldsBinding: Binding<[HTTPField]> {
+        Binding(
+            get: { model.request(for: identity)?.query ?? [] },
+            set: { model.updateQuery($0, for: identity) }
         )
     }
 

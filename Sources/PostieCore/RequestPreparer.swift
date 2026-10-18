@@ -13,7 +13,7 @@ private enum RequestPreparationError: LocalizedError {
     case collectionDefaultsUnavailable
     case invalidBasicCredentials
     case invalidBearerCredential
-    case authorizationConflict
+    case invalidAPIKeyCredential
     case invalidTimeout
 
     var errorDescription: String? {
@@ -42,8 +42,8 @@ private enum RequestPreparationError: LocalizedError {
             return "Basic credentials contain invalid characters."
         case .invalidBearerCredential:
             return "The Bearer token must be non-empty and contain no whitespace or control characters."
-        case .authorizationConflict:
-            return "Structured authentication conflicts with an enabled Authorization header."
+        case .invalidAPIKeyCredential:
+            return "The API key must be non-empty and contain no control characters."
         case .invalidTimeout:
             return "Timeouts and response limits must be valid positive values."
         }
@@ -94,7 +94,7 @@ public enum RequestPreparer {
             configuration,
             pathParameters: pathParameters,
             variableValues: resolvedVariables.mapValues(\.value),
-            authorizationHeader: nil
+            structuredHeader: nil
         )
     }
 
@@ -111,19 +111,33 @@ public enum RequestPreparer {
         let selectedAuthentication = configuration.inheritsCollectionAuthentication
             ? collection.authentication
             : configuration.authentication
+        let selectedAuthenticationHeaderName = try authenticationHeaderName(for: selectedAuthentication)
         let requestHeaders = configuration.headers.filter(hasNonblankName)
         let collectionHeaderNames = collection.headers.filter { $0.isEnabled && hasNonblankName($0) }
         let headerNameSources = collectionHeaderNames.map(\.name) + requestHeaders.map(\.name)
         let headerNameVariables = try referencedNames(in: headerNameSources)
         var resolvedVariables = try await resolveVariables(headerNameVariables, in: effectiveContext, decryptor: decryptor)
         let resolvedNameValues = resolvedVariables.mapValues(\.value)
-        let suppressedHeaderNames = Set(try requestHeaders.map {
+        let resolvedRequestHeaderNames = try requestHeaders.map {
             try substitute($0.name, values: resolvedNameValues).lowercased()
-        })
+        }
+        let suppressedHeaderNames = Set(resolvedRequestHeaderNames)
+        let manualAuthenticationHeaderOverride = selectedAuthenticationHeaderName.map { authenticationHeaderName in
+            zip(requestHeaders, resolvedRequestHeaderNames).contains { pair in
+                pair.0.isEnabled && isActive(pair.0) && pair.1 == authenticationHeaderName.lowercased()
+            }
+        } ?? false
+        let authenticationToPrepare = manualAuthenticationHeaderOverride ? RequestAuthentication() : selectedAuthentication
         var inheritedHeaders: [HTTPField] = []
         for field in collection.headers where isActive(field) {
             let name = try substitute(field.name, values: resolvedNameValues)
-            guard !suppressedHeaderNames.contains(name.lowercased()) else { continue }
+            let normalizedName = name.lowercased()
+            let matchesStructuredAuthenticationHeader = selectedAuthenticationHeaderName.map {
+                $0.caseInsensitiveCompare(name) == .orderedSame
+            } ?? false
+            guard !suppressedHeaderNames.contains(normalizedName), !matchesStructuredAuthenticationHeader else {
+                continue
+            }
             inheritedHeaders.append(field)
         }
 
@@ -132,23 +146,28 @@ public enum RequestPreparer {
             configuration,
             pathParameters: pathParameters,
             headers: headers,
-            authentication: selectedAuthentication
+            authentication: authenticationToPrepare
         )
         let names = try referencedNames(in: sources).filter { resolvedVariables[$0] == nil }
         let remainingVariables = try await resolveVariables(names, in: effectiveContext, decryptor: decryptor)
         resolvedVariables.merge(remainingVariables) { current, _ in current }
 
         let secretTemplate: String?
-        switch selectedAuthentication.kind {
+        switch authenticationToPrepare.kind {
         case .none:
             secretTemplate = nil
         case .basic:
-            guard let envelope = selectedAuthentication.password else {
+            guard let envelope = authenticationToPrepare.password else {
                 throw RequestPreparationError.invalidAuthentication
             }
             secretTemplate = try await decrypt(envelope, using: decryptor)
         case .bearer:
-            guard let envelope = selectedAuthentication.token else {
+            guard let envelope = authenticationToPrepare.token else {
+                throw RequestPreparationError.invalidAuthentication
+            }
+            secretTemplate = try await decrypt(envelope, using: decryptor)
+        case .apiKey:
+            guard let envelope = authenticationToPrepare.apiKey else {
                 throw RequestPreparationError.invalidAuthentication
             }
             secretTemplate = try await decrypt(envelope, using: decryptor)
@@ -166,25 +185,51 @@ public enum RequestPreparer {
             resolvedVariables: resolvedVariables,
             variableValues: variableValues
         )
-        let authorizationHeader = try structuredAuthorizationHeader(
-            selectedAuthentication,
+        let structuredHeader = try structuredAuthenticationHeader(
+            authenticationToPrepare,
+            headerName: selectedAuthenticationHeaderName,
             secretTemplate: secretTemplate,
             variableValues: variableValues
         )
+        var sensitiveRequestHeaderNames = headerSensitivity.sensitiveRequestHeaderNames
+        let secretRequestHeaderNames = headerSensitivity.secretRequestHeaderNames
+        if selectedAuthentication.kind == .apiKey, let selectedAuthenticationHeaderName {
+            sensitiveRequestHeaderNames.insert(selectedAuthenticationHeaderName.lowercased())
+        }
         let request = try makeRequest(
             configuration,
             pathParameters: pathParameters,
             variableValues: variableValues,
-            authorizationHeader: authorizationHeader,
+            structuredHeader: structuredHeader,
             headers: headers
         )
+        var requestHeaderSources: [String: HTTPHeaderSource] = [:]
+        for field in inheritedHeaders where isActive(field) {
+            let name = try substitute(field.name, values: variableValues).lowercased()
+            requestHeaderSources[name] = .collection
+        }
+        for field in configuration.headers where isActive(field) {
+            let name = try substitute(field.name, values: variableValues).lowercased()
+            requestHeaderSources[name] = .request
+        }
+        if let structuredHeader {
+            let source: HTTPHeaderSource = configuration.inheritsCollectionAuthentication ? .collectionAuth : .requestAuth
+            requestHeaderSources[structuredHeader.name.lowercased()] = source
+        }
+        let presentHeaderNames = Set((request.allHTTPHeaderFields ?? [:]).keys.map { $0.lowercased() })
+        requestHeaderSources = requestHeaderSources.reduce(into: [:]) { result, entry in
+            if presentHeaderNames.contains(entry.key) {
+                result[entry.key] = entry.value
+            }
+        }
 
         return PreparedHTTPRequest(
             configuration: configuration,
             request: request,
             referencedInputs: resolvedVariables,
-            sensitiveRequestHeaderNames: headerSensitivity.sensitiveRequestHeaderNames,
-            secretRequestHeaderNames: headerSensitivity.secretRequestHeaderNames
+            sensitiveRequestHeaderNames: sensitiveRequestHeaderNames,
+            secretRequestHeaderNames: secretRequestHeaderNames,
+            requestHeaderSources: requestHeaderSources
         )
     }
 
@@ -205,9 +250,10 @@ public enum RequestPreparer {
         headers: [HTTPField]? = nil,
         authentication: RequestAuthentication? = nil
     ) -> [String] {
-        var sources = [configuration.url]
+        let query = QueryParameters.normalize(url: configuration.url, fields: configuration.query)
+        var sources = [query.baseURL]
         sources.append(contentsOf: pathParameters.map(\.value))
-        sources.append(contentsOf: configuration.query.filter(isActive).flatMap { [$0.name, $0.value] })
+        sources.append(contentsOf: query.fields.filter(QueryParameters.isActive).flatMap(QueryParameters.templateSources))
         sources.append(contentsOf: (headers ?? configuration.headers).filter(isActive).flatMap { [$0.name, $0.value] })
 
         if configuration.bodyEnabled {
@@ -347,11 +393,26 @@ public enum RequestPreparer {
         }
     }
 
-    private static func structuredAuthorizationHeader(
+    private static func authenticationHeaderName(for authentication: RequestAuthentication) throws -> String? {
+        switch authentication.kind {
+        case .none:
+            return nil
+        case .basic, .bearer:
+            return "Authorization"
+        case .apiKey:
+            guard let name = authentication.apiKeyHeaderName, isHTTPToken(name) else {
+                throw RequestPreparationError.invalidHeaderName
+            }
+            return name
+        }
+    }
+
+    private static func structuredAuthenticationHeader(
         _ authentication: RequestAuthentication,
+        headerName: String?,
         secretTemplate: String?,
         variableValues: [String: String]
-    ) throws -> String? {
+    ) throws -> (name: String, value: String)? {
         switch authentication.kind {
         case .none:
             return nil
@@ -365,7 +426,7 @@ public enum RequestPreparer {
                 throw RequestPreparationError.invalidBasicCredentials
             }
             let credentials = Data("\(username):\(password)".utf8).base64EncodedString()
-            return "Basic \(credentials)"
+            return (headerName ?? "Authorization", "Basic \(credentials)")
         case .bearer:
             guard let secretTemplate else {
                 throw RequestPreparationError.invalidAuthentication
@@ -378,7 +439,19 @@ public enum RequestPreparer {
                   }) else {
                 throw RequestPreparationError.invalidBearerCredential
             }
-            return "Bearer \(token)"
+            return (headerName ?? "Authorization", "Bearer \(token)")
+        case .apiKey:
+            guard let secretTemplate else {
+                throw RequestPreparationError.invalidAuthentication
+            }
+            let key = try substitute(secretTemplate, values: variableValues)
+            guard !key.isEmpty, !containsControlCharacters(key) else {
+                throw RequestPreparationError.invalidAPIKeyCredential
+            }
+            guard let headerName else {
+                throw RequestPreparationError.invalidHeaderName
+            }
+            return (headerName, key)
         }
     }
 
@@ -407,7 +480,7 @@ public enum RequestPreparer {
         _ configuration: HTTPRequestConfiguration,
         pathParameters: [PathParameterValue],
         variableValues: [String: String],
-        authorizationHeader: String?,
+        structuredHeader: (name: String, value: String)?,
         headers: [HTTPField]? = nil
     ) throws -> URLRequest {
         var encodedPathValues: [String: String] = [:]
@@ -419,9 +492,10 @@ public enum RequestPreparer {
             encodedPathValues[pathParameter.name] = encodedValue
         }
 
-        let originalPathReferences = TemplateEngine.pathReferences(in: configuration.url)
+        let query = QueryParameters.normalize(url: configuration.url, fields: configuration.query)
+        let originalPathReferences = TemplateEngine.pathReferences(in: query.baseURL)
         let urlWithPathValues = replacingPathParameters(
-            in: configuration.url,
+            in: query.baseURL,
             references: originalPathReferences,
             values: encodedPathValues
         )
@@ -441,25 +515,8 @@ public enum RequestPreparer {
             throw RequestPreparationError.invalidMethod
         }
 
-        var queryItems: [HTTPField] = []
-        for field in configuration.query where isActive(field) {
-            let name = try substitute(field.name, values: variableValues)
-            let value = try substitute(field.value, values: variableValues)
-            queryItems.append(HTTPField(id: field.id, name: name, value: value, isEnabled: true))
-        }
-
-        if !queryItems.isEmpty {
-            let encodedItems = try queryItems.map { field -> String in
-                guard let name = field.name.addingPercentEncoding(withAllowedCharacters: unreservedCharacters),
-                      let value = field.value.addingPercentEncoding(withAllowedCharacters: unreservedCharacters) else {
-                    throw RequestPreparationError.invalidURL
-                }
-                return "\(name)=\(value)"
-            }
-            let encodedAdditions = encodedItems.joined(separator: "&")
-            let existingQuery = components.percentEncodedQuery ?? ""
-            let separator = existingQuery.isEmpty || existingQuery.hasSuffix("&") ? "" : "&"
-            components.percentEncodedQuery = existingQuery + separator + encodedAdditions
+        if let encodedQuery = try QueryParameters.encodedQuery(fields: query.fields, values: variableValues) {
+            components.percentEncodedQuery = components.percentEncodedQuery.map { $0 + "&" + encodedQuery } ?? encodedQuery
         }
 
         guard let url = components.url else {
@@ -481,11 +538,6 @@ public enum RequestPreparer {
             ))
         }
 
-        if authorizationHeader != nil,
-           resolvedHeaders.contains(where: { $0.name.caseInsensitiveCompare("Authorization") == .orderedSame }) {
-            throw RequestPreparationError.authorizationConflict
-        }
-
         for field in resolvedHeaders {
             guard isHTTPToken(field.name) else {
                 throw RequestPreparationError.invalidHeaderName
@@ -503,8 +555,14 @@ public enum RequestPreparer {
             }
         }
 
-        if let authorizationHeader {
-            request.setValue(authorizationHeader, forHTTPHeaderField: "Authorization")
+        if let structuredHeader {
+            guard isHTTPToken(structuredHeader.name) else {
+                throw RequestPreparationError.invalidHeaderName
+            }
+            guard isValidHeaderValue(structuredHeader.value) else {
+                throw RequestPreparationError.invalidHeaderValue
+            }
+            request.setValue(structuredHeader.value, forHTTPHeaderField: structuredHeader.name)
         }
 
         if configuration.bodyEnabled {

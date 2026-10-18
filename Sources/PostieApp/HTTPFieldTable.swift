@@ -12,7 +12,10 @@ struct FieldTable: View {
     var completionVariables: [VariableCompletion] = []
     var inheritedFields: [HTTPField] = []
     var inheritedFieldStatus: (HTTPField) -> String = { _ in "Inherited" }
+    var inheritedFieldSourceLabel = "Collection"
     var onOpenInheritedSource: (() -> Void)?
+    var derivedRows: [DerivedHeaderRowPresentation] = []
+    var derivedRowsResetKey: UUID?
     @State private var trailingField = HTTPField()
     @State private var focusedField: FieldFocus?
 
@@ -48,6 +51,10 @@ struct FieldTable: View {
                     inheritedRow(field)
                 }
 
+                ForEach(derivedRows) { row in
+                    DerivedHeaderRow(presentation: row, resetKey: derivedRowsResetKey?.uuidString ?? row.id)
+                }
+
                 ForEach(fields + [trailingField]) { field in
                     editableRow(field, isTrailingField: field.id == trailingField.id)
                 }
@@ -81,7 +88,7 @@ struct FieldTable: View {
                 focused: focusBinding(for: .name(field.id))
             )
                 .font(.system(.body, design: .monospaced))
-                .frame(minWidth: 0, maxWidth: .infinity)
+                .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
             Divider().frame(height: 22)
             HighlightedTextField(
                 valuePlaceholder,
@@ -91,7 +98,7 @@ struct FieldTable: View {
                 focused: focusBinding(for: .value(field.id))
             )
                 .font(.system(.body, design: .monospaced))
-                .frame(minWidth: 0, maxWidth: .infinity)
+                .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
             if isTrailingField {
                 Color.clear.frame(width: 26)
             } else {
@@ -128,7 +135,7 @@ struct FieldTable: View {
                     availableVariables: availableVariables
                 )
                     .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-                Text(status)
+                Text(HeaderPresentation.sourceStatusLabel(source: inheritedFieldSourceLabel, status: status))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)

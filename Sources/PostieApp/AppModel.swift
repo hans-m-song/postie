@@ -46,6 +46,9 @@ final class AppModel: ObservableObject {
 
     @Published private(set) var globalVariables: VariableValues = [:]
     @Published private(set) var globalVariablesAreReadOnly = true
+    @Published private(set) var globalOptions = HTTPOptions()
+    @Published private(set) var globalOptionsAreReadOnly = true
+    @Published private(set) var showsGlobalSettings = false
     @Published private(set) var variableSaveErrors: [VariableOwner: String] = [:]
     @Published private(set) var showsGlobalVariables = false
     @Published var showsRequestSearch = false
@@ -174,7 +177,8 @@ final class AppModel: ObservableObject {
         guard selectedIdentity == identity,
               selectedCollectionID == nil,
               !showsOngoingRequests,
-              !showsGlobalVariables else { return }
+              !showsGlobalVariables,
+              !showsGlobalSettings else { return }
         recordNavigation(.request(identity, section: section))
     }
 
@@ -247,6 +251,7 @@ final class AppModel: ObservableObject {
     }
 
     func select(_ identity: RequestIdentity?) {
+        showsGlobalSettings = false
         variableDefinitionRequest = nil
         selectedIdentity = identity
         selectedCollectionID = nil
@@ -256,6 +261,7 @@ final class AppModel: ObservableObject {
     }
 
     func showOngoingRequests() {
+        showsGlobalSettings = false
         variableDefinitionRequest = nil
         selectedCollectionID = nil
         showsGlobalVariables = false
@@ -264,6 +270,7 @@ final class AppModel: ObservableObject {
     }
 
     func showRequests() {
+        showsGlobalSettings = false
         variableDefinitionRequest = nil
         selectedCollectionID = nil
         showsOngoingRequests = false
@@ -283,6 +290,7 @@ final class AppModel: ObservableObject {
     }
 
     func showGlobalVariables() {
+        showsGlobalSettings = false
         variableDefinitionRequest = nil
         selectedCollectionID = nil
         showsGlobalVariables = true
@@ -295,7 +303,35 @@ final class AppModel: ObservableObject {
         showsRequestSearch = true
     }
 
+    func showGlobalSettings() {
+        variableDefinitionRequest = nil
+        selectedCollectionID = nil
+        showsGlobalVariables = false
+        showsOngoingRequests = false
+        showsGlobalSettings = true
+        recordNavigation(.globalSettings)
+    }
+
+    func updateGlobalOptions(_ options: HTTPOptions) {
+        guard workspaceLoaded, !globalOptionsAreReadOnly, !isTerminating else { return }
+        globalOptions = options
+        markWorkspaceChanged()
+        scheduleVariableSave(.global)
+    }
+
+    func requestOptionOverrides(for identity: RequestIdentity) -> HTTPOptionsOverrides {
+        guard let request = request(for: identity) else { return HTTPOptionsOverrides() }
+        return request.optionOverrides ?? .explicit(request.options)
+    }
+
+    func updateRequestOptionOverrides(_ overrides: HTTPOptionsOverrides, for identity: RequestIdentity) {
+        updateDraft(identity) {
+            $0.optionOverrides = overrides
+        }
+    }
+
     func showCollection(_ id: UUID, section: CollectionEditorSection = .variables) {
+        showsGlobalSettings = false
         guard collections.contains(where: { $0.id == id }) else { return }
         variableDefinitionRequest = nil
         collectionEditorSection = section
@@ -324,6 +360,7 @@ final class AppModel: ObservableObject {
     }
 
     private func showRequest(_ identity: RequestIdentity) {
+        showsGlobalSettings = false
         variableDefinitionRequest = nil
         selectedIdentity = identity
         selectedCollectionID = nil
@@ -352,7 +389,7 @@ final class AppModel: ObservableObject {
             return isAvailableRequest(identity) && variables(for: .request(identity))[name] != nil
         case let .collection(id, _):
             return collections.contains { $0.id == id }
-        case .globalVariables, .ongoingRequests:
+        case .globalVariables, .globalSettings, .ongoingRequests:
             return true
         }
     }
@@ -367,6 +404,7 @@ final class AppModel: ObservableObject {
     private func restoreNavigation(to location: NavigationLocation) {
         guard isAvailableNavigationLocation(location) else { return }
         variableDefinitionRequest = nil
+        showsGlobalSettings = false
 
         switch location {
         case let .request(identity, section):
@@ -385,6 +423,11 @@ final class AppModel: ObservableObject {
             selectedCollectionID = nil
             showsGlobalVariables = true
             showsOngoingRequests = false
+        case .globalSettings:
+            selectedCollectionID = nil
+            showsGlobalVariables = false
+            showsOngoingRequests = false
+            showsGlobalSettings = true
         case .ongoingRequests:
             selectedCollectionID = nil
             showsGlobalVariables = false
@@ -502,7 +545,7 @@ final class AppModel: ObservableObject {
     }
 
     private var activeVariableOwner: VariableOwner? {
-        guard !showsOngoingRequests else { return nil }
+        guard !showsOngoingRequests, !showsGlobalSettings else { return nil }
         if showsGlobalVariables { return .global }
         if let selectedCollectionID { return .collection(selectedCollectionID) }
         if let selectedIdentity { return .request(selectedIdentity) }
@@ -618,12 +661,22 @@ final class AppModel: ObservableObject {
         if case let .request(identity) = owner {
             setInheritsCollectionAuthentication(false, for: identity)
         }
-        updateAuthentication(owner) { $0.kind = kind }
+        updateAuthentication(owner) {
+            $0.kind = kind
+            if kind == .apiKey, $0.apiKeyHeaderName == nil {
+                $0.apiKeyHeaderName = "X-API-Key"
+            }
+        }
     }
 
     func updateAuthenticationUsername(_ username: String, owner: VariableOwner) {
         guard canEditVariables(owner) else { return }
         updateAuthentication(owner) { $0.username = username }
+    }
+
+    func updateAPIKeyHeaderName(_ headerName: String, owner: VariableOwner) {
+        guard owner != .global, canEditVariables(owner) else { return }
+        updateAuthentication(owner) { $0.apiKeyHeaderName = headerName.isEmpty ? nil : headerName }
     }
 
     func setAuthenticationSecret(_ value: String, field: AuthenticationSecretField, owner: VariableOwner) async throws {
@@ -633,6 +686,7 @@ final class AppModel: ObservableObject {
                 switch field {
                 case .password: $0.password = envelope
                 case .token: $0.token = envelope
+                case .apiKey: $0.apiKey = envelope
                 }
             }
         }
@@ -641,8 +695,77 @@ final class AppModel: ObservableObject {
     func revealAuthenticationSecret(field: AuthenticationSecretField, owner: VariableOwner) async throws -> String {
         guard owner != .global else { throw ConfigurationEditError.unavailable }
         let authentication = authentication(for: owner)
-        guard let envelope = field == .password ? authentication.password : authentication.token else { return "" }
+        let envelope: SecretEnvelope?
+        switch field {
+        case .password: envelope = authentication.password
+        case .token: envelope = authentication.token
+        case .apiKey: envelope = authentication.apiKey
+        }
+        guard let envelope else { return "" }
         return try await secretVault.decrypt(envelope)
+    }
+
+    func previewAuthenticationHeader(for identity: RequestIdentity, source: HTTPHeaderSource) async throws -> String {
+        guard let request = request(for: identity),
+              let collection = collection(for: identity) else { throw ConfigurationEditError.unavailable }
+        let variableContext = variableContext(for: identity)
+        let collectionHeaders = collection.headers
+
+        let authentication: RequestAuthentication
+        switch source {
+        case .requestAuth:
+            guard !request.inheritsCollectionAuthentication else { throw ConfigurationEditError.unavailable }
+            authentication = request.authentication
+        case .collectionAuth:
+            guard request.inheritsCollectionAuthentication else { throw ConfigurationEditError.unavailable }
+            authentication = collection.authentication
+        case .request, .collection, .automatic:
+            throw ConfigurationEditError.unavailable
+        }
+
+        var preview = HTTPRequestConfiguration()
+        preview.url = "https://postie.invalid/"
+        preview.pathParameters = []
+        preview.query = []
+        preview.headers = []
+        preview.body = ""
+        preview.bodyEnabled = false
+        preview.authentication = authentication
+        preview.inheritsCollectionAuthentication = false
+
+        let expectedHeaderName = HeaderPresentation.authenticationHeaderName(for: authentication)
+        guard let expectedHeaderName, !expectedHeaderName.isEmpty else {
+            throw ConfigurationEditError.unavailable
+        }
+
+        let prepared = try await RequestPreparer.prepare(
+            preview,
+            context: variableContext,
+            decryptor: secretVault
+        )
+
+        let resolvedHeaderName: String?
+        if HeaderPresentation.hasTemplateSyntax(in: expectedHeaderName) {
+            resolvedHeaderName = prepared.requestHeaderSources.first { $0.value == .requestAuth }?.key
+        } else {
+            resolvedHeaderName = expectedHeaderName
+        }
+        guard let resolvedHeaderName,
+              let value = prepared.request.value(forHTTPHeaderField: resolvedHeaderName),
+              self.request(for: identity) == request,
+              self.variableContext(for: identity) == variableContext,
+              self.collection(for: identity)?.headers == collectionHeaders,
+              source != .collectionAuth || self.collection(for: identity)?.authentication == authentication,
+              selectedIdentity == identity,
+              selectedCollectionID == nil,
+              !showsGlobalVariables,
+              !showsGlobalSettings,
+              !showsOngoingRequests,
+              requestEditorSection(for: identity) == .request ||
+                  requestEditorSection(for: identity) == .authentication else {
+            throw ConfigurationEditError.unavailable
+        }
+        return value
     }
 
     func discardAuthenticationSecretEdit(field: AuthenticationSecretField, owner: VariableOwner) {
@@ -772,9 +895,31 @@ final class AppModel: ObservableObject {
 
     func updateDraft(_ identity: RequestIdentity, _ update: (inout HTTPRequestConfiguration) -> Void) {
         guard canEdit(identity), var draft = drafts[identity] else { return }
+        let oldOptions = draft.options
+        let oldOverrides = draft.optionOverrides
         update(&draft)
+        if draft.options != oldOptions, draft.optionOverrides == oldOverrides {
+            draft.optionOverrides = .explicit(draft.options)
+        }
         drafts[identity] = draft
         scheduleAutosave(for: identity)
+    }
+
+    func displayURL(for identity: RequestIdentity) -> String {
+        guard let request = request(for: identity) else { return "" }
+        return QueryParameters.render(baseURL: request.url, fields: request.query)
+    }
+
+    func updateURL(_ url: String, for identity: RequestIdentity) {
+        updateDraft(identity) { request in
+            let parsed = QueryParameters.parse(displayURL: url, previousFields: request.query, previousBase: request.url)
+            request.url = parsed.baseURL
+            request.query = parsed.fields
+        }
+    }
+
+    func updateQuery(_ fields: [HTTPField], for identity: RequestIdentity) {
+        updateDraft(identity) { $0.query = fields }
     }
 
     func createCollection(name: String) async {
@@ -962,8 +1107,10 @@ final class AppModel: ObservableObject {
     func startRequest(_ identity: RequestIdentity) {
         guard canEdit(identity),
               activeRuns[identity] == nil,
-              let configuration = drafts[identity],
+              var configuration = drafts[identity],
               let executionManager else { return }
+
+        configuration.options = requestOptionOverrides(for: identity).resolve(against: globalOptions)
 
         let token = UUID()
         let context = variableContext(for: identity)
@@ -1228,6 +1375,8 @@ final class AppModel: ObservableObject {
                 requestEditorExpansionStates = requestEditorExpansionStates.filter { workspaceMembers.contains($0.key) }
                 globalVariables = nextGlobals
                 globalVariablesAreReadOnly = loaded.globalVariablesAreReadOnly
+                if !dirtyVariableOwners.contains(.global) { globalOptions = loaded.globalOptions }
+                globalOptionsAreReadOnly = loaded.globalOptionsAreReadOnly
                 storageIssues = loaded.issues
                 for identity in nextDrafts.keys where drafts[identity] == nil {
                     editVersions[identity] = 0
@@ -1291,12 +1440,14 @@ final class AppModel: ObservableObject {
 
     private static func containsCiphertext(_ request: HTTPRequestConfiguration) -> Bool {
         request.variables.values.contains(where: \.isEncrypted) ||
-            request.authentication.password != nil || request.authentication.token != nil
+            request.authentication.password != nil || request.authentication.token != nil ||
+            request.authentication.apiKey != nil
     }
 
     private static func containsCiphertext(_ collection: RequestCollection) -> Bool {
         collection.variables.values.contains(where: \.isEncrypted) ||
-            collection.authentication.password != nil || collection.authentication.token != nil
+            collection.authentication.password != nil || collection.authentication.token != nil ||
+            collection.authentication.apiKey != nil
     }
 
     private func scheduleVariableSave(_ owner: VariableOwner) {
@@ -1319,6 +1470,9 @@ final class AppModel: ObservableObject {
 
     private func enqueueVariableSave(_ values: VariableValues, owner: VariableOwner, version: UInt64) {
         guard let store else { return }
+        let options = globalOptions
+        let saveOptions = !globalOptionsAreReadOnly
+        let saveVariables = !globalVariablesAreReadOnly
         let defaults: CollectionRequestDefaults?
         if case let .collection(id) = owner, let collection = collection(id: id) {
             defaults = CollectionRequestDefaults(headers: collection.headers, authentication: collection.authentication)
@@ -1328,7 +1482,9 @@ final class AppModel: ObservableObject {
             await previous?.value
             do {
                 switch owner {
-                case .global: try await store.saveGlobalVariables(values)
+                case .global:
+                    if saveVariables { try await store.saveGlobalVariables(values) }
+                    if saveOptions { try await store.saveGlobalOptions(options) }
                 case let .collection(id):
                     guard let defaults else { return }
                     try await store.saveCollectionConfiguration(defaults, variables: values, in: id)
@@ -1546,6 +1702,7 @@ final class AppModel: ObservableObject {
         var request = HTTPRequestConfiguration()
         request.name = name
         request.inheritsCollectionAuthentication = true
+        request.optionOverrides = HTTPOptionsOverrides()
 
         do {
             try await store.createRequest(request, in: collectionID)
@@ -1747,6 +1904,7 @@ final class AppModel: ObservableObject {
         if let selectedIdentity,
            selectedCollectionID == nil,
            !showsGlobalVariables,
+           !showsGlobalSettings,
            !showsOngoingRequests {
             recordNavigation(.request(selectedIdentity, section: requestEditorSection(for: selectedIdentity)))
         }

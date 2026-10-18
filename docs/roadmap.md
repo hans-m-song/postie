@@ -4,7 +4,35 @@ Recorded 2026-10-17. M1–M4 are complete locally. M5 remains not started. IDs a
 
 This document records the approved high-level breakdown. User agreed on 2026-10-17 to keep local planning for now; TaskView records have not been created. Revisit TaskView migration only when project tracking is requested again.
 
+Latest scope, 2026-10-18: parameter polish, Copy as cURL and native snapshots are selected for the next implementation slices. Snapshots support Rename and Delete; HAR export and Paste cURL remain deferred. See [grouped deferred features](deferred-features.md) for the consolidated backlog and explicit non-goals. Older M5-deferred wording below records prior scope, not cancellation of these selected slices.
+
 ## Shared task contract
+
+## T-83 — Inherited authentication summary and navigation (complete locally)
+
+Request Auth now displays inherited collection authentication type, relevant public fields and a masked derived header with explicit Reveal/Hide. Both source actions open collection Auth directly. Preview uses request-scoped variables and retains identity, configuration and navigation stale-result checks. Verified on 2026-10-18: 173 existing functional tests, release build, strict signature/diff checks, and isolated 335-point native summary, destination, Back navigation and safe malformed-credential reveal checks. Successful credential reveal was not exercised against a real Keychain item.
+
+## T-82 — Unified derived headers and captured sources (complete locally)
+
+Approved 2026-10-18: Request Headers includes collection and selected auth rows (including request-level auth) as read-only rows with source/status, explicit Reveal/Hide for auth and source navigation. Captured request headers in final/redirect responses use matching Name/Value table presentation and immutable send-time source labels, never live configuration inference. Preserve manual request-header precedence, explicit secret access and stale-result cleanup. Query checkboxes unchanged; the empty entry row intentionally has none, as clarified by the user.
+
+Verified: 173 functional tests, independent review, warning-free release, strict signature/diff checks and isolated narrow-pane native source-navigation/masking/capture checks. See header-tables.md for evidence and limits.
+
+## T-81 — API key authentication and header precedence (complete locally)
+
+Approved 2026-10-18: collection/request API key auth with literal header name and encrypted, template-capable value sent verbatim. Enabled manual request headers take precedence over selected request auth, inherited collection auth and collection headers, case-insensitively; explicit Inherit/None remains. Shadowed auth inputs are not decrypted/resolved. Custom auth header names join masking and cross-origin stripping. Reuse secret editor/lifecycle and existing at-rest encryption; no query-string API keys or new credential storage system. Focused preparation/persistence/loopback and synthetic native gates; no real credentials/configuration accessed.
+
+Verified: combined 165 functional tests plus focused 35 preparation tests covering three late additions (168 distinct tests). Independent source review clear; release warning-free and signature/diff checks passed. Native collection/request auth controls, 335-point layout and secret draft discard checked. See api-key-authentication.md for evidence and limits.
+
+## T-79 — Bidirectional query editing (complete locally)
+
+Approved 2026-10-18: URL and query table synchronize additions, edits, deletion and enabled state. Disabled rows stay in table and are excluded from URL/execution. Preserve duplicate keys, ordering, empty values, templates, fragments and percent encoding; retain partial URL typing and avoid double appending legacy URL/query inputs. Main owns integration and documentation; bounded core/app executors and independent focused verification. No bulk editing or unrelated parameter layout work.
+
+Verified with T-80: 155 functional tests, independent source review, isolated native checks and release/signature validation. See query-and-global-settings.md for decisions, evidence and limits.
+
+## T-80 — Global execution defaults and size units (complete locally)
+
+Approved 2026-10-18: global Settings page for redirects, timeouts and response-size limit; decimal KB/MB entry. Each unset request value inherits, with the inherited numeric value shown as placeholder. Clearing an override restores inheritance; redirects have a Use global choice and limits retain explicit Unlimited. Existing concrete settings remain explicit, new requests inherit. Functional gates cover persistence, effective execution options and unit conversion.
 
 ## T-78 — Restore request section tabs (complete locally)
 

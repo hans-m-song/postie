@@ -32,11 +32,26 @@ private enum RunCancellation: Sendable {
     case shutdown
 }
 
+private func reconciledHeaderSources(
+    for request: URLRequest,
+    inheriting sources: [String: HTTPHeaderSource],
+    defaultSource: HTTPHeaderSource
+) -> [String: HTTPHeaderSource] {
+    let normalizedSources = sources.reduce(into: [String: HTTPHeaderSource]()) { result, entry in
+        result[entry.key.lowercased()] = entry.value
+    }
+    return (request.allHTTPHeaderFields ?? [:]).keys.reduce(into: [:]) { result, name in
+        let normalizedName = name.lowercased()
+        result[normalizedName] = normalizedSources[normalizedName] ?? defaultSource
+    }
+}
+
 private struct HTTPResponseMetadata: Sendable {
     let finalURL: URL
     let effectiveMethod: String
     let statusCode: Int
     let requestHeaders: [HTTPField]
+    let requestHeaderSources: [String: HTTPHeaderSource]
     let responseHeaders: [HTTPField]
     let redirects: [HTTPRedirect]
     let bodyFileURL: URL
@@ -57,6 +72,7 @@ private struct ActiveHTTPRun {
     let identity: RequestIdentity
     let configuration: HTTPRequestConfiguration
     let preparedRequest: URLRequest
+    let requestHeaderSources: [String: HTTPHeaderSource]
     let sensitiveRequestHeaderNames: Set<String>
     let secretRequestHeaderNames: Set<String>
     let redirects: [HTTPRedirect]
@@ -72,6 +88,7 @@ private struct ActiveHTTPRun {
 private struct RetainedHTTPResponse {
     let identity: RequestIdentity
     let bodyURL: URL
+    let requestHeaderSources: [String: HTTPHeaderSource]
     let sensitiveRequestHeaderNames: Set<String>
     let secretRequestHeaderNames: Set<String>
 }
@@ -286,6 +303,7 @@ public actor HTTPExecutionManager {
             identity: identity,
             configuration: configuration,
             preparedRequest: preparedRequest,
+            requestHeaderSources: [:],
             sensitiveRequestHeaderNames: RequestPreparer.standardSensitiveRequestHeaderNames,
             secretRequestHeaderNames: [],
             redirects: [],
@@ -307,6 +325,7 @@ public actor HTTPExecutionManager {
             identity: identity,
             configuration: prepared.configuration,
             preparedRequest: prepared.request,
+            requestHeaderSources: prepared.requestHeaderSources,
             sensitiveRequestHeaderNames: prepared.sensitiveRequestHeaderNames,
             secretRequestHeaderNames: prepared.secretRequestHeaderNames,
             redirects: [],
@@ -342,13 +361,22 @@ public actor HTTPExecutionManager {
 
         var capturedRequest = redirectRequest
         if !sameOrigin(response.finalURL, redirectURL) {
-            Self.stripCrossOriginCredentials(from: &capturedRequest)
+            Self.stripCrossOriginCredentials(
+                from: &capturedRequest,
+                additionalNames: retainedResponse.sensitiveRequestHeaderNames.union(retainedResponse.secretRequestHeaderNames)
+            )
         }
+        let requestHeaderSources = reconciledHeaderSources(
+            for: capturedRequest,
+            inheriting: retainedResponse.requestHeaderSources,
+            defaultSource: .automatic
+        )
 
         return try launch(
             identity: identity,
             configuration: response.request,
             preparedRequest: capturedRequest,
+            requestHeaderSources: requestHeaderSources,
             sensitiveRequestHeaderNames: retainedResponse.sensitiveRequestHeaderNames,
             secretRequestHeaderNames: retainedResponse.secretRequestHeaderNames,
             redirects: response.redirects,
@@ -360,6 +388,7 @@ public actor HTTPExecutionManager {
         identity: RequestIdentity,
         configuration: HTTPRequestConfiguration,
         preparedRequest: URLRequest,
+        requestHeaderSources: [String: HTTPHeaderSource],
         sensitiveRequestHeaderNames: Set<String>,
         secretRequestHeaderNames: Set<String>,
         redirects: [HTTPRedirect],
@@ -383,6 +412,11 @@ public actor HTTPExecutionManager {
             identity: identity,
             configuration: configuration,
             preparedRequest: preparedRequest,
+            requestHeaderSources: reconciledHeaderSources(
+                for: preparedRequest,
+                inheriting: requestHeaderSources,
+                defaultSource: .request
+            ),
             sensitiveRequestHeaderNames: sensitiveRequestHeaderNames,
             secretRequestHeaderNames: secretRequestHeaderNames,
             redirects: redirects,
@@ -422,8 +456,8 @@ public actor HTTPExecutionManager {
         return (scheme, host, components.port ?? defaultPort)
     }
 
-    private static func stripCrossOriginCredentials(from request: inout URLRequest) {
-        for header in ["Authorization", "Proxy-Authorization", "Cookie", "Cookie2"] {
+    private static func stripCrossOriginCredentials(from request: inout URLRequest, additionalNames: Set<String>) {
+        for header in Set(["Authorization", "Proxy-Authorization", "Cookie", "Cookie2"]).union(additionalNames) {
             request.setValue(nil, forHTTPHeaderField: header)
         }
     }
@@ -526,6 +560,7 @@ public actor HTTPExecutionManager {
             runID: runID,
             request: activeRun.configuration,
             preparedRequest: activeRun.preparedRequest,
+            requestHeaderSources: activeRun.requestHeaderSources,
             sensitiveRequestHeaderNames: activeRun.sensitiveRequestHeaderNames,
             secretRequestHeaderNames: activeRun.secretRequestHeaderNames,
             redirects: activeRun.redirects,
@@ -596,6 +631,7 @@ public actor HTTPExecutionManager {
             retainedResponses[runID] = RetainedHTTPResponse(
                 identity: activeRun.identity,
                 bodyURL: bodyURL,
+                requestHeaderSources: metadata.requestHeaderSources,
                 sensitiveRequestHeaderNames: activeRun.sensitiveRequestHeaderNames,
                 secretRequestHeaderNames: activeRun.secretRequestHeaderNames
             )
@@ -615,7 +651,8 @@ public actor HTTPExecutionManager {
                 redirectRequest: metadata.redirectRequest,
                 pendingRedirect: metadata.pendingRedirect,
                 sensitiveRequestHeaderNames: activeRun.sensitiveRequestHeaderNames,
-                secretRequestHeaderNames: activeRun.secretRequestHeaderNames
+                secretRequestHeaderNames: activeRun.secretRequestHeaderNames,
+                requestHeaderSources: metadata.requestHeaderSources
             )))
         case .failed(let message, let bodyFileURL):
             if let bodyFileURL {
@@ -684,6 +721,7 @@ private final class HTTPDownloadDelegate: NSObject, URLSessionDownloadDelegate, 
     private let sensitiveRequestHeaderNames: Set<String>
     private let secretRequestHeaderNames: Set<String>
     private var currentRequest: URLRequest
+    private var currentRequestHeaderSources: [String: HTTPHeaderSource]
     private var redirects: [HTTPRedirect]
     private var followedRedirectCount: Int
     private var redirectLimitReached = false
@@ -698,6 +736,7 @@ private final class HTTPDownloadDelegate: NSObject, URLSessionDownloadDelegate, 
         runID: UUID,
         request: HTTPRequestConfiguration,
         preparedRequest: URLRequest,
+        requestHeaderSources: [String: HTTPHeaderSource],
         sensitiveRequestHeaderNames: Set<String>,
         secretRequestHeaderNames: Set<String>,
         redirects: [HTTPRedirect],
@@ -710,6 +749,11 @@ private final class HTTPDownloadDelegate: NSObject, URLSessionDownloadDelegate, 
         self.runID = runID
         self.request = request
         self.currentRequest = preparedRequest
+        self.currentRequestHeaderSources = reconciledHeaderSources(
+            for: preparedRequest,
+            inheriting: requestHeaderSources,
+            defaultSource: .request
+        )
         self.sensitiveRequestHeaderNames = sensitiveRequestHeaderNames
         self.secretRequestHeaderNames = secretRequestHeaderNames
         self.redirects = redirects
@@ -729,6 +773,15 @@ private final class HTTPDownloadDelegate: NSObject, URLSessionDownloadDelegate, 
         newRequest: URLRequest,
         completionHandler: @escaping (URLRequest?) -> Void
     ) {
+        if let currentRequest = task.currentRequest {
+            self.currentRequest = currentRequest
+        }
+        currentRequestHeaderSources = reconciledHeaderSources(
+            for: currentRequest,
+            inheriting: currentRequestHeaderSources,
+            defaultSource: .automatic
+        )
+
         guard let nextURL = newRequest.url else {
             completionHandler(nil)
             return
@@ -745,11 +798,18 @@ private final class HTTPDownloadDelegate: NSObject, URLSessionDownloadDelegate, 
         }
 
         if !sameOrigin(previousURL, nextURL) {
-            redirectedRequest.setValue(nil, forHTTPHeaderField: "Authorization")
-            redirectedRequest.setValue(nil, forHTTPHeaderField: "Proxy-Authorization")
-            redirectedRequest.setValue(nil, forHTTPHeaderField: "Cookie")
-            redirectedRequest.setValue(nil, forHTTPHeaderField: "Cookie2")
+            let credentialNames = Set(["Authorization", "Proxy-Authorization", "Cookie", "Cookie2"])
+                .union(sensitiveRequestHeaderNames)
+                .union(secretRequestHeaderNames)
+            for name in credentialNames {
+                redirectedRequest.setValue(nil, forHTTPHeaderField: name)
+            }
         }
+        let redirectedHeaderSources = reconciledHeaderSources(
+            for: redirectedRequest,
+            inheriting: currentRequestHeaderSources,
+            defaultSource: .automatic
+        )
 
         let redirect = HTTPRedirect(
             statusCode: response.statusCode,
@@ -760,7 +820,8 @@ private final class HTTPDownloadDelegate: NSObject, URLSessionDownloadDelegate, 
             requestHeaders: requestHeaders(from: currentRequest),
             responseHeaders: responseHeaders(from: response),
             sensitiveRequestHeaderNames: sensitiveRequestHeaderNames,
-            secretRequestHeaderNames: secretRequestHeaderNames
+            secretRequestHeaderNames: secretRequestHeaderNames,
+            requestHeaderSources: currentRequestHeaderSources
         )
         redirects.append(redirect)
         continuation.yield(.redirect(redirect))
@@ -789,6 +850,7 @@ private final class HTTPDownloadDelegate: NSObject, URLSessionDownloadDelegate, 
         }
 
         currentRequest = redirectedRequest
+        currentRequestHeaderSources = redirectedHeaderSources
         followedRedirectCount += 1
         redirectRequest = nil
         pendingRedirect = nil
@@ -827,6 +889,15 @@ private final class HTTPDownloadDelegate: NSObject, URLSessionDownloadDelegate, 
             return
         }
 
+        if let currentRequest = downloadTask.currentRequest {
+            self.currentRequest = currentRequest
+        }
+        currentRequestHeaderSources = reconciledHeaderSources(
+            for: currentRequest,
+            inheriting: currentRequestHeaderSources,
+            defaultSource: .automatic
+        )
+
         do {
             let attributes = try FileManager.default.attributesOfItem(atPath: location.path)
             let bodyByteCount = (attributes[.size] as? NSNumber)?.int64Value ?? 0
@@ -844,6 +915,7 @@ private final class HTTPDownloadDelegate: NSObject, URLSessionDownloadDelegate, 
                 effectiveMethod: currentRequest.httpMethod ?? request.method,
                 statusCode: response.statusCode,
                 requestHeaders: requestHeaders(from: currentRequest),
+                requestHeaderSources: currentRequestHeaderSources,
                 responseHeaders: responseHeaders(from: response),
                 redirects: redirects,
                 bodyFileURL: destination,

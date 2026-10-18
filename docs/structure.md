@@ -43,6 +43,8 @@ The package separates PostieCore from the PostieApp executable and has two focus
 ```text
 Sources/PostieCore/
   Models.swift                  Shared values and run events
+  QueryParameters.swift         Ordered query parsing, rendering, raw encoding and template provenance
+  HTTPSettings.swift            Per-field HTTP option overrides and inheritance resolution
   ConfigurationValues.swift     Persisted encrypted values and transient preparation contracts
   TemplateEngine.swift          Shared literal token and path grammar
   RequestPreparer.swift         Scoped substitution, auth and URLRequest construction
@@ -56,6 +58,9 @@ Sources/PostieApp/
   AppModel.swift                Drafts, autosave, CRUD and per-request runs
   ContentView.swift             Sidebar/actions and split layout
   RequestEditorView.swift       Stacked query/header/body and options
+  HTTPSettingsEditor.swift      Global defaults and inherited request options with KB/MB entry
+  HeaderPresentation.swift      Auth row/source/status models without automatic decryption
+  DerivedHeaderRow.swift        Read-only auth header preview, explicit reveal and source navigation
   RequestResponseSplit.swift    Native split allocation and persistent hosted panes
   GrowingBodyEditor.swift       Non-scrolling native editor, height, binding and undo
   JSONBodyEditing.swift         Pure delimiter, selection and indentation edit plans

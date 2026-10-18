@@ -27,6 +27,7 @@ final class HTTPIntegrationTests: XCTestCase {
         ))
         let getResponse = try completedResponse(in: getEvents)
         XCTAssertEqual(getResponse.effectiveMethod, "GET")
+        XCTAssertEqual(getResponse.requestHeaderSources["x-integration"], .request)
         let getPayload = try responseJSON(getResponse)
         let rawQuery = try XCTUnwrap(getPayload["query"] as? String)
         let returnedURL = try XCTUnwrap(URLComponents(string: fixture.baseURL + (getPayload["path"] as? String ?? "") + "?" + rawQuery))
@@ -84,6 +85,11 @@ final class HTTPIntegrationTests: XCTestCase {
         let payload = try responseJSON(response)
 
         XCTAssertEqual(response.request, configuration)
+        assertHeaderSources(
+            response.requestHeaderSources,
+            match: response.requestHeaders,
+            configuredSources: ["x-prepared": .request]
+        )
         XCTAssertEqual(payload["body"] as? String, "resolved body")
         XCTAssertEqual(try XCTUnwrap(requestHeader("X-Prepared", in: payload)), "resolved header")
         try await manager.discardBody(at: response.bodyFileURL)
@@ -129,21 +135,44 @@ final class HTTPIntegrationTests: XCTestCase {
         manualContext.request["credential"] = .plain("replacement value")
         manualContext.request["headerName"] = .plain("X-Replacement")
         XCTAssertEqual(manualPrepared.request.value(forHTTPHeaderField: "X-Private"), "Bearer captured value")
+        XCTAssertEqual(manualPrepared.requestHeaderSources, ["x-private": .request])
 
         let identity = RequestIdentity(collectionID: UUID(), requestID: manualRequest.id)
         let stopped = try completedResponse(in: await collect(try await manager.start(identity: identity, prepared: manualPrepared)))
         XCTAssertEqual(stopped.sensitiveRequestHeaderNames, sensitiveHeaders)
         XCTAssertEqual(stopped.secretRequestHeaderNames, secretHeaders)
+        assertHeaderSources(
+            stopped.requestHeaderSources,
+            match: stopped.requestHeaders,
+            configuredSources: ["x-private": .request]
+        )
+        let stoppedRedirect = try XCTUnwrap(stopped.redirects.first)
         XCTAssertEqual(stopped.redirects.first?.sensitiveRequestHeaderNames, sensitiveHeaders)
         XCTAssertEqual(stopped.redirects.first?.secretRequestHeaderNames, secretHeaders)
+        assertHeaderSources(
+            stoppedRedirect.requestHeaderSources,
+            match: stoppedRedirect.requestHeaders,
+            configuredSources: ["x-private": .request]
+        )
 
         let followed = try completedResponse(in: await collect(
             try await manager.followRedirect(identity: identity, response: stopped)
         ))
         XCTAssertEqual(followed.sensitiveRequestHeaderNames, sensitiveHeaders)
         XCTAssertEqual(followed.secretRequestHeaderNames, secretHeaders)
-        XCTAssertEqual(followed.redirects.first?.sensitiveRequestHeaderNames, sensitiveHeaders)
-        XCTAssertEqual(followed.redirects.first?.secretRequestHeaderNames, secretHeaders)
+        assertHeaderSources(
+            followed.requestHeaderSources,
+            match: followed.requestHeaders,
+            configuredSources: ["x-private": .request]
+        )
+        let followedRedirect = try XCTUnwrap(followed.redirects.first)
+        XCTAssertEqual(followedRedirect.sensitiveRequestHeaderNames, sensitiveHeaders)
+        XCTAssertEqual(followedRedirect.secretRequestHeaderNames, secretHeaders)
+        assertHeaderSources(
+            followedRedirect.requestHeaderSources,
+            match: followedRedirect.requestHeaders,
+            configuredSources: ["x-private": .request]
+        )
         try await manager.discardBody(at: stopped.bodyFileURL)
         try await manager.discardBody(at: followed.bodyFileURL)
 
@@ -166,8 +195,19 @@ final class HTTPIntegrationTests: XCTestCase {
         )))
         XCTAssertEqual(automatic.sensitiveRequestHeaderNames, sensitiveHeaders)
         XCTAssertEqual(automatic.secretRequestHeaderNames, secretHeaders)
+        assertHeaderSources(
+            automatic.requestHeaderSources,
+            match: automatic.requestHeaders,
+            configuredSources: ["x-private": .request]
+        )
+        let automaticRedirect = try XCTUnwrap(automatic.redirects.first)
         XCTAssertEqual(automatic.redirects.first?.sensitiveRequestHeaderNames, sensitiveHeaders)
         XCTAssertEqual(automatic.redirects.first?.secretRequestHeaderNames, secretHeaders)
+        assertHeaderSources(
+            automaticRedirect.requestHeaderSources,
+            match: automaticRedirect.requestHeaders,
+            configuredSources: ["x-private": .request]
+        )
         try await manager.discardBody(at: automatic.bodyFileURL)
     }
 
@@ -507,6 +547,150 @@ final class HTTPIntegrationTests: XCTestCase {
             XCTAssertNil(try requestHeader(name, in: payload), "\(name) must be absent at a different origin.")
         }
         try await manager.discardBody(at: response.bodyFileURL)
+    }
+
+    func testAPIKeyHeaderSurvivesSameOriginAndIsStrippedAcrossOrigins() async throws {
+        let source = try LocalHTTPFixture()
+        let destination = try LocalHTTPFixture()
+        let root = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let manager = try HTTPExecutionManager(bodyDirectory: root.appendingPathComponent("bodies", isDirectory: true))
+        let envelope = SecretEnvelope(combined: "synthetic-api-key-envelope")
+        let apiKey = "synthetic-api-key-value"
+        let decryptor = IntegrationSecretDecryptor(values: [envelope.combined: apiKey])
+
+        var followOptions = HTTPOptions()
+        followOptions.followRedirects = true
+        let sameOriginConfiguration = HTTPRequestConfiguration(
+            url: try source.url(path: "/redirect", query: [URLQueryItem(name: "to", value: "/echo")]),
+            options: followOptions,
+            authentication: RequestAuthentication(kind: .apiKey, apiKeyHeaderName: "X-API-Key", apiKey: envelope)
+        )
+        let sameOriginPrepared = try await RequestPreparer.prepare(
+            sameOriginConfiguration,
+            context: VariableContext(),
+            decryptor: decryptor
+        )
+        XCTAssertEqual(sameOriginPrepared.request.value(forHTTPHeaderField: "X-API-Key"), apiKey)
+        XCTAssertTrue(sameOriginPrepared.sensitiveRequestHeaderNames.contains("x-api-key"))
+        XCTAssertFalse(sameOriginPrepared.secretRequestHeaderNames.contains("x-api-key"))
+        XCTAssertEqual(sameOriginPrepared.requestHeaderSources, ["x-api-key": .requestAuth])
+
+        let sameOrigin = try completedResponse(in: await collect(try await manager.start(
+            identity: RequestIdentity(collectionID: UUID(), requestID: sameOriginConfiguration.id),
+            prepared: sameOriginPrepared
+        )))
+        XCTAssertEqual(sameOrigin.redirects.count, 1)
+        XCTAssertEqual(sameOrigin.requestHeaderSources["x-api-key"], .requestAuth)
+        XCTAssertEqual(sameOrigin.redirects.first?.requestHeaderSources["x-api-key"], .requestAuth)
+        let sameOriginPayload = try responseJSON(sameOrigin)
+        XCTAssertEqual(try requestHeader("X-API-Key", in: sameOriginPayload), apiKey)
+        try await manager.discardBody(at: sameOrigin.bodyFileURL)
+
+        let destinationURL = try destination.url(path: "/echo")
+        let manualConfiguration = HTTPRequestConfiguration(
+            url: try source.url(path: "/redirect", query: [URLQueryItem(name: "to", value: destinationURL)]),
+            authentication: RequestAuthentication(kind: .apiKey, apiKeyHeaderName: "X-API-Key", apiKey: envelope)
+        )
+        let manualPrepared = try await RequestPreparer.prepare(
+            manualConfiguration,
+            context: VariableContext(),
+            decryptor: decryptor
+        )
+        let manualIdentity = RequestIdentity(collectionID: UUID(), requestID: manualConfiguration.id)
+        let manualStopped = try completedResponse(in: await collect(try await manager.start(
+            identity: manualIdentity,
+            prepared: manualPrepared
+        )))
+        XCTAssertEqual(
+            manualStopped.redirects.first?.requestHeaders.first { $0.name.caseInsensitiveCompare("X-API-Key") == .orderedSame }?.value,
+            apiKey
+        )
+        XCTAssertNil(manualStopped.redirectRequest?.value(forHTTPHeaderField: "X-API-Key"))
+        XCTAssertEqual(manualStopped.redirects.first?.requestHeaderSources["x-api-key"], .requestAuth)
+
+        let manualFollowedRun = try await manager.followRedirect(identity: manualIdentity, response: manualStopped)
+        let manualFollowed = try completedResponse(in: await collect(manualFollowedRun))
+        let manualPayload = try responseJSON(manualFollowed)
+        XCTAssertNil(try requestHeader("X-API-Key", in: manualPayload))
+        XCTAssertNil(manualFollowed.requestHeaderSources["x-api-key"])
+        try await manager.discardBody(at: manualStopped.bodyFileURL)
+        try await manager.discardBody(at: manualFollowed.bodyFileURL)
+
+        let automaticConfiguration = HTTPRequestConfiguration(
+            url: try source.url(path: "/redirect", query: [URLQueryItem(name: "to", value: destinationURL)]),
+            options: followOptions,
+            authentication: RequestAuthentication(kind: .apiKey, apiKeyHeaderName: "X-API-Key", apiKey: envelope)
+        )
+        let automaticPrepared = try await RequestPreparer.prepare(
+            automaticConfiguration,
+            context: VariableContext(),
+            decryptor: decryptor
+        )
+        let automatic = try completedResponse(in: await collect(try await manager.start(
+            identity: RequestIdentity(collectionID: UUID(), requestID: automaticConfiguration.id),
+            prepared: automaticPrepared
+        )))
+        XCTAssertEqual(automatic.redirects.count, 1)
+        XCTAssertEqual(
+            automatic.redirects.first?.requestHeaders.first { $0.name.caseInsensitiveCompare("X-API-Key") == .orderedSame }?.value,
+            apiKey
+        )
+        let automaticPayload = try responseJSON(automatic)
+        XCTAssertNil(try requestHeader("X-API-Key", in: automaticPayload))
+        XCTAssertEqual(automatic.redirects.first?.requestHeaderSources["x-api-key"], .requestAuth)
+        XCTAssertNil(automatic.requestHeaderSources["x-api-key"])
+        try await manager.discardBody(at: automatic.bodyFileURL)
+    }
+
+    func testUnknownHeaderAddedToManualRedirectUsesAutomaticSource() async throws {
+        let fixture = try LocalHTTPFixture()
+        let root = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let manager = try HTTPExecutionManager(bodyDirectory: root.appendingPathComponent("bodies", isDirectory: true))
+        let redirectURL = try fixture.url(path: "/redirect", query: [
+            URLQueryItem(name: "to", value: "/echo"),
+            URLQueryItem(name: "status", value: "302")
+        ])
+        let configuration = HTTPRequestConfiguration(
+            url: redirectURL,
+            headers: [HTTPField(name: "X-Request", value: "captured")]
+        )
+        let prepared = try await RequestPreparer.prepare(configuration, context: VariableContext(), decryptor: nil)
+        let identity = RequestIdentity(collectionID: UUID(), requestID: configuration.id)
+        let stopped = try completedResponse(in: await collect(try await manager.start(identity: identity, prepared: prepared)))
+        var redirectRequest = try XCTUnwrap(stopped.redirectRequest)
+        redirectRequest.setValue("added after capture", forHTTPHeaderField: "X-Runtime")
+        let responseWithRuntimeHeader = HTTPResponseRecord(
+            runID: stopped.runID,
+            request: stopped.request,
+            finalURL: stopped.finalURL,
+            statusCode: stopped.statusCode,
+            requestHeaders: stopped.requestHeaders,
+            responseHeaders: stopped.responseHeaders,
+            redirects: stopped.redirects,
+            bodyFileURL: stopped.bodyFileURL,
+            bodyByteCount: stopped.bodyByteCount,
+            duration: stopped.duration,
+            redirectLimitReached: stopped.redirectLimitReached,
+            effectiveMethod: stopped.effectiveMethod,
+            redirectRequest: redirectRequest,
+            pendingRedirect: stopped.pendingRedirect,
+            sensitiveRequestHeaderNames: stopped.sensitiveRequestHeaderNames,
+            secretRequestHeaderNames: stopped.secretRequestHeaderNames,
+            requestHeaderSources: stopped.requestHeaderSources
+        )
+
+        let followed = try completedResponse(in: await collect(
+            try await manager.followRedirect(identity: identity, response: responseWithRuntimeHeader)
+        ))
+        let payload = try responseJSON(followed)
+
+        XCTAssertEqual(followed.requestHeaderSources["x-request"], .request)
+        XCTAssertEqual(followed.requestHeaderSources["x-runtime"], .automatic)
+        XCTAssertEqual(try requestHeader("X-Runtime", in: payload), "added after capture")
+        try await manager.discardBody(at: stopped.bodyFileURL)
+        try await manager.discardBody(at: followed.bodyFileURL)
     }
 
     func testIdentityIsSingleFlightWhileDifferentIdentitiesRunConcurrently() async throws {
@@ -871,6 +1055,27 @@ final class HTTPIntegrationTests: XCTestCase {
             guard case .completed(let response) = event else { return nil }
             return response
         }.first)
+    }
+
+    private func assertHeaderSources(
+        _ sources: [String: HTTPHeaderSource],
+        match actualHeaders: [HTTPField],
+        configuredSources: [String: HTTPHeaderSource],
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let actualNames = Set(actualHeaders.map { $0.name.lowercased() })
+        XCTAssertEqual(Set(sources.keys), actualNames, file: file, line: line)
+
+        for name in actualNames {
+            XCTAssertEqual(
+                sources[name],
+                configuredSources[name] ?? .automatic,
+                "Unexpected source for actual request header \(name).",
+                file: file,
+                line: line
+            )
+        }
     }
 
     private func failureMessages(in events: [HTTPExecutionEvent]) -> [String] {

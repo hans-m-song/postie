@@ -6,15 +6,25 @@ struct ResponseHeaderRow: View {
     let field: HTTPField
     let isSensitive: Bool
     let isNameSecret: Bool
+    var source: HTTPHeaderSource? = nil
     @State private var isRevealed = false
     @State private var copied = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            Text(isNameSecret && !isRevealed ? "Secret header" : field.name)
-                .fontWeight(.medium)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(width: 110, alignment: .leading)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(isNameSecret && !isRevealed ? "Secret header" : field.name)
+                    .fontWeight(.medium)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let sourceLabel {
+                    Text(sourceLabel)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+            Divider()
             VStack(alignment: .leading, spacing: 5) {
                 if (isSensitive || isNameSecret) && !isRevealed {
                     Text("••••••••")
@@ -39,10 +49,16 @@ struct ResponseHeaderRow: View {
             }
             .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
         }
+        .fixedSize(horizontal: false, vertical: true)
         .onChange(of: field) { _, _ in reset() }
         .onChange(of: isSensitive) { _, _ in reset() }
         .onChange(of: isNameSecret) { _, _ in reset() }
+        .onChange(of: source) { _, _ in reset() }
         .onDisappear(perform: reset)
+    }
+
+    private var sourceLabel: String? {
+        source.map { HeaderPresentation.sourceLabel(for: $0) }
     }
 
     private func reset() {

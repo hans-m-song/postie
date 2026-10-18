@@ -13,7 +13,7 @@ A lightweight native macOS HTTP client for personal use. Make requests, save the
 - Global, collection, and request variables. Precedence: request overrides collection, which overrides global.
 - Collection settings page for Variables/Headers/Auth, opened from the collection name or right-click menu. Shared headers use request overrides/disabled-row suppression; new requests inherit collection auth, existing explicit auth is preserved. Current follow-up verification: collection-settings.md.
 - Literal `{{variable}}` substitution in URLs, query values, header values, authentication fields, and text bodies. Values are not recursively expanded. Missing references prevent sending and cURL copying.
-- None, Basic, and Bearer authentication.
+- None, Basic, Bearer and header-based API Key authentication. API keys use an editable header name and encrypted template-capable value. Enabled manual request headers take precedence over selected authentication; explicit None and collection Inherit remain distinct. See api-key-authentication.md.
 - Response status, elapsed time, headers, raw body, and formatted JSON where valid.
 - Initial layout: request editor left, response right, with a resizable divider. Top/bottom layout switching is deferred.
 - The request pane has Request, Auth, Variables and Settings tabs. Request stacks Query, Path, Headers and Body accordions, all expanded initially, including empty and inherited-only sections. Counts remain visible while collapsed; session expansion choices are independent per request. Settings holds redirect, timeout and size options. The response column stacks exchange disclosures: redirect hops and header groups collapsed initially, final response expanded. Each selected pane owns one vertical scroll area. Raw and unsupported response text wraps to the pane; successful Pretty JSON retains horizontal scrolling for long lines. Tabs for multiple requests and bulk editing remain deferred; see request-tabs-restoration.md.
@@ -34,6 +34,8 @@ A lightweight native macOS HTTP client for personal use. Make requests, save the
 Shared variables means reuse within the app, not live collaboration. Collections do not contain folders. macOS is the only planned platform.
 
 ## Deferred
+
+Current grouped inventory: [deferred-features.md](deferred-features.md). As clarified 2026-10-18, parameter polish, Copy as cURL and native snapshots are selected next; HAR export and Paste cURL are deferred. Historical initial-scope lists below do not override that sequence.
 
 gRPC, WebSockets, OpenAPI import, existing collection specifications, Git integration, named environments, live collaboration, scripts, recursive templates, dynamic values including UUIDs/timestamps, OAuth flows, automatic request history, additional syntax languages, and cross-platform support. Manual saved snapshots are in scope; automatic response persistence is not.
 

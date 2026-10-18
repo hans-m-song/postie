@@ -2,6 +2,8 @@
 
 Recorded 2026-10-17. User requested saving an instance of a request and response, described as Postman-like snapshots. This document defines Postie's proposed behaviour; it does not assert parity with a particular Postman feature. No implementation exists.
 
+Clarified 2026-10-18: native metadata plus body-sidecar storage is selected; HAR export is deferred to a future feature. Snapshots can be renamed and deleted. Immutable means the captured request/response content stays fixed; the user-facing name is mutable and independent of snapshot identity. Save initially proposes the request name and capture time. See deferred-features.md for grouped future capabilities.
+
 ## Capture contract
 
 An explicit Save Snapshot action stores an immutable record of a completed HTTP exchange. Capture send-time request templates, the effective referenced variable/auth inputs and preparation settings from execution state, paired with the received response. Never capture current editor values after the exchange. Store templates/literals and the original response unencrypted; encrypt frozen captured inputs as described in encryption.md. A snapshot includes capture timestamp, source collection/request identities and display names, method, URL template, ordered query entries (including duplicate keys, empty values and enabled state where supported), ordered header templates, body template, preparation format version/settings, encrypted captured inputs, response status/headers/body and duration. Query templates include names and values actually used by preparation, not just the URL editor text. It reconstructs application-level submitted request intent, not a raw packet trace or guaranteed intermediate redirect capture.
@@ -15,7 +17,7 @@ Initial capture is for completed HTTP responses, including non-2xx status codes.
 ## Storage proposal
 
 ```text
-Application Support/Postie/
+~/.config/postie/
   snapshots/
     <snapshot-id>/
       snapshot.json

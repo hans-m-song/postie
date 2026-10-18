@@ -200,7 +200,7 @@ private struct ResponseExchangeView: View {
             DisclosureGroup(isExpanded: $isFinalExpanded) {
                 VStack(alignment: .leading, spacing: 14) {
                     DisclosureGroup("Request headers (\(response.requestHeaders.count))") {
-                        HeaderTable(fields: response.requestHeaders, sensitiveNames: response.sensitiveRequestHeaderNames, secretNames: response.secretRequestHeaderNames)
+                        HeaderTable(fields: response.requestHeaders, sensitiveNames: response.sensitiveRequestHeaderNames, secretNames: response.secretRequestHeaderNames, sources: response.requestHeaderSources)
                             .padding(.top, 7)
                     }
                     .disclosureGroupStyle(PaddedDisclosureGroupStyle())
@@ -261,7 +261,7 @@ private struct RedirectDisclosure: View {
     var body: some View {
         DisclosureGroup(isExpanded: expansion ?? $localExpanded) {
             VStack(alignment: .leading, spacing: 13) {
-                ExchangeHeaderGroup(title: "Request headers", fields: redirect.requestHeaders, sensitiveNames: redirect.sensitiveRequestHeaderNames, secretNames: redirect.secretRequestHeaderNames)
+                ExchangeHeaderGroup(title: "Request headers", fields: redirect.requestHeaders, sensitiveNames: redirect.sensitiveRequestHeaderNames, secretNames: redirect.secretRequestHeaderNames, sources: redirect.requestHeaderSources)
                 ExchangeHeaderGroup(title: "Response headers", fields: redirect.responseHeaders)
             }
             .padding(.top, 8)
@@ -325,11 +325,12 @@ private struct ExchangeHeaderGroup: View {
     let fields: [HTTPField]
     var sensitiveNames: Set<String> = []
     var secretNames: Set<String> = []
+    var sources: [String: HTTPHeaderSource] = [:]
     @State private var isExpanded = false
 
     var body: some View {
         DisclosureGroup(isExpanded: $isExpanded) {
-            HeaderTable(fields: fields, sensitiveNames: sensitiveNames, secretNames: secretNames)
+            HeaderTable(fields: fields, sensitiveNames: sensitiveNames, secretNames: secretNames, sources: sources)
                 .padding(.top, 7)
         } label: {
             HStack {
@@ -346,11 +347,26 @@ private struct HeaderTable: View {
     let fields: [HTTPField]
     var sensitiveNames: Set<String> = []
     var secretNames: Set<String> = []
+    var sources: [String: HTTPHeaderSource] = [:]
 
     private let standardSensitiveNames: Set<String> = ["authorization", "proxy-authorization", "cookie", "set-cookie"]
 
     var body: some View {
         VStack(spacing: 0) {
+            if !fields.isEmpty {
+                HStack(spacing: 10) {
+                    Text("Name")
+                        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+                    Divider().frame(height: 19)
+                    Text("Value")
+                        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 7)
+                .background(.quaternary)
+            }
             if fields.isEmpty {
                 Text("No headers exposed by URLSession")
                     .font(.caption)
@@ -362,7 +378,8 @@ private struct HeaderTable: View {
                 ResponseHeaderRow(
                     field: field,
                     isSensitive: sensitiveNames.contains(field.name.lowercased()) || standardSensitiveNames.contains(field.name.lowercased()),
-                    isNameSecret: secretNames.contains(field.name.lowercased())
+                    isNameSecret: secretNames.contains(field.name.lowercased()),
+                    source: sources[field.name.lowercased()]
                 )
                 .font(.system(.callout, design: .monospaced))
                 .padding(.horizontal, 9)

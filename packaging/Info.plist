@@ -10,6 +10,8 @@
 	<string>dev.postie.local</string>
 	<key>CFBundleExecutable</key>
 	<string>Postie</string>
+	<key>CFBundleIconFile</key>
+	<string>Postie.icns</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>

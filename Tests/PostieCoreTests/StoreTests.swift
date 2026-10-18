@@ -160,6 +160,93 @@ final class StoreTests: XCTestCase {
         XCTAssertFalse(serializedRequest.contains("synthetic plaintext before conversion"))
     }
 
+    func testLegacyAuthenticationWithoutAPIKeyFieldsStillDecodes() throws {
+        let data = Data(#"{"kind":"bearer","username":"","token":{"version":1,"combined":"synthetic legacy token ciphertext"}}"#.utf8)
+
+        let authentication = try JSONDecoder().decode(RequestAuthentication.self, from: data)
+
+        XCTAssertEqual(authentication.kind, .bearer)
+        XCTAssertEqual(authentication.token?.combined, "synthetic legacy token ciphertext")
+        XCTAssertNil(authentication.apiKeyHeaderName)
+        XCTAssertNil(authentication.apiKey)
+    }
+
+    func testAPIKeyAuthenticationPersistsOnlyItsEnvelopeAndClearsFieldsExplicitly() async throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let collectionID = try await createWorkspace(at: root, requestCount: 1)
+        let store = try CollectionStore(rootURL: root)
+        let initialLoad = try await store.load()
+        var request = try XCTUnwrap(initialLoad.collections.first?.requests.first)
+        request.authentication = RequestAuthentication(
+            kind: .apiKey,
+            apiKeyHeaderName: "X-Service-Key",
+            apiKey: SecretEnvelope(combined: "synthetic API key ciphertext")
+        )
+        try await store.saveRequest(request, in: collectionID)
+
+        let storedURL = requestURL(root, collectionID, request.id)
+        var storedRequest = try readObject(at: storedURL)
+        var authentication = try XCTUnwrap(storedRequest["authentication"] as? [String: Any])
+        XCTAssertEqual(authentication["kind"] as? String, "apiKey")
+        XCTAssertEqual(authentication["apiKeyHeaderName"] as? String, "X-Service-Key")
+        XCTAssertEqual((authentication["apiKey"] as? [String: Any])?["combined"] as? String, "synthetic API key ciphertext")
+        XCTAssertFalse(try String(contentsOf: storedURL, encoding: .utf8).contains("synthetic API key plaintext"))
+
+        var apiKeyEnvelope = try XCTUnwrap(authentication["apiKey"] as? [String: Any])
+        apiKeyEnvelope["futureEnvelopeData"] = ["retained": true]
+        authentication["apiKey"] = apiKeyEnvelope
+        authentication["futureAuthData"] = ["retained": true]
+        storedRequest["authentication"] = authentication
+        try writeObject(storedRequest, to: storedURL)
+
+        let beforeCredentialUpdate = try await store.load()
+        request = try XCTUnwrap(beforeCredentialUpdate.collections.first?.requests.first)
+        request.authentication.apiKey = SecretEnvelope(combined: "synthetic updated API key ciphertext")
+        try await store.saveRequest(request, in: collectionID)
+
+        storedRequest = try readObject(at: storedURL)
+        authentication = try XCTUnwrap(storedRequest["authentication"] as? [String: Any])
+        XCTAssertEqual((authentication["apiKey"] as? [String: Any])?["combined"] as? String, "synthetic updated API key ciphertext")
+        XCTAssertEqual((authentication["apiKey"] as? [String: Any])?["futureEnvelopeData"] as? [String: Bool], ["retained": true])
+        XCTAssertEqual((authentication["futureAuthData"] as? [String: Bool])?["retained"], true)
+
+        request.authentication.apiKey = nil
+        request.authentication.apiKeyHeaderName = nil
+        try await store.saveRequest(request, in: collectionID)
+
+        storedRequest = try readObject(at: storedURL)
+        authentication = try XCTUnwrap(storedRequest["authentication"] as? [String: Any])
+        XCTAssertNil(authentication["apiKey"])
+        XCTAssertNil(authentication["apiKeyHeaderName"])
+        XCTAssertEqual((authentication["futureAuthData"] as? [String: Bool])?["retained"], true)
+    }
+
+    func testAPIKeyCollectionDefaultsRoundTripAsAnEnvelope() async throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let collectionID = try await createWorkspace(at: root, requestCount: 1)
+        let store = try CollectionStore(rootURL: root)
+        let defaults = CollectionRequestDefaults(
+            headers: [HTTPField(name: "X-Collection", value: "default")],
+            authentication: RequestAuthentication(
+                kind: .apiKey,
+                apiKeyHeaderName: "X-Collection-Key",
+                apiKey: SecretEnvelope(combined: "synthetic collection API key ciphertext")
+            )
+        )
+
+        try await store.saveCollectionConfiguration(defaults, variables: [:], in: collectionID)
+
+        let loaded = try await store.load()
+        let collection = try XCTUnwrap(loaded.collections.first { $0.id == collectionID })
+        XCTAssertEqual(collection.authentication, defaults.authentication)
+        let metadata = try readObject(at: collectionURL(root, collectionID).appendingPathComponent("collection.json"))
+        let authentication = try XCTUnwrap(metadata["authentication"] as? [String: Any])
+        XCTAssertEqual(authentication["apiKeyHeaderName"] as? String, "X-Collection-Key")
+        XCTAssertEqual((authentication["apiKey"] as? [String: Any])?["combined"] as? String, "synthetic collection API key ciphertext")
+    }
+
     func testOwnedVariableMapsRemoveRenamedKeysAndPreserveUnknownMetadata() async throws {
         let root = try makeRoot()
         defer { try? FileManager.default.removeItem(at: root) }

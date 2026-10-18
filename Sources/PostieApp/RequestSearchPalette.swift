@@ -14,10 +14,11 @@ struct RequestSearchResult: Identifiable, Equatable {
             collection.requests.compactMap { saved in
                 let identity = RequestIdentity(collectionID: collection.id, requestID: saved.id)
                 let request = drafts[identity] ?? saved
+                let displayURL = QueryParameters.render(baseURL: request.url, fields: request.query)
                 guard query.isEmpty || request.name.localizedCaseInsensitiveContains(query) ||
-                        request.url.localizedCaseInsensitiveContains(query) else { return nil }
+                        displayURL.localizedCaseInsensitiveContains(query) else { return nil }
                 return Self(id: identity, name: request.name, collectionName: collection.name,
-                            method: request.method, url: request.url)
+                            method: request.method, url: displayURL)
             }
         }
     }

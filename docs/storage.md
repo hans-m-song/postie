@@ -67,3 +67,7 @@ Search uses the loaded in-memory saved-request summaries, keyed by collection ID
 ## Verification gate
 
 T-29 verifies ordering, stable identities across renames, duplicate display names, invalid/duplicate IDs, missing/malformed files and unsupported versions. Inject failures between each create/delete write step; restart and verify partial work is preserved, diagnosed and never silently resurrected. Atomic file replacement is a requirement, not a claim of crash-proof multi-file transactions.
+
+## Saved JSON formatting
+
+Configuration JSON is pretty-printed with sorted keys on write. Existing compact files are reformatted on their next ordinary save; no bulk rewrite is performed.

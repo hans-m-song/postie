@@ -102,6 +102,8 @@ struct ContentView: View {
                 Divider()
                 ScrollView { VariableEditorView(owner: .global).padding(18) }
             }
+        } else if model.showsGlobalSettings {
+            GlobalSettingsPage()
         } else if let collectionID = model.selectedCollectionID {
             CollectionEditorView(collectionID: collectionID).id(collectionID)
                 .environment(\.variableInspectionOwner, .collection(collectionID))
@@ -132,8 +134,11 @@ private struct SidebarView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Image(systemName: "paperplane.fill")
-                    .foregroundStyle(.tint)
+                Image(nsImage: sidebarIcon)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 28, height: 28)
+                    .accessibilityHidden(true)
                 Text("Postie")
                     .font(.title2.weight(.semibold))
                 Spacer()
@@ -142,17 +147,6 @@ private struct SidebarView: View {
             .padding(.top, 18)
             .padding(.bottom, 12)
 
-            Button {
-                model.showRequests()
-            } label: {
-                Label("Requests", systemImage: "doc.text")
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .buttonStyle(.plain)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
-            .background(!model.showsOngoingRequests && !model.showsGlobalVariables && model.selectedCollectionID == nil ? Color.accentColor.opacity(0.13) : .clear, in: RoundedRectangle(cornerRadius: 7))
-
             Button { model.showRequestSearch() } label: {
                 HStack {
                     Label("Search Requests", systemImage: "magnifyingglass")
@@ -160,9 +154,11 @@ private struct SidebarView: View {
                     Text("⌘K").foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .padding(.horizontal, 12).padding(.vertical, 7)
 
             Button {
                 model.showOngoingRequests()
@@ -180,19 +176,32 @@ private struct SidebarView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
             .background(model.showsOngoingRequests ? Color.accentColor.opacity(0.13) : .clear, in: RoundedRectangle(cornerRadius: 7))
 
             Button { model.showGlobalVariables() } label: {
                 Label("Global Variables", systemImage: "curlybraces")
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .padding(.horizontal, 12).padding(.vertical, 7)
             .background(model.showsGlobalVariables ? Color.accentColor.opacity(0.13) : .clear, in: RoundedRectangle(cornerRadius: 7))
+
+            Button { model.showGlobalSettings() } label: {
+                Label("Settings", systemImage: "gearshape")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .background(model.showsGlobalSettings ? Color.accentColor.opacity(0.13) : .clear, in: RoundedRectangle(cornerRadius: 7))
 
             Divider()
                 .padding(.vertical, 12)
@@ -248,6 +257,15 @@ private struct SidebarView: View {
         }
         .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
         .background(.regularMaterial)
+    }
+
+    private var sidebarIcon: NSImage {
+        guard let iconURL = Bundle.main.url(forResource: "Postie", withExtension: "icns"),
+              let image = NSImage(contentsOf: iconURL) else {
+            return NSImage(named: NSImage.applicationIconName) ?? NSImage(size: NSSize(width: 28, height: 28))
+        }
+
+        return image
     }
 
     private var storageIssues: some View {
@@ -393,7 +411,7 @@ private struct RequestSidebarRow: View {
             .padding(.trailing, 7)
             .padding(.vertical, 6)
             .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-            .background(model.selectedIdentity == identity && model.selectedCollectionID == nil && !model.showsOngoingRequests && !model.showsGlobalVariables ? Color.accentColor.opacity(0.14) : .clear, in: RoundedRectangle(cornerRadius: 6))
+            .background(model.selectedIdentity == identity && model.selectedCollectionID == nil && !model.showsOngoingRequests && !model.showsGlobalVariables && !model.showsGlobalSettings ? Color.accentColor.opacity(0.14) : .clear, in: RoundedRectangle(cornerRadius: 6))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -418,7 +436,7 @@ private struct RequestSidebarRow: View {
                 Button("Delete request", role: .destructive) { deletionTarget = .request(identity) }
             }
         }
-        .accessibilityAddTraits(model.selectedIdentity == identity && model.selectedCollectionID == nil && !model.showsOngoingRequests && !model.showsGlobalVariables ? .isSelected : [])
+        .accessibilityAddTraits(model.selectedIdentity == identity && model.selectedCollectionID == nil && !model.showsOngoingRequests && !model.showsGlobalVariables && !model.showsGlobalSettings ? .isSelected : [])
     }
 
     private func methodColor(_ method: String) -> Color {

@@ -10,4 +10,5 @@ enum VariableOwner: Hashable {
 enum AuthenticationSecretField: Hashable {
     case password
     case token
+    case apiKey
 }

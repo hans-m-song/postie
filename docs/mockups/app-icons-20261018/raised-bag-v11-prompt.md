@@ -1,0 +1,7 @@
+# Raised narrower mailbag — 18 October 2026
+
+Built-in image generation tool. Reference: `postie-ct-slate-large-bag-v10.png`. Output: `postie-ct-slate-raised-bag-v11.png`. Concept only; not installed.
+
+## Exact prompt
+
+Use case: precise-object-edit. Make a small positional and proportion correction ONLY to the mailbag of this Postie icon. Narrow the entire red-bordered cream bag by about 15 percent, keeping its left edge approximately fixed so its RIGHT edge moves left and reveals substantially more of the black saddle. Raise the entire bag upward by about 7 percent of image height so its bottom edge reveals the top arc of the rear black tire. Keep approximately the same bag height; leave safe blue margin above it inside tile. Keep large bold dark curly braces { } centered on the cream face, slightly compress their spacing to suit the narrower bag, preserve continuous thick red border and smooth flat top. Reveal underlying black seat, red bike and rear wheel naturally where bag previously covered them. Preserve EVERYTHING ELSE: exact slate blue rounded tile, red CT-style bike with solid simplified body, open spoke-free wheel interiors showing blue, small cream axle hubs, same silver engine and rearward exhaust, same simple handlebar and round headlight, front fork, wheel positions, soft sculptural material and lighting. Do not shrink the whole bike or change background. Only narrow and lift the bag; no new details or text.

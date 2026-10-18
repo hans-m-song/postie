@@ -204,3 +204,21 @@ Independent final119 tests (Core61/App58), zero failures/warnings; source review
 User reversed T74 layout: restored Request/Auth/Variables/Settings tabs; Request keeps four initially expanded accordions with session collapse choices and counts. Reused section history and removed obsolete accordion restoration event. Hidden Headers/Auth unmount; retained Variables/Body activity guards clear transient state. Reference scan keys include identity. Reviewer queued-scroll tab guard added.
 
 Independent exact-source118 tests (Core61/App57), no failures/warnings; source review and scope audit clear. Native defaults/tab/history/GoDef/popup dismissal/body draft retention passed. Final release/signature verified. Synthetic-only checks, no requests or Keychain/userdata access. App closed, own wake assertion stopped. Current docs reconciled; multi-request tabs/bulk edit/M5/memory remain deferred. Check in locally only; no push.
+
+## 2026-10-18 — T79/T80 query synchronization and HTTP defaults
+
+Approved and completed canonical baseURL+ordered query rows with provenance-preserving encoding, disabled-row retention, legacy send-order normalization and literal/real template distinction. Global HTTP defaults persist in globals.json; per-field optional overrides distinguish inheritance from explicit unlimited. Empty inputs restore inheritance and show global placeholders; legacy concrete request settings retained. DecimalKB/MB conversion leaves byte counts unchanged. Independent review fixes and155-test/native/release verification recorded in docs/query-and-global-settings.md. No push/commit or real user data accessed.
+
+## 2026-10-18 — API key auth
+
+Added encrypted header-based API key auth, manual request header precedence and custom credential cross-origin stripping. Independent review,168 distinct functional tests, native editor and release/signature checks recorded in docs/api-key-authentication.md. No real credentials accessed.
+
+## 2026-10-18 — Header provenance and read-only auth rows
+
+T82 captures header origin during preparation and propagates it per observed hop; response UI never consults mutable live config for labels. Auth preview is explicit-only and transient.173 functionaltests and isolated nativechecks documented in docs/header-tables.md. No push or realcredential access.
+
+## 2026-10-18 — T-83 inherited authentication
+- Fixed request Auth source navigation to explicitly select collection Auth.
+- Added read-only inherited type/public fields and masked derived header with explicit Reveal/Hide; request-scoped variable context, existing preview guards and local reveal reset on scope changes retained.
+- Verified release build, 173 existing functional tests, strict signature/diff checks and isolated native 335-point summary/destination/Back navigation. Synthetic malformed envelope reveal fails safely; no real Keychain credential or user workspace accessed. Successful credential reveal not exercised natively.
+- Changes remain local and uncommitted. Selected parameter polish, Copy as cURL and native snapshots remain next.

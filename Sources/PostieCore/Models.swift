@@ -5,12 +5,33 @@ public struct HTTPField: Identifiable, Codable, Equatable, Sendable {
     public var name: String
     public var value: String
     public var isEnabled: Bool
+    public var queryEncoding: QueryParameterEncoding?
 
-    public init(id: UUID = UUID(), name: String = "", value: String = "", isEnabled: Bool = true) {
+    public init(
+        id: UUID = UUID(),
+        name: String = "",
+        value: String = "",
+        isEnabled: Bool = true,
+        queryEncoding: QueryParameterEncoding? = nil
+    ) {
         self.id = id
         self.name = name
         self.value = value
         self.isEnabled = isEnabled
+        self.queryEncoding = queryEncoding
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, value, isEnabled, queryEncoding
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        value = try container.decode(String.self, forKey: .value)
+        isEnabled = try container.decode(Bool.self, forKey: .isEnabled)
+        queryEncoding = try container.decodeIfPresent(QueryParameterEncoding.self, forKey: .queryEncoding)
     }
 }
 
@@ -50,6 +71,7 @@ public struct HTTPRequestConfiguration: Identifiable, Codable, Equatable, Sendab
     public var bodyEnabled: Bool
     public var bodySyntax: BodySyntax
     public var options: HTTPOptions
+    public var optionOverrides: HTTPOptionsOverrides?
     public var variables: VariableValues
     public var authentication: RequestAuthentication
     public var inheritsCollectionAuthentication: Bool
@@ -66,6 +88,7 @@ public struct HTTPRequestConfiguration: Identifiable, Codable, Equatable, Sendab
         bodyEnabled: Bool = false,
         bodySyntax: BodySyntax = .none,
         options: HTTPOptions = HTTPOptions(),
+        optionOverrides: HTTPOptionsOverrides? = nil,
         variables: VariableValues = [:],
         authentication: RequestAuthentication = RequestAuthentication(),
         inheritsCollectionAuthentication: Bool = false
@@ -81,6 +104,7 @@ public struct HTTPRequestConfiguration: Identifiable, Codable, Equatable, Sendab
         self.bodyEnabled = bodyEnabled
         self.bodySyntax = bodySyntax
         self.options = options
+        self.optionOverrides = optionOverrides
         self.variables = variables
         self.authentication = authentication
         self.inheritsCollectionAuthentication = inheritsCollectionAuthentication
@@ -98,6 +122,7 @@ public struct HTTPRequestConfiguration: Identifiable, Codable, Equatable, Sendab
         case bodyEnabled
         case bodySyntax
         case options
+        case optionOverrides
         case variables
         case authentication
         case inheritsCollectionAuthentication
@@ -116,6 +141,7 @@ public struct HTTPRequestConfiguration: Identifiable, Codable, Equatable, Sendab
         bodyEnabled = try container.decode(Bool.self, forKey: .bodyEnabled)
         bodySyntax = try container.decode(BodySyntax.self, forKey: .bodySyntax)
         options = try container.decode(HTTPOptions.self, forKey: .options)
+        optionOverrides = try container.decodeIfPresent(HTTPOptionsOverrides.self, forKey: .optionOverrides)
         variables = try container.decodeIfPresent(VariableValues.self, forKey: .variables) ?? [:]
         authentication = try container.decodeIfPresent(RequestAuthentication.self, forKey: .authentication) ?? RequestAuthentication()
         inheritsCollectionAuthentication = try container.decodeIfPresent(Bool.self, forKey: .inheritsCollectionAuthentication) ?? false
@@ -181,12 +207,16 @@ public struct WorkspaceLoad: Sendable {
     public var issues: [StorageIssue]
     public var globalVariables: VariableValues
     public var globalVariablesAreReadOnly: Bool
+    public var globalOptions: HTTPOptions
+    public var globalOptionsAreReadOnly: Bool
 
-    public init(collections: [RequestCollection], issues: [StorageIssue] = [], globalVariables: VariableValues = [:], globalVariablesAreReadOnly: Bool = false) {
+    public init(collections: [RequestCollection], issues: [StorageIssue] = [], globalVariables: VariableValues = [:], globalVariablesAreReadOnly: Bool = false, globalOptions: HTTPOptions = HTTPOptions(), globalOptionsAreReadOnly: Bool = false) {
         self.collections = collections
         self.issues = issues
         self.globalVariables = globalVariables
         self.globalVariablesAreReadOnly = globalVariablesAreReadOnly
+        self.globalOptions = globalOptions
+        self.globalOptionsAreReadOnly = globalOptionsAreReadOnly
     }
 }
 
@@ -198,6 +228,7 @@ public struct HTTPRedirect: Identifiable, Sendable {
     public let method: String
     public let nextMethod: String
     public let requestHeaders: [HTTPField]
+    public let requestHeaderSources: [String: HTTPHeaderSource]
     public let sensitiveRequestHeaderNames: Set<String>
     public let secretRequestHeaderNames: Set<String>
     public let responseHeaders: [HTTPField]
@@ -212,7 +243,8 @@ public struct HTTPRedirect: Identifiable, Sendable {
         requestHeaders: [HTTPField],
         responseHeaders: [HTTPField],
         sensitiveRequestHeaderNames: Set<String> = [],
-        secretRequestHeaderNames: Set<String> = []
+        secretRequestHeaderNames: Set<String> = [],
+        requestHeaderSources: [String: HTTPHeaderSource] = [:]
     ) {
         self.id = id
         self.statusCode = statusCode
@@ -221,6 +253,9 @@ public struct HTTPRedirect: Identifiable, Sendable {
         self.method = method
         self.nextMethod = nextMethod
         self.requestHeaders = requestHeaders
+        self.requestHeaderSources = requestHeaderSources.reduce(into: [:]) { result, entry in
+            result[entry.key.lowercased()] = entry.value
+        }
         self.sensitiveRequestHeaderNames = Set(sensitiveRequestHeaderNames.map { $0.lowercased() })
         self.secretRequestHeaderNames = Set(secretRequestHeaderNames.map { $0.lowercased() })
         self.responseHeaders = responseHeaders
@@ -243,6 +278,7 @@ public struct HTTPResponseRecord: Sendable {
     public let finalURL: URL
     public let statusCode: Int
     public let requestHeaders: [HTTPField]
+    public let requestHeaderSources: [String: HTTPHeaderSource]
     public let sensitiveRequestHeaderNames: Set<String>
     public let secretRequestHeaderNames: Set<String>
     public let responseHeaders: [HTTPField]
@@ -271,13 +307,17 @@ public struct HTTPResponseRecord: Sendable {
         redirectRequest: URLRequest? = nil,
         pendingRedirect: HTTPRedirect? = nil,
         sensitiveRequestHeaderNames: Set<String> = [],
-        secretRequestHeaderNames: Set<String> = []
+        secretRequestHeaderNames: Set<String> = [],
+        requestHeaderSources: [String: HTTPHeaderSource] = [:]
     ) {
         self.runID = runID
         self.request = request
         self.finalURL = finalURL
         self.statusCode = statusCode
         self.requestHeaders = requestHeaders
+        self.requestHeaderSources = requestHeaderSources.reduce(into: [:]) { result, entry in
+            result[entry.key.lowercased()] = entry.value
+        }
         self.sensitiveRequestHeaderNames = Set(sensitiveRequestHeaderNames.map { $0.lowercased() })
         self.secretRequestHeaderNames = Set(secretRequestHeaderNames.map { $0.lowercased() })
         self.responseHeaders = responseHeaders

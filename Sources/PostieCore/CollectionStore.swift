@@ -175,7 +175,9 @@ public actor CollectionStore {
             collections: collections,
             issues: issues,
             globalVariables: globals.values,
-            globalVariablesAreReadOnly: globals.isReadOnly
+            globalVariablesAreReadOnly: globals.isReadOnly,
+            globalOptions: globals.options,
+            globalOptionsAreReadOnly: globals.optionsAreReadOnly
         )
     }
 
@@ -185,6 +187,26 @@ public actor CollectionStore {
         let existing = object["variables"] ?? .object([:])
         object["variables"] = Self.mergeOwnedVariables(existing, with: incoming)
         try replaceJSON(.object(object), at: globalsURL, operation: "save global variables")
+    }
+
+    public func saveGlobalOptions(_ options: HTTPOptions) throws {
+        guard Self.valid(options) else {
+            throw CollectionStoreError.ioFailure(operation: "save invalid global HTTP settings")
+        }
+
+        var object = try writableGlobalsObject()
+        let incoming = try Self.httpOptionsJSONValue(options)
+        if let existing = object["httpOptions"] {
+            do {
+                _ = try Self.decodeHTTPOptions(existing)
+            } catch {
+                throw CollectionStoreError.ioFailure(operation: "save global HTTP settings because their stored value is malformed")
+            }
+            object["httpOptions"] = Self.mergeUnknownData(existing, with: incoming)
+        } else {
+            object["httpOptions"] = incoming
+        }
+        try replaceJSON(.object(object), at: globalsURL, operation: "save global HTTP settings")
     }
 
     public func saveCollectionVariables(_ variables: VariableValues, in collectionID: UUID) throws {
@@ -438,9 +460,11 @@ public actor CollectionStore {
 
     private static func initializeGlobalsIfMissing(at url: URL) throws {
         guard fileMode(at: url) == nil else { return }
+        let options = try httpOptionsJSONValue(HTTPOptions())
         let emptyGlobals = JSONValue.object([
             "formatVersion": .number(Decimal(currentFormatVersion)),
-            "variables": .object([:])
+            "variables": .object([:]),
+            "httpOptions": options
         ])
         do {
             let data = try JSONEncoder.postieEncoder.encode(emptyGlobals)
@@ -451,30 +475,59 @@ public actor CollectionStore {
         }
     }
 
-    private func loadGlobals(issues: inout [StorageIssue]) -> (values: VariableValues, isReadOnly: Bool) {
+    private func loadGlobals(issues: inout [StorageIssue]) -> (
+        values: VariableValues,
+        isReadOnly: Bool,
+        options: HTTPOptions,
+        optionsAreReadOnly: Bool
+    ) {
         guard Self.isRegularFile(globalsURL), let data = try? Data(contentsOf: globalsURL) else {
             issues.append(makeIssue(.missingGlobals, message: "The globals document is missing or unreadable and was preserved."))
-            return ([:], true)
+            return ([:], true, HTTPOptions(), true)
         }
         guard case .object(let object) = try? JSONDecoder().decode(JSONValue.self, from: data),
               case .number(let version)? = object["formatVersion"] else {
             issues.append(makeIssue(.malformedGlobals, message: "The globals document is malformed and was preserved."))
-            return ([:], true)
+            return ([:], true, HTTPOptions(), true)
         }
         guard version == Decimal(Self.currentFormatVersion) else {
             issues.append(makeIssue(.unsupportedGlobalsVersion, message: "The globals document uses an unsupported format and was preserved."))
-            return ([:], true)
+            return ([:], true, HTTPOptions(), true)
         }
+
+        var values: VariableValues = [:]
+        var variablesAreReadOnly = false
         guard let rawVariables = object["variables"] else {
             issues.append(makeIssue(.malformedGlobals, message: "The globals document is malformed and was preserved."))
-            return ([:], true)
+            variablesAreReadOnly = true
+            return (values, variablesAreReadOnly, HTTPOptions(), true)
         }
         do {
-            return (try Self.decodeVariables(rawVariables), false)
+            values = try Self.decodeVariables(rawVariables)
         } catch {
             issues.append(makeIssue(.malformedGlobals, message: "The globals document is malformed and was preserved."))
-            return ([:], true)
+            variablesAreReadOnly = true
         }
+
+        let options: HTTPOptions
+        var optionsAreReadOnly = variablesAreReadOnly
+        if let rawOptions = object["httpOptions"] {
+            do {
+                options = try Self.decodeHTTPOptions(rawOptions)
+            } catch {
+                issues.append(makeIssue(
+                    .malformedGlobals,
+                    detail: "httpOptions",
+                    message: "The global HTTP settings are malformed and were preserved."
+                ))
+                options = HTTPOptions()
+                optionsAreReadOnly = true
+            }
+        } else {
+            options = HTTPOptions()
+        }
+
+        return (values, variablesAreReadOnly, options, optionsAreReadOnly)
     }
 
     private func writableGlobalsObject() throws -> [String: JSONValue] {
@@ -779,6 +832,9 @@ public actor CollectionStore {
             options["maximumResponseBytes"] = .null
         }
         requestObject["options"] = .object(options)
+        if let overrides = request.optionOverrides {
+            requestObject["optionOverrides"] = try Self.httpOptionsOverridesJSONValue(overrides)
+        }
         return .object(requestObject)
     }
 
@@ -793,6 +849,49 @@ public actor CollectionStore {
     private static func variableJSONValue(_ variables: VariableValues) throws -> JSONValue {
         let data = try JSONEncoder.postieEncoder.encode(variables)
         return try JSONDecoder().decode(JSONValue.self, from: data)
+    }
+
+    private static func httpOptionsJSONValue(_ options: HTTPOptions) throws -> JSONValue {
+        let data = try JSONEncoder.postieEncoder.encode(options)
+        guard case .object(var object) = try JSONDecoder().decode(JSONValue.self, from: data) else {
+            throw CollectionStoreError.ioFailure(operation: "encode global HTTP settings")
+        }
+        if options.overallTimeout == nil { object["overallTimeout"] = .null }
+        if options.maximumResponseBytes == nil { object["maximumResponseBytes"] = .null }
+        return .object(object)
+    }
+
+    private static func httpOptionsOverridesJSONValue(_ overrides: HTTPOptionsOverrides) throws -> JSONValue {
+        let data = try JSONEncoder.postieEncoder.encode(overrides)
+        guard case .object(var object) = try JSONDecoder().decode(JSONValue.self, from: data) else {
+            throw CollectionStoreError.ioFailure(operation: "encode request HTTP settings")
+        }
+        if overrides.followRedirects == nil { object["followRedirects"] = .null }
+        if overrides.inactivityTimeout == nil { object["inactivityTimeout"] = .null }
+        if overrides.overallTimeout == nil { object["overallTimeout"] = .null }
+        if overrides.maximumResponseBytes == nil { object["maximumResponseBytes"] = .null }
+        return .object(object)
+    }
+
+    private static func decodeHTTPOptions(_ value: JSONValue) throws -> HTTPOptions {
+        guard case .object(let object) = value,
+              object["followRedirects"] != nil,
+              object["inactivityTimeout"] != nil,
+              object["overallTimeout"] != nil,
+              object["maximumResponseBytes"] != nil else {
+            throw DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "Global HTTP settings are incomplete."))
+        }
+        let options = try decodeJSON(value, as: HTTPOptions.self)
+        guard valid(options) else {
+            throw DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "Global HTTP settings are outside their valid range."))
+        }
+        return options
+    }
+
+    private static func valid(_ options: HTTPOptions) -> Bool {
+        options.inactivityTimeout.isFinite && options.inactivityTimeout > 0
+            && (options.overallTimeout.map { $0.isFinite && $0 > 0 } ?? true)
+            && (options.maximumResponseBytes.map { $0 >= 0 } ?? true)
     }
 
     private static func collectionDefaultsJSONValue(_ defaults: CollectionRequestDefaults) throws -> JSONValue {
@@ -948,6 +1047,9 @@ public actor CollectionStore {
                 }
             }
         }
+        if newObject["optionOverrides"] == nil {
+            merged.removeValue(forKey: "optionOverrides")
+        }
         return .object(merged)
     }
 
@@ -974,14 +1076,14 @@ public actor CollectionStore {
             return incoming
         }
 
-        let knownFields: Set<String> = ["kind", "username", "password", "token"]
+        let knownFields: Set<String> = ["kind", "username", "password", "token", "apiKeyHeaderName", "apiKey"]
         var merged = oldObject
         for key in knownFields {
             guard let newValue = newObject[key] else {
                 merged.removeValue(forKey: key)
                 continue
             }
-            if (key == "password" || key == "token"), let oldValue = oldObject[key] {
+            if (key == "password" || key == "token" || key == "apiKey"), let oldValue = oldObject[key] {
                 merged[key] = mergeUnknownData(oldValue, with: newValue)
             } else {
                 merged[key] = newValue
@@ -1143,6 +1245,7 @@ public actor CollectionStore {
         var bodyEnabled: Bool
         var bodySyntax: BodySyntax
         var options: HTTPOptions
+        var optionOverrides: HTTPOptionsOverrides?
         var variables: VariableValues?
         var authentication: RequestAuthentication?
         var inheritsCollectionAuthentication: Bool?
@@ -1159,24 +1262,27 @@ public actor CollectionStore {
             self.bodyEnabled = configuration.bodyEnabled
             self.bodySyntax = configuration.bodySyntax
             self.options = configuration.options
+            self.optionOverrides = configuration.optionOverrides
             self.variables = configuration.variables
             self.authentication = configuration.authentication
             self.inheritsCollectionAuthentication = configuration.inheritsCollectionAuthentication
         }
 
         func configuration(identity: UUID) -> HTTPRequestConfiguration {
-            HTTPRequestConfiguration(
+            let normalizedQuery = QueryParameters.normalize(url: url, fields: query)
+            return HTTPRequestConfiguration(
                 id: identity,
                 name: name,
                 method: method,
-                url: url,
+                url: normalizedQuery.baseURL,
                 pathParameters: pathParameters ?? [],
-                query: query,
+                query: normalizedQuery.fields,
                 headers: headers,
                 body: body,
                 bodyEnabled: bodyEnabled,
                 bodySyntax: bodySyntax,
                 options: options,
+                optionOverrides: optionOverrides,
                 variables: variables ?? [:],
                 authentication: authentication ?? RequestAuthentication(),
                 inheritsCollectionAuthentication: inheritsCollectionAuthentication ?? false
@@ -1328,7 +1434,7 @@ private struct JSONCodingKey: CodingKey {
 private extension JSONEncoder {
     static var postieEncoder: JSONEncoder {
         let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         return encoder
     }
 }
