@@ -29,13 +29,14 @@ struct VariableInspection: Equatable {
 }
 
 enum VariableInspectionMatcher {
-    static func reference(in value: String, selection: NSRange) -> TemplateReference? {
+    static func reference(in value: String, selection: NSRange, definedNames: Set<String>? = nil) -> TemplateReference? {
         guard value.utf16.prefix(VariableCompletionMatcher.maximumInputLength + 1).count <= VariableCompletionMatcher.maximumInputLength,
               selection.location >= 0, selection.length >= 0,
               selection.location <= value.utf16.count,
               selection.length <= value.utf16.count - selection.location else { return nil }
         return TemplateEngine.scan(value).references.first {
-            selection.location >= $0.range.location &&
+            (definedNames?.contains($0.name) ?? true) &&
+                selection.location >= $0.range.location &&
                 selection.location < NSMaxRange($0.range) &&
                 NSMaxRange(selection) <= NSMaxRange($0.range)
         }
@@ -73,14 +74,23 @@ final class VariableInspectionPopover: NSObject, NSPopoverDelegate {
         if target != inspection || !popover.isShown {
             target = inspection
             let controller = NSViewController()
-            controller.view = VariableInspectionHostingView(rootView: VariableInspectionView(
+            let hostingView = VariableInspectionHostingView(rootView: VariableInspectionView(
                 model: model,
                 inspection: inspection,
                 isCurrent: isCurrent,
-                dismiss: { [weak self] in self?.dismiss() }
+                dismiss: { [weak self] in self?.dismiss() },
+                onContentSizeChange: { [weak self] size in
+                    guard let self, self.target == inspection else { return }
+                    self.updateContentSize(size)
+                }
             ))
+            hostingView.sizingOptions = [.intrinsicContentSize]
+            hostingView.layoutSubtreeIfNeeded()
+            let fittingSize = hostingView.fittingSize
+            hostingView.setFrameSize(fittingSize)
+            controller.view = hostingView
+            controller.preferredContentSize = fittingSize
             popover.contentViewController = controller
-            popover.contentSize = NSSize(width: 360, height: 170)
         }
         if popover.isShown {
             popover.positioningRect = rect
@@ -100,17 +110,62 @@ final class VariableInspectionPopover: NSObject, NSPopoverDelegate {
         target = nil
         popover.contentViewController = nil
     }
+
+    private func updateContentSize(_ size: CGSize) {
+        guard size.width > 0, size.height > 0 else { return }
+        let contentSize = NSSize(width: size.width, height: size.height)
+        guard abs(popover.contentSize.width - contentSize.width) > 0.5 ||
+                abs(popover.contentSize.height - contentSize.height) > 0.5 else { return }
+        popover.contentSize = contentSize
+    }
 }
 
 private final class VariableInspectionHostingView<Content: View>: NSHostingView<Content> {
     override var acceptsFirstResponder: Bool { false }
 }
 
+@MainActor
+private struct VariableInspectionValueField: NSViewRepresentable {
+    let value: String
+    let accessibilityLabel: String
+
+    func makeNSView(context: Context) -> VariableInspectionNativeValueField {
+        let textField = VariableInspectionNativeValueField(frame: .zero)
+        textField.isEnabled = true
+        textField.isEditable = false
+        textField.isSelectable = false
+        textField.isBordered = true
+        textField.isBezeled = true
+        textField.bezelStyle = .roundedBezel
+        textField.font = NSFont.monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+        textField.textColor = .labelColor
+        textField.usesSingleLineMode = true
+        textField.lineBreakMode = .byTruncatingMiddle
+        textField.focusRingType = .none
+        textField.setAccessibilityLabel(accessibilityLabel)
+        textField.stringValue = value
+        textField.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        textField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return textField
+    }
+
+    func updateNSView(_ textField: VariableInspectionNativeValueField, context: Context) {
+        if textField.stringValue != value { textField.stringValue = value }
+        textField.setAccessibilityLabel(accessibilityLabel)
+    }
+}
+
+private final class VariableInspectionNativeValueField: NSTextField {
+    override var acceptsFirstResponder: Bool { false }
+}
+
+@MainActor
 private struct VariableInspectionView: View {
     @ObservedObject var model: AppModel
     let inspection: VariableInspection
     let isCurrent: () -> Bool
     let dismiss: () -> Void
+    let onContentSizeChange: (CGSize) -> Void
 
     @State private var revealedValue: String?
     @State private var revealTask: Task<Void, Never>?
@@ -119,48 +174,69 @@ private struct VariableInspectionView: View {
     @State private var errorMessage: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("{{\(inspection.name)}}")
-                    .font(.system(.body, design: .monospaced).weight(.semibold))
-                    .lineLimit(1).truncationMode(.middle)
-                Spacer()
-                Text(inspection.scopeName).font(.caption).foregroundStyle(.secondary)
-            }
-            ScrollView([.horizontal, .vertical]) {
-                Text(displayValue)
-                    .font(.system(.body, design: .monospaced))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(6)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(.quaternary, in: RoundedRectangle(cornerRadius: 5))
-            HStack {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                VariableInspectionValueField(
+                    value: isSecretHidden ? "••••••••" : displayValue,
+                    accessibilityLabel: isSecretHidden ? "Secret value hidden" : "Variable value"
+                )
+                .frame(minWidth: 0, maxWidth: .infinity)
+                .layoutPriority(1)
+
                 if inspection.value.isEncrypted {
-                    Button(revealedValue == nil ? "Reveal" : "Hide") {
+                    Button {
                         if revealedValue == nil { reveal() } else { clear() }
+                    } label: {
+                        Image(systemName: revealedValue == nil ? "eye" : "eye.slash")
                     }
+                    .buttonStyle(.borderless)
                     .focusable(false)
                     .disabled(isBusy || !model.isCurrent(inspection))
+                    .accessibilityLabel(revealedValue == nil ? "Reveal secret" : "Hide secret")
+                    .help(revealedValue == nil ? "Reveal secret" : "Hide secret")
                     if isBusy { ProgressView().controlSize(.small) }
                 }
-                if let errorMessage {
-                    Text(errorMessage).font(.caption).foregroundStyle(.red)
-                }
+            }
+
+            if let errorMessage {
+                Text(errorMessage)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .lineLimit(1)
+            }
+
+            HStack {
+                Text(inspection.scopeName)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 Spacer(minLength: 4)
-                Button("Go to definition") {
+                Button {
                     guard isCurrent(), model.isCurrent(inspection) else { return }
                     clear()
                     dismiss()
                     model.showVariableDefinition(inspection)
+                } label: {
+                    HStack(spacing: 4) {
+                        Text("Go to definition")
+                        Image(systemName: "arrow.up.right")
+                    }
                 }
+                .buttonStyle(.borderless)
                 .focusable(false)
                 .disabled(!model.isCurrent(inspection))
+                .accessibilityLabel("Go to definition")
+                .help("Go to definition")
             }
             .controlSize(.small)
         }
         .padding(12)
-        .frame(width: 360, height: 170)
+        .frame(width: 320)
+        .fixedSize(horizontal: false, vertical: true)
+        .onGeometryChange(for: CGSize.self) { proxy in
+            proxy.size
+        } action: { size in
+            onContentSizeChange(size)
+        }
         .onChange(of: model.isCurrent(inspection)) { _, current in
             if !current { clear(); dismiss() }
         }
@@ -171,6 +247,10 @@ private struct VariableInspectionView: View {
         guard model.isCurrent(inspection) else { return "Variable changed" }
         if case let .plain(value) = inspection.value { return value.isEmpty ? "(empty)" : value }
         return revealedValue.map { $0.isEmpty ? "(empty)" : $0 } ?? "Secret value hidden"
+    }
+
+    private var isSecretHidden: Bool {
+        inspection.value.isEncrypted && revealedValue == nil
     }
 
     private func reveal() {

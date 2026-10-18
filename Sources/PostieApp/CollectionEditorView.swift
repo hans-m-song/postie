@@ -18,7 +18,10 @@ struct CollectionEditorView: View {
                     Text(collection.name).font(.title2.weight(.semibold))
                     Text("Shared variables, headers and authentication for this collection.")
                         .font(.callout).foregroundStyle(.secondary)
-                    Picker("Collection section", selection: $model.collectionEditorSection) {
+                    Picker("Collection section", selection: Binding(
+                        get: { model.collectionEditorSection },
+                        set: { model.setCollectionEditorSection($0) }
+                    )) {
                         Text("Variables").tag(CollectionEditorSection.variables)
                         Text("Headers").tag(CollectionEditorSection.headers)
                         Text("Auth").tag(CollectionEditorSection.authentication)

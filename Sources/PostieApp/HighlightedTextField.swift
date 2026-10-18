@@ -392,14 +392,10 @@ private struct NativeHighlightedTextField: NSViewRepresentable {
             if let fieldEditor, !fieldEditor.hasMarkedText(),
                isEnabled, textField.isEnabled, activeFieldEditor === fieldEditor,
                let reference = VariableInspectionMatcher.reference(
-                in: fieldEditor.string, selection: fieldEditor.selectedRange()
-               ) {
+                in: fieldEditor.string, selection: fieldEditor.selectedRange(), definedNames: availableVariables
+               ), let inspectionOwner,
+               let inspection = model.variableInspection(named: reference.name, in: inspectionOwner) {
                 dismissCompletion()
-                guard let inspectionOwner,
-                      let inspection = model.variableInspection(named: reference.name, in: inspectionOwner) else {
-                    dismissInspection()
-                    return
-                }
                 inspectedVariable = inspection
                 inspectionGeneration += 1
                 let generation = inspectionGeneration

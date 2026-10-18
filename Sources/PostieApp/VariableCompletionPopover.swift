@@ -21,8 +21,9 @@ final class VariableCompletionPopover {
     }
 
     func update(suggestions: [VariableCompletion], selectedIndex: Int) {
-        controller.listView.update(suggestions: suggestions, selectedIndex: selectedIndex)
-        popover.contentSize = controller.listView.intrinsicContentSize
+        controller.update(suggestions: suggestions, selectedIndex: selectedIndex)
+        popover.contentSize = controller.visibleContentSize(for: suggestions.count)
+        controller.scrollSelectionIntoView()
     }
 
     func show(
@@ -53,15 +54,44 @@ final class VariableCompletionPopover {
 @MainActor
 private final class VariableCompletionPopoverController: NSViewController {
     let listView = VariableCompletionListView()
+    private let scrollView = VariableCompletionScrollView()
 
     override func loadView() {
-        view = listView
+        scrollView.borderType = .noBorder
+        scrollView.drawsBackground = false
+        scrollView.hasVerticalScroller = true
+        scrollView.autohidesScrollers = true
+        scrollView.scrollerStyle = .overlay
+        scrollView.documentView = listView
+        view = scrollView
+    }
+
+    func update(suggestions: [VariableCompletion], selectedIndex: Int) {
+        loadViewIfNeeded()
+        listView.update(suggestions: suggestions, selectedIndex: selectedIndex)
+    }
+
+    func visibleContentSize(for suggestionCount: Int) -> NSSize {
+        NSSize(
+            width: listView.intrinsicContentSize.width,
+            height: listView.rowHeight * CGFloat(min(max(1, suggestionCount), listView.maximumVisibleRows))
+        )
+    }
+
+    func scrollSelectionIntoView() {
+        listView.scrollSelectionIntoView()
     }
 }
 
 @MainActor
+private final class VariableCompletionScrollView: NSScrollView {
+    override var acceptsFirstResponder: Bool { false }
+}
+
+@MainActor
 private final class VariableCompletionListView: NSView {
-    private let rowHeight: CGFloat = 26
+    fileprivate let rowHeight: CGFloat = 44
+    fileprivate let maximumVisibleRows = 6
     private var suggestions: [VariableCompletion] = []
     private var selectedIndex = 0
     var onSelection: ((Int) -> Void)?
@@ -76,8 +106,20 @@ private final class VariableCompletionListView: NSView {
     func update(suggestions: [VariableCompletion], selectedIndex: Int) {
         self.suggestions = suggestions
         self.selectedIndex = suggestions.isEmpty ? 0 : min(max(0, selectedIndex), suggestions.count - 1)
+        setFrameSize(intrinsicContentSize)
         invalidateIntrinsicContentSize()
         needsDisplay = true
+    }
+
+    func scrollSelectionIntoView() {
+        guard suggestions.indices.contains(selectedIndex) else { return }
+        let rowRect = NSRect(
+            x: 0,
+            y: rowHeight * CGFloat(selectedIndex),
+            width: bounds.width,
+            height: rowHeight
+        )
+        _ = scrollToVisible(rowRect)
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -93,34 +135,31 @@ private final class VariableCompletionListView: NSView {
             }
 
             let textColor = isSelected ? NSColor.alternateSelectedControlTextColor : NSColor.labelColor
-            let metadataColor = isSelected ? textColor : NSColor.secondaryLabelColor
             let nameAttributes: [NSAttributedString.Key: Any] = [
                 .font: NSFont.monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular),
-                .foregroundColor: textColor
+                .foregroundColor: textColor,
+                .paragraphStyle: singleLineParagraphStyle()
             ]
-            let metadataAttributes: [NSAttributedString.Key: Any] = [
+            let detailColor = isSelected ? textColor : NSColor.secondaryLabelColor
+            let detailAttributes: [NSAttributedString.Key: Any] = [
                 .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize),
-                .foregroundColor: metadataColor
+                .foregroundColor: detailColor,
+                .paragraphStyle: singleLineParagraphStyle()
             ]
             let metadata = suggestion.isSecret
                 ? "\(scopeLabel(suggestion.scope)) · 🔒 Secret"
                 : scopeLabel(suggestion.scope)
-            let metadataSize = (metadata as NSString).size(withAttributes: metadataAttributes)
+            let metadataSize = (metadata as NSString).size(withAttributes: detailAttributes)
             let metadataWidth = min(metadataSize.width, bounds.width * 0.52)
-            let metadataRect = NSRect(
-                x: bounds.width - metadataWidth - 10,
-                y: rowRect.minY + 3,
-                width: metadataWidth,
-                height: rowHeight - 6
-            )
-            let nameRect = NSRect(
-                x: 10,
-                y: rowRect.minY + 3,
-                width: max(0, metadataRect.minX - 18),
-                height: rowHeight - 6
-            )
+            let detailY = rowRect.minY + 24
+            let metadataRect = NSRect(x: bounds.width - metadataWidth - 10, y: detailY, width: metadataWidth, height: 15)
+            let nameRect = NSRect(x: 10, y: rowRect.minY + 4, width: bounds.width - 20, height: 17)
+            let previewRect = NSRect(x: 10, y: detailY, width: max(0, metadataRect.minX - 18), height: 15)
             (suggestion.name as NSString).draw(in: nameRect, withAttributes: nameAttributes)
-            (metadata as NSString).draw(in: metadataRect, withAttributes: metadataAttributes)
+            if let preview = suggestion.preview, !suggestion.isSecret {
+                (preview as NSString).draw(in: previewRect, withAttributes: detailAttributes)
+            }
+            (metadata as NSString).draw(in: metadataRect, withAttributes: detailAttributes)
         }
     }
 
@@ -139,5 +178,11 @@ private final class VariableCompletionListView: NSView {
         case .collection: return "Collection"
         case .request: return "Request"
         }
+    }
+
+    private func singleLineParagraphStyle() -> NSParagraphStyle {
+        let style = NSMutableParagraphStyle()
+        style.lineBreakMode = .byTruncatingTail
+        return style
     }
 }

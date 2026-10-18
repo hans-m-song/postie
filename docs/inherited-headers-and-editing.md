@@ -2,6 +2,8 @@
 
 Approved 2026-10-18. T-64–T-67 are complete locally.
 
+Presentation update T-68–T-69: see variable-popover-polish.md. The earlier scrollable inspector described below is replaced by a compact native value field, and autocomplete gains bounded ordinary-value previews. Historical verification below records the earlier layout.
+
 - [x] T-64: inherited collection headers share the request Headers table. Rows are read-only, retain templates, explain overrides/suppression and jump to collection Headers.
 - [x] T-65: JSON-only newline indentation and selected-text delimiter wrapping. Two-space indentation, inline opener pairs, native undo; paste/IME/None unchanged.
 - [x] T-66: complete variable tokens open an inspector above their text range; show ordinary values, explicit secret Reveal and Go to definition. Incomplete tokens retain keyboard autocomplete, anchored to their range.

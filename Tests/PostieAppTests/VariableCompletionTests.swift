@@ -139,4 +139,34 @@ final class VariableCompletionTests: XCTestCase {
 
         XCTAssertEqual(VariableCompletionMatcher.replacement(for: variable), "{{baseURL}}")
     }
+
+    func testPlainPreviewIsSingleLineAndTruncatedWithinBound() {
+        let multiline = VariableCompletion(
+            name: "endpoint",
+            scope: .global,
+            isSecret: false,
+            preview: "  first\r\nsecond\tthird\u{2028}last "
+        )
+        let longValue = VariableCompletion(
+            name: "long",
+            scope: .global,
+            isSecret: false,
+            preview: String(repeating: "x", count: VariableCompletion.maximumPreviewLength + 20)
+        )
+
+        XCTAssertEqual(multiline.preview, "first second third last")
+        XCTAssertEqual(longValue.preview?.count, VariableCompletion.maximumPreviewLength)
+        XCTAssertTrue(longValue.preview?.hasSuffix("…") == true)
+    }
+
+    func testSecretPreviewIsDiscarded() {
+        let secret = VariableCompletion(
+            name: "credential",
+            scope: .request,
+            isSecret: true,
+            preview: "synthetic secret text"
+        )
+
+        XCTAssertNil(secret.preview)
+    }
 }

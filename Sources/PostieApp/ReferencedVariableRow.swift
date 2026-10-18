@@ -53,7 +53,7 @@ struct ReferencedVariableRow: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text("{{\(name)}}")
-                    .font(.system(.caption, design: .monospaced))
+                    .font(.system(size: NSFont.systemFontSize, design: .monospaced))
                     .foregroundStyle(details == nil ? Color.red : Color.teal)
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -72,7 +72,7 @@ struct ReferencedVariableRow: View {
                             .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
                     } else if case let .plain(value) = details.value {
                         Text(value.isEmpty ? "(empty)" : value)
-                            .font(.system(.caption, design: .monospaced))
+                            .font(.system(size: NSFont.systemFontSize, design: .monospaced))
                             .lineLimit(1).truncationMode(.middle)
                             .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
                     }

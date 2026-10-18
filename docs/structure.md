@@ -61,7 +61,8 @@ Sources/PostieApp/
   JSONBodyEditing.swift         Pure delimiter, selection and indentation edit plans
   SyntaxHighlighting.swift      Bounded lexical spans and adaptive colors
   HighlightedTextField.swift    Native URL/header/value template presentation
-  VariableCompletion.swift     Bounded metadata-only token completion matching
+  NavigationHistory.swift      Bounded session navigation identities and sections
+  VariableCompletion.swift     Bounded token matching and ordinary-value previews
   VariableCompletionPopover.swift Native completion list and positioning
   VariableInspection.swift     Scoped token inspector, explicit reveal and navigation
   HighlightedResponseText.swift Selectable natural-size response text

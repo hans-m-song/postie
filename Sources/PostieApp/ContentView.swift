@@ -17,6 +17,23 @@ struct ContentView: View {
         } detail: {
             detail
         }
+        .toolbar {
+            ToolbarItemGroup(placement: .navigation) {
+                Button { model.navigateBack() } label: {
+                    Image(systemName: "chevron.backward")
+                }
+                .help("Back")
+                .accessibilityLabel("Back")
+                .disabled(!model.canNavigateBack)
+
+                Button { model.navigateForward() } label: {
+                    Image(systemName: "chevron.forward")
+                }
+                .help("Forward")
+                .accessibilityLabel("Forward")
+                .disabled(!model.canNavigateForward)
+            }
+        }
         .disabled(model.isTerminating)
         .sheet(item: $namePrompt) { prompt in
             NameInputSheet(prompt: prompt)

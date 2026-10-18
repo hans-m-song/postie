@@ -2,14 +2,30 @@ import Foundation
 import PostieCore
 
 struct VariableCompletion: Equatable, Hashable, Sendable {
+    static let maximumPreviewLength = 256
+
     let name: String
     let scope: VariableScope
     let isSecret: Bool
+    let preview: String?
 
-    init(name: String, scope: VariableScope, isSecret: Bool) {
+    init(name: String, scope: VariableScope, isSecret: Bool, preview: String? = nil) {
         self.name = name
         self.scope = scope
         self.isSecret = isSecret
+        self.preview = isSecret ? nil : Self.singleLinePreview(preview)
+    }
+
+    private static func singleLinePreview(_ preview: String?) -> String? {
+        guard let preview else { return nil }
+
+        let boundedSource = String(preview.prefix(maximumPreviewLength + 1))
+        let isTruncated = boundedSource.count > maximumPreviewLength
+        let characterLimit = isTruncated ? maximumPreviewLength - 1 : maximumPreviewLength
+        let singleLine = boundedSource.prefix(characterLimit)
+            .split(whereSeparator: \.isWhitespace)
+            .joined(separator: " ")
+        return isTruncated ? singleLine + "…" : singleLine
     }
 }
 

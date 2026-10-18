@@ -6,6 +6,10 @@ enum CollectionEditorSection: Hashable {
     case variables, headers, authentication
 }
 
+enum RequestEditorSection: Hashable {
+    case request, authentication, variables, settings
+}
+
 struct VariableDefinitionRequest: Identifiable {
     let id = UUID()
     let owner: VariableOwner
@@ -55,7 +59,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var storageIssues: [StorageIssue] = []
     @Published private(set) var selectedIdentity: RequestIdentity?
     @Published private(set) var selectedCollectionID: UUID?
-    @Published var collectionEditorSection: CollectionEditorSection = .variables
+    @Published private(set) var collectionEditorSection: CollectionEditorSection = .variables
+    @Published private(set) var requestEditorSections: [RequestIdentity: RequestEditorSection] = [:]
     @Published private(set) var variableDefinitionRequest: VariableDefinitionRequest?
     @Published private(set) var showsOngoingRequests = false
     @Published private(set) var now = Date()
@@ -106,6 +111,7 @@ final class AppModel: ObservableObject {
     private var pendingSaveTasks: [RequestIdentity: Task<Void, Never>] = [:]
     private var saveChains: [RequestIdentity: Task<Void, Never>] = [:]
     private var previewTasks: [RequestIdentity: PendingPreview] = [:]
+    private var navigationHistory = NavigationHistory()
     private var settlementWaiters: [RequestIdentity: [CheckedContinuation<Void, Never>]] = [:]
     private var collectionMutationTasks: [UUID: Task<Void, Never>] = [:]
     private var collectionMutationTokens: [UUID: UUID] = [:]
@@ -144,6 +150,31 @@ final class AppModel: ObservableObject {
 
     var activeRunCount: Int {
         activeRuns.count
+    }
+
+    var canNavigateBack: Bool {
+        navigationHistory.canGoBack(to: availableNavigationLocations)
+    }
+
+    var canNavigateForward: Bool {
+        navigationHistory.canGoForward(to: availableNavigationLocations)
+    }
+
+    func requestEditorSection(for identity: RequestIdentity) -> RequestEditorSection {
+        requestEditorSections[identity] ?? .request
+    }
+
+    func setRequestEditorSection(_ section: RequestEditorSection, for identity: RequestIdentity) {
+        guard drafts[identity] != nil, requestEditorSection(for: identity) != section else { return }
+        requestEditorSections[identity] = section
+        if section != .variables, variableDefinitionRequest?.owner == .request(identity) {
+            variableDefinitionRequest = nil
+        }
+        guard selectedIdentity == identity,
+              selectedCollectionID == nil,
+              !showsOngoingRequests,
+              !showsGlobalVariables else { return }
+        recordNavigation(.request(identity, section: section))
     }
 
     func request(for identity: RequestIdentity) -> HTTPRequestConfiguration? {
@@ -187,6 +218,7 @@ final class AppModel: ObservableObject {
         selectedCollectionID = nil
         showsOngoingRequests = false
         showsGlobalVariables = false
+        if let identity { recordNavigation(.request(identity, section: requestEditorSection(for: identity))) }
     }
 
     func showOngoingRequests() {
@@ -194,6 +226,7 @@ final class AppModel: ObservableObject {
         selectedCollectionID = nil
         showsGlobalVariables = false
         showsOngoingRequests = true
+        recordNavigation(.ongoingRequests)
     }
 
     func showRequests() {
@@ -204,15 +237,15 @@ final class AppModel: ObservableObject {
         if selectedIdentity == nil {
             selectFirstRequest()
         }
+        if let selectedIdentity {
+            recordNavigation(.request(selectedIdentity, section: requestEditorSection(for: selectedIdentity)))
+        }
     }
 
     func openRequest(_ identity: RequestIdentity) {
         guard drafts[identity] != nil, !reconcilingRequests.contains(identity) else { return }
-        variableDefinitionRequest = nil
-        selectedIdentity = identity
-        selectedCollectionID = nil
-        showsOngoingRequests = false
-        showsGlobalVariables = false
+        showRequest(identity)
+        recordNavigation(.request(identity, section: requestEditorSection(for: identity)))
     }
 
     func showGlobalVariables() {
@@ -220,6 +253,7 @@ final class AppModel: ObservableObject {
         selectedCollectionID = nil
         showsGlobalVariables = true
         showsOngoingRequests = false
+        recordNavigation(.globalVariables)
     }
 
     func showRequestSearch() {
@@ -234,6 +268,94 @@ final class AppModel: ObservableObject {
         selectedCollectionID = id
         showsGlobalVariables = false
         showsOngoingRequests = false
+        recordNavigation(.collection(id, section: section))
+    }
+
+    func setCollectionEditorSection(_ section: CollectionEditorSection) {
+        guard let selectedCollectionID,
+              collections.contains(where: { $0.id == selectedCollectionID }),
+              collectionEditorSection != section else { return }
+        collectionEditorSection = section
+        recordNavigation(.collection(selectedCollectionID, section: section))
+    }
+
+    func navigateBack() {
+        guard let location = navigationHistory.goBack(to: availableNavigationLocations) else { return }
+        restoreNavigation(to: location)
+    }
+
+    func navigateForward() {
+        guard let location = navigationHistory.goForward(to: availableNavigationLocations) else { return }
+        restoreNavigation(to: location)
+    }
+
+    private func showRequest(_ identity: RequestIdentity) {
+        variableDefinitionRequest = nil
+        selectedIdentity = identity
+        selectedCollectionID = nil
+        showsOngoingRequests = false
+        showsGlobalVariables = false
+    }
+
+    private func recordNavigation(_ location: NavigationLocation) {
+        guard isAvailableNavigationLocation(location) else { return }
+        navigationHistory.visit(location)
+    }
+
+    private var availableNavigationLocations: Set<NavigationLocation> {
+        var available: Set<NavigationLocation> = []
+        for location in navigationHistory.locations where isAvailableNavigationLocation(location) {
+            available.insert(location)
+        }
+        return available
+    }
+
+    private func isAvailableNavigationLocation(_ location: NavigationLocation) -> Bool {
+        switch location {
+        case let .request(identity, _):
+            return isAvailableRequest(identity)
+        case let .requestVariableDefinition(identity, name):
+            return isAvailableRequest(identity) && variables(for: .request(identity))[name] != nil
+        case let .collection(id, _):
+            return collections.contains { $0.id == id }
+        case .globalVariables, .ongoingRequests:
+            return true
+        }
+    }
+
+    private func isAvailableRequest(_ identity: RequestIdentity) -> Bool {
+        guard drafts[identity] != nil,
+              !reconcilingRequests.contains(identity),
+              let collection = collection(id: identity.collectionID) else { return false }
+        return collection.requests.contains { $0.id == identity.requestID }
+    }
+
+    private func restoreNavigation(to location: NavigationLocation) {
+        guard isAvailableNavigationLocation(location) else { return }
+        variableDefinitionRequest = nil
+
+        switch location {
+        case let .request(identity, section):
+            showRequest(identity)
+            requestEditorSections[identity] = section
+        case let .requestVariableDefinition(identity, name):
+            showRequest(identity)
+            requestEditorSections[identity] = .variables
+            variableDefinitionRequest = VariableDefinitionRequest(owner: .request(identity), name: name)
+        case let .collection(id, section):
+            collectionEditorSection = section
+            selectedCollectionID = id
+            showsGlobalVariables = false
+            showsOngoingRequests = false
+        case .globalVariables:
+            selectedCollectionID = nil
+            showsGlobalVariables = true
+            showsOngoingRequests = false
+        case .ongoingRequests:
+            selectedCollectionID = nil
+            showsGlobalVariables = false
+            showsOngoingRequests = true
+        }
     }
 
     func collection(id: UUID) -> RequestCollection? {
@@ -268,10 +390,21 @@ final class AppModel: ObservableObject {
 
     private func variableCompletions(in context: VariableContext) -> [VariableCompletion] {
         let names = Set(context.global.keys).union(context.collection.keys).union(context.request.keys)
-        return names.sorted().map { name in
-            if let value = context.request[name] { return VariableCompletion(name: name, scope: .request, isSecret: value.isEncrypted) }
-            if let value = context.collection[name] { return VariableCompletion(name: name, scope: .collection, isSecret: value.isEncrypted) }
-            return VariableCompletion(name: name, scope: .global, isSecret: context.global[name]?.isEncrypted ?? false)
+        return names.sorted().compactMap { name in
+            let resolved: (VariableValue, VariableScope)? =
+                context.request[name].map { ($0, .request) } ??
+                context.collection[name].map { ($0, .collection) } ??
+                context.global[name].map { ($0, .global) }
+            guard let (value, scope) = resolved else { return nil }
+
+            let preview: String?
+            if case let .plain(plainValue) = value {
+                preview = plainValue
+            } else {
+                preview = nil
+            }
+
+            return VariableCompletion(name: name, scope: scope, isSecret: value.isEncrypted, preview: preview)
         }
     }
 
@@ -321,8 +454,11 @@ final class AppModel: ObservableObject {
         case .global: showGlobalVariables()
         case let .collection(id): showCollection(id)
         case let .request(identity):
-            openRequest(identity)
+            guard isAvailableNavigationLocation(.requestVariableDefinition(identity, name: inspection.name)) else { return }
+            showRequest(identity)
+            requestEditorSections[identity] = .variables
             variableDefinitionRequest = VariableDefinitionRequest(owner: inspection.owner, name: inspection.name)
+            recordNavigation(.requestVariableDefinition(identity, name: inspection.name))
         }
     }
 
@@ -1044,6 +1180,7 @@ final class AppModel: ObservableObject {
                 if let selectedCollectionID, !nextCollections.contains(where: { $0.id == selectedCollectionID }) {
                     self.selectedCollectionID = nil
                 }
+                requestEditorSections = requestEditorSections.filter { workspaceMembers.contains($0.key) }
                 globalVariables = nextGlobals
                 globalVariablesAreReadOnly = loaded.globalVariablesAreReadOnly
                 storageIssues = loaded.issues
@@ -1546,6 +1683,7 @@ final class AppModel: ObservableObject {
             discardBody(latest.response.bodyFileURL, for: identity, after: latest.response.runID)
         }
         previewTasks.removeValue(forKey: identity)
+        requestEditorSections.removeValue(forKey: identity)
     }
 
     private func replaceCollection(_ collection: RequestCollection) {
@@ -1559,6 +1697,12 @@ final class AppModel: ObservableObject {
     private func selectFirstRequest() {
         selectedIdentity = collections.first.flatMap { collection in
             collection.requests.first.map { RequestIdentity(collectionID: collection.id, requestID: $0.id) }
+        }
+        if let selectedIdentity,
+           selectedCollectionID == nil,
+           !showsGlobalVariables,
+           !showsOngoingRequests {
+            recordNavigation(.request(selectedIdentity, section: requestEditorSection(for: selectedIdentity)))
         }
     }
 

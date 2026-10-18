@@ -34,6 +34,13 @@ struct PostieApp: App {
         }
         .commands {
             CommandGroup(after: .sidebar) {
+                Button("Back") { model.navigateBack() }
+                    .keyboardShortcut("[", modifiers: [.command])
+                    .disabled(!model.canNavigateBack)
+                Button("Forward") { model.navigateForward() }
+                    .keyboardShortcut("]", modifiers: [.command])
+                    .disabled(!model.canNavigateForward)
+                Divider()
                 Button("Search Requests…") { model.showRequestSearch() }
                     .keyboardShortcut("k", modifiers: [.command])
                 Button("Requests") { model.showRequests() }

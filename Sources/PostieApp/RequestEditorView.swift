@@ -135,14 +135,15 @@ struct RequestToolbar: View {
 struct RequestEditorView: View {
     @EnvironmentObject private var model: AppModel
     let identity: RequestIdentity
-    @State private var selectedSection: EditorSection = .request
     @State private var referencedVariableNames: [String] = []
 
-    private enum EditorSection: Hashable {
-        case request
-        case authentication
-        case variables
-        case settings
+    private var selectedSection: RequestEditorSection { model.requestEditorSection(for: identity) }
+
+    private var sectionBinding: Binding<RequestEditorSection> {
+        Binding(
+            get: { model.requestEditorSection(for: identity) },
+            set: { model.setRequestEditorSection($0, for: identity) }
+        )
     }
 
     var body: some View {
@@ -192,11 +193,11 @@ struct RequestEditorView: View {
     private var editor: some View {
         VStack(spacing: 0) {
             VStack(spacing: 8) {
-                Picker("Request editor section", selection: $selectedSection) {
-                    Text("Request").tag(EditorSection.request)
-                    Text("Auth").tag(EditorSection.authentication)
-                    Text("Variables").tag(EditorSection.variables)
-                    Text("Settings").tag(EditorSection.settings)
+                Picker("Request editor section", selection: sectionBinding) {
+                    Text("Request").tag(RequestEditorSection.request)
+                    Text("Auth").tag(RequestEditorSection.authentication)
+                    Text("Variables").tag(RequestEditorSection.variables)
+                    Text("Settings").tag(RequestEditorSection.settings)
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
@@ -290,7 +291,7 @@ struct RequestEditorView: View {
     private func selectVariablesForDefinitionRequest() {
         guard let definitionRequest = model.variableDefinitionRequest,
               definitionRequest.owner == .request(identity) else { return }
-        selectedSection = .variables
+        model.setRequestEditorSection(.variables, for: identity)
         model.consumeVariableDefinitionRequest(definitionRequest.id)
     }
 
@@ -606,20 +607,23 @@ private struct PathParameterTable: View {
 
             VStack(spacing: 0) {
                 HStack(spacing: 8) {
+                    Color.clear.frame(width: 26)
                     Text("Name")
                         .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
                     Divider().frame(height: 19)
                     Text("Value")
                         .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+                    Color.clear.frame(width: 26)
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
-                .padding(.horizontal, 10)
+                .padding(.horizontal, 8)
                 .padding(.vertical, 7)
                 .background(.quaternary)
 
                 ForEach(names, id: \.self) { name in
                     HStack(spacing: 8) {
+                        Color.clear.frame(width: 26)
                         Text(":\(name)")
                             .font(.system(.body, design: .monospaced))
                             .lineLimit(1)
@@ -634,8 +638,9 @@ private struct PathParameterTable: View {
                         )
                             .font(.system(.body, design: .monospaced))
                             .frame(minWidth: 0, maxWidth: .infinity)
+                        Color.clear.frame(width: 26)
                     }
-                    .padding(.horizontal, 10)
+                    .padding(.horizontal, 8)
                     .padding(.vertical, 6)
                     if name != names.last {
                         Divider()

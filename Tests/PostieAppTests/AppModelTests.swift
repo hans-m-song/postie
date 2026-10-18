@@ -40,6 +40,43 @@ final class AppModelTests: XCTestCase {
         try await model.flushPendingSaves()
     }
 
+    func testVariableCompletionsPreviewEffectivePlainValueAndExcludeSecrets() async throws {
+        let root = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = try makeModel(root: root, secretVault: SecretVault(keyStore: AppModelKeyStore()))
+        try await waitUntil { model.canEditVariables(.global) }
+        await model.createCollection(name: "Completion")
+        let collectionID = try XCTUnwrap(model.collections.first?.id)
+        await model.createRequest(in: collectionID)
+        let request = try XCTUnwrap(model.collections.first?.requests.first)
+        let requestIdentity = identity(collectionID, request)
+
+        try model.setPlainVariable(name: "override", value: "global value", owner: .global)
+        try model.setPlainVariable(name: "override", value: "collection value", owner: .collection(collectionID))
+        try model.setPlainVariable(name: "override", value: "request value", owner: .request(requestIdentity))
+        try model.setPlainVariable(name: "collectionOnly", value: "collection fallback", owner: .collection(collectionID))
+        try model.setPlainVariable(name: "globalOnly", value: "global fallback", owner: .global)
+        try await model.setVariable(
+            name: "credential",
+            value: "synthetic secret text",
+            isSecret: true,
+            owner: .request(requestIdentity)
+        )
+
+        let completions = Dictionary(uniqueKeysWithValues: model.variableCompletions(for: requestIdentity).map { ($0.name, $0) })
+
+        XCTAssertEqual(completions["override"]?.scope, .request)
+        XCTAssertEqual(completions["override"]?.preview, "request value")
+        XCTAssertEqual(completions["collectionOnly"]?.scope, .collection)
+        XCTAssertEqual(completions["collectionOnly"]?.preview, "collection fallback")
+        XCTAssertEqual(completions["globalOnly"]?.scope, .global)
+        XCTAssertEqual(completions["globalOnly"]?.preview, "global fallback")
+        XCTAssertEqual(completions["credential"]?.scope, .request)
+        XCTAssertEqual(completions["credential"]?.isSecret, true)
+        XCTAssertNil(completions["credential"]?.preview)
+        try await model.flushPendingSaves()
+    }
+
     func testFlushPersistsLatestEditAndNavigationRetainsOtherDrafts() async throws {
         let root = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -68,6 +105,81 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(stored["body"] as? String, "last edit before flush")
         XCTAssertEqual(stored["bodyEnabled"] as? Bool, true)
         XCTAssertNil(model.autosaveErrors[first])
+    }
+
+    func testNavigationHistoryRestoresTabsAndVariableDefinitionsWithoutSending() async throws {
+        let root = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = try makeModel(root: root)
+        await model.createCollection(name: "Navigation")
+        let collectionID = try XCTUnwrap(model.collections.first?.id)
+        await model.createRequest(in: collectionID, name: "First")
+        let first = try XCTUnwrap(model.selectedIdentity)
+        await model.createRequest(in: collectionID, name: "Second")
+        let second = try XCTUnwrap(model.selectedIdentity)
+        try model.setPlainVariable(name: "host", value: "synthetic value", owner: .request(second))
+        model.updateDraft(second) {
+            $0.url = "https://example.test/unsent"
+            $0.body = "preserved draft"
+        }
+        model.setRequestEditorSection(.settings, for: second)
+        model.showCollection(collectionID, section: .headers)
+        model.setCollectionEditorSection(.authentication)
+        model.showGlobalVariables()
+        model.showOngoingRequests()
+
+        model.navigateBack()
+        XCTAssertTrue(model.showsGlobalVariables)
+        model.navigateBack()
+        XCTAssertEqual(model.selectedCollectionID, collectionID)
+        XCTAssertEqual(model.collectionEditorSection, .authentication)
+        model.navigateBack()
+        XCTAssertEqual(model.selectedCollectionID, collectionID)
+        XCTAssertEqual(model.collectionEditorSection, .headers)
+        model.navigateBack()
+        XCTAssertEqual(model.selectedIdentity, second)
+        XCTAssertEqual(model.requestEditorSection(for: second), .settings)
+
+        let inspection = try XCTUnwrap(model.variableInspection(named: "host", in: .request(second)))
+        model.showVariableDefinition(inspection)
+        XCTAssertEqual(model.requestEditorSection(for: second), .variables)
+        model.showGlobalVariables()
+        model.navigateBack()
+        XCTAssertEqual(model.selectedIdentity, second)
+        XCTAssertEqual(model.requestEditorSection(for: second), .variables)
+        XCTAssertEqual(model.variableDefinitionRequest?.owner, .request(second))
+        XCTAssertEqual(model.variableDefinitionRequest?.name, "host")
+        model.navigateBack()
+        XCTAssertEqual(model.requestEditorSection(for: second), .settings)
+
+        XCTAssertEqual(model.request(for: second)?.url, "https://example.test/unsent")
+        XCTAssertEqual(model.request(for: second)?.body, "preserved draft")
+        XCTAssertEqual(model.request(for: first)?.url, "")
+        XCTAssertTrue(model.activeRuns.isEmpty)
+        XCTAssertNil(model.latestResponses[second])
+        try await model.flushPendingSaves()
+    }
+
+    func testNavigationSkipsADeletedRequestDestination() async throws {
+        let root = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = try makeModel(root: root)
+        await model.createCollection(name: "Navigation")
+        let collectionID = try XCTUnwrap(model.collections.first?.id)
+        await model.createRequest(in: collectionID, name: "First")
+        let first = try XCTUnwrap(model.selectedIdentity)
+        await model.createRequest(in: collectionID, name: "Deleted")
+        let deleted = try XCTUnwrap(model.selectedIdentity)
+        await model.createRequest(in: collectionID, name: "Current")
+        let current = try XCTUnwrap(model.selectedIdentity)
+
+        await model.deleteRequest(deleted)
+        XCTAssertTrue(model.canNavigateBack)
+        model.navigateBack()
+        XCTAssertEqual(model.selectedIdentity, first)
+        model.navigateForward()
+        XCTAssertEqual(model.selectedIdentity, current)
+        XCTAssertNil(model.request(for: deleted))
     }
 
     func testOverlappingCollectionMutationsPreserveEveryCreatedRequest() async throws {

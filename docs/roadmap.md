@@ -6,6 +6,14 @@ This document records the approved high-level breakdown. User agreed on 2026-10-
 
 ## Shared task contract
 
+## T-70–T-73 — Navigation and editor consistency (complete locally)
+
+Approved 2026-10-18: Back/Forward navigation, inherited header highlighting, table gutter/font consistency, one-line growing body authoring, and closed partial-name autocomplete. See navigation-and-editor-polish.md. Verified with 115 functional tests, independent review/scope audit, native checks and release/signature validation; no M5 or memory-budget changes.
+
+## T-68–T-69 — Compact variable popovers and autocomplete values (complete locally)
+
+Approved 2026-10-18: ordinary-value previews in autocomplete and compact native value/source inspector, with an eye action for secrets. Preserve input focus, effective scope, explicit-only decryption and existing navigation. See variable-popover-polish.md.
+
 ## T-64–T-67 — Inherited headers, variable inspection and JSON editing (complete locally)
 
 Approved 2026-10-18: one headers table with read-only inherited rows/source navigation, JSON newline indentation and selected-text wrapping, token-anchored variable inspection/value/reveal/definition navigation, and the subsequently reported revealed-secret column alignment repair (T-67). See inherited-headers-and-editing.md. No M5 or memory-budget expansion.

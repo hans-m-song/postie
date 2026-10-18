@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import PostieCore
 
@@ -120,7 +121,7 @@ struct FieldTable: View {
                 .help(status)
                 .accessibilityLabel(status)
             VStack(alignment: .leading, spacing: 2) {
-                Text(field.name)
+                ReadOnlyHighlightedText(text: field.name, availableVariables: availableVariables)
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .textSelection(.enabled)
@@ -132,10 +133,10 @@ struct FieldTable: View {
                     .truncationMode(.tail)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .font(.system(.body, design: .monospaced))
+            .font(.system(size: NSFont.systemFontSize, design: .monospaced))
             Divider().frame(height: 30)
-            Text(field.value)
-                .font(.system(.body, design: .monospaced))
+            ReadOnlyHighlightedText(text: field.value, availableVariables: availableVariables)
+                .font(.system(size: NSFont.systemFontSize, design: .monospaced))
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .textSelection(.enabled)
@@ -217,5 +218,60 @@ struct FieldTable: View {
                 }
             }
         )
+    }
+}
+
+private struct ReadOnlyHighlightedText: View {
+    let text: String
+    let availableVariables: Set<String>
+
+    @State private var highlightedRequest: SyntaxHighlighting.Request?
+    @State private var spans: [SyntaxHighlighting.Span] = []
+
+    private var request: SyntaxHighlighting.Request {
+        SyntaxHighlighting.Request(
+            text: text,
+            syntax: .none,
+            availableVariables: availableVariables,
+            validPathParameters: [],
+            isURL: false
+        )
+    }
+
+    var body: some View {
+        renderedText
+            .task(id: request) {
+                let request = request
+                highlightedRequest = nil
+                spans = []
+
+                let result = await Task.detached(priority: .utility) {
+                    SyntaxHighlighting.result(for: request)
+                }.value
+                guard !Task.isCancelled else { return }
+                highlightedRequest = request
+                spans = result.spans
+            }
+    }
+
+    @MainActor
+    private var renderedText: Text {
+        guard highlightedRequest == request else { return Text(text) }
+
+        var highlighted = AttributedString(text)
+        var cursor = 0
+
+        for span in spans.sorted(by: { $0.location < $1.location }) {
+            guard span.length > 0,
+                  span.location >= cursor,
+                  let stringRange = Range(span.range, in: text),
+                  let lowerBound = AttributedString.Index(stringRange.lowerBound, within: highlighted),
+                  let upperBound = AttributedString.Index(stringRange.upperBound, within: highlighted) else { continue }
+
+            highlighted[lowerBound..<upperBound].foregroundColor = Color(nsColor: span.color.appKitColor)
+            cursor = NSMaxRange(span.range)
+        }
+
+        return Text(highlighted)
     }
 }

@@ -1,6 +1,6 @@
 # Handoff
 
-Updated 2026-10-18. M1–M4 and follow-ups T-52–T-67 are complete locally. Keep commits local; never push without a new request. Prior commits:8e0a6eb referenced values,66c4443 memory assessment/explicit deferral. Main alone edits .agents documents. No incomplete worker or worktree.
+Updated 2026-10-18. M1–M4 and follow-ups T-52–T-73 are complete locally. Keep commits local; never push without a new request. Prior commits:8e0a6eb referenced values,66c4443 memory assessment/explicit deferral. Main alone edits .agents documents. No incomplete worker or worktree.
 
 ## Latest: T-64–T-67 inherited headers, inspection and editor fixes
 
@@ -35,3 +35,11 @@ Prior validation apps are closed; fixture12258/7812 stopped. Do not delete synth
 See docs/authoring-follow-up.md. JSON pairing, focused URL highlighting, scoped field/body/auth completion, send-time header privacy, read-only Variables reference table and compact secret controls complete. Independent 93 tests (Core61/App32), source reviews, scope audit and isolated native checks passed. No remaining source blocker. IME/light appearance/large-input latency unverified. Response bodies are not redacted. Memory work and M5 remain deferred.
 
 Normal output dist/Postie.app; logs /Volumes/Data/tmp/postie-m34/authoring-final-tests.log, authoring-final-build.log, authoring-dist-build.log. Synthetic .build/authoring-baseline app/data/bodies, ID dev.postie.validation.authoringbaseline.20261018a. Exact new validation Keychain service ending .workspace-encryption was created for synthetic checks; do not delete automatically. App closed, fixture23800 stopped. Reuse authoringBaseline CUA binding after explicit launch; fresh app lookup previously blocked1355s. Only local commit; never push.
+
+## Latest: T-68–T-73 completed locally — 2026-10-18
+
+See docs/variable-popover-polish.md and docs/navigation-and-editor-polish.md. Ordinary completion previews, compact native inspector, bounded session Back/Forward with section/definition restoration, inherited template highlighting, consistent gutters/fonts, one-line growing body and closed partial-name completion are complete. Independent exact-source 115 tests (Core61/App54), zero failures/warnings; source reviews and scope audit found no remaining blockers. Native checks passed draft-preserving keyboard Back/Forward, one-step definition jump, partial-token Return, eighth completion, compact ordinary inspector, synthetic secret Reveal/Hide, body growth/shrink and table alignment. Pointer-after-scroll, error resizing, IME/light mode/performance unverified. No sends.
+
+Initial getApp attached to an instance without synthetic-directory args, stopped at workspace lock. Closed it; final isolated PID arguments verified before UI. No user runtime config/real Keychain items accessed. New synthetic validation key created for dev.postie.validation.compact.20261018a; never delete automatically. App .build/compact-validation/Postie.app and explicit data/bodies beneath same ignored root. App closed, caffeinate session26318 stopped. Reuse compactValidation after explicit isolated launch; avoid getApp lookup stalls.
+
+Final test/release/dist logs: /Volumes/Data/tmp/postie-m34/navigation-polish-{tests,release,dist}.log. Output dist/Postie.app. Keep commit local, never push. No incomplete workers/worktree. M5, snapshots/cURL/import/log/sync/drag-drop and memory changes remain deferred.

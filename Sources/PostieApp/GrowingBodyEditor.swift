@@ -109,7 +109,7 @@ struct GrowingBodyEditor: NSViewRepresentable {
         guard width > 0,
               let textContainer = textView.textContainer,
               let layoutManager = textView.layoutManager else {
-            return CGSize(width: max(0, width), height: Self.minimumHeight)
+            return CGSize(width: max(0, width), height: Self.minimumHeight(for: textView))
         }
 
         textContainer.containerSize = NSSize(
@@ -121,13 +121,18 @@ struct GrowingBodyEditor: NSViewRepresentable {
         let extraLineRect = layoutManager.extraLineFragmentRect
         let contentBottom = max(usedRect.maxY, extraLineRect.maxY)
         let height = max(
-            Self.minimumHeight,
+            Self.minimumHeight(for: textView),
             ceil(contentBottom + textView.textContainerInset.height * 2)
         )
         return CGSize(width: width, height: height)
     }
 
-    private static let minimumHeight: CGFloat = 180
+    private static func minimumHeight(for textView: NSTextView) -> CGFloat {
+        let font = textView.font ?? NSFont.monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+        let lineHeight = textView.layoutManager?.defaultLineHeight(for: font)
+            ?? ceil(font.ascender - font.descender + font.leading)
+        return ceil(lineHeight + textView.textContainerInset.height * 2)
+    }
 
     @MainActor
     final class Coordinator: NSObject, NSTextViewDelegate {
