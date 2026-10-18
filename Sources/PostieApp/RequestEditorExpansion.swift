@@ -1,27 +1,9 @@
 import Foundation
 
 enum RequestEditorAccordion: String, CaseIterable, Hashable, Identifiable {
-    case query, path, headers, body, authentication, variables, settings
+    case query, path, headers, body
 
     var id: Self { self }
-
-    var navigationSection: RequestEditorSection {
-        switch self {
-        case .query, .path, .headers, .body: .request
-        case .authentication: .authentication
-        case .variables: .variables
-        case .settings: .settings
-        }
-    }
-
-    static func restored(for section: RequestEditorSection) -> Self? {
-        switch section {
-        case .request: nil
-        case .authentication: .authentication
-        case .variables: .variables
-        case .settings: .settings
-        }
-    }
 }
 
 struct RequestEditorContentSnapshot: Equatable {
@@ -62,9 +44,5 @@ struct RequestEditorExpansionState: Equatable {
         } else {
             expanded.remove(section)
         }
-    }
-
-    mutating func expand(_ section: RequestEditorAccordion) {
-        expanded.insert(section)
     }
 }

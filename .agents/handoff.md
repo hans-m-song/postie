@@ -1,6 +1,6 @@
 # Handoff
 
-Updated 2026-10-18. M1–M4 and follow-ups T-52–T-75 are complete locally. Keep commits local; never push without a new request. Prior commits:8e0a6eb referenced values,66c4443 memory assessment/explicit deferral. Main alone edits .agents documents. No incomplete worker or worktree.
+Updated 2026-10-18. M1–M4 and follow-ups T-52–T-78 are complete locally. Keep commits local; never push without a new request. Prior commits:8e0a6eb referenced values,66c4443 memory assessment/explicit deferral. Main alone edits .agents documents. No incomplete worker or worktree.
 
 ## Latest: T-64–T-67 inherited headers, inspection and editor fixes
 
@@ -53,3 +53,13 @@ Independent final exact-source119 tests (Core61/App58) passed, zero failures/war
 Output dist/Postie.app, strict signature checked. Logs /Volumes/Data/tmp/postie-m34/accordion-{tests,release,dist}.log; initial compile log preserved separately. Validation app .build/compact-validation/Postie.app, ID dev.postie.validation.compact.20261018a, explicitly launched with .build/accordion-validation/data and bodies (fake malformed envelope fails before Keychain); app closed and caffeinate8735 stopped. Reuse compactValidation binding only after isolated launch; avoid getApp stalls. Keep prior synthetic key items.
 
 T-76 bulk editing and T-77 request tabs deferred/documented, future Back/Forward must activate destination tab. M5/memory/snapshots/import/cURL/log/sync/drag-drop remain deferred. Keep commit local; never push. No worktree/incomplete workers.
+
+## Latest: T-78 completed locally — 2026-10-18
+
+User reversed all-accordion section layout: Request/Auth/Variables/Settings tabs restored. Query/Path/Headers/Body retain counted accordions, all initially open including empty/inherited-only. Manual collapse remains per-request session state; Back/Forward restores tab, definition jumps select Variables. Headers/Auth unmount off-tab; retained Variables/Body use activity flags to clear secret/popup state while retaining ordinary drafts/undo. Removed obsolete accordion restoration event; existing navigation section state suffices. Reference scan task now includes identity to avoid stale identical-source requests.
+
+Independent final exact-source118 tests (Core61/App57), zero failures/warnings; source review/scope audit clear. Reviewer queued-scroll guard added and exact-source tests repeated afterward. Native checks passed all-open empty/configured defaults, tabs/Auth/Settings content, manual collapse retention, keyboard Back/Forward, inherited GoDef selecting Variables, popup dismissal on leaving Request/Variables, and edited JSON body surviving Settings round trip. No actual secret decrypt/Keychain fault injection/IME/lightmode/performance recheck. No sends/userconfig/env/PII/Keychain access.
+
+Final dist/Postie.app release/signature verified. Logs /Volumes/Data/tmp/postie-m34/tab-restoration-{tests,release,dist}.log. Synthetic .build/tab-restoration-validation/data and bodies; explicit launched .build/compact-validation/Postie.app ID dev.postie.validation.compact.20261018a, process argv verified before UI. Existing compactValidation binding reused; app closed and caffeinate43763 stopped. No new key or fixture server. Never getApp into default user storage; retain synthetic keys from prior checks.
+
+Documentation current layout reconciled; T74 history marked superseded. Future multi-request tabsT77 remain separate/deferred. Bulk editing/M5/memory/snapshots/import/cURL/log/sync/drag-drop remain deferred. Local commit only; no push. No incomplete workers/worktree.

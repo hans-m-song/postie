@@ -151,6 +151,10 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.variableDefinitionRequest?.name, "host")
         model.navigateBack()
         XCTAssertEqual(model.requestEditorSection(for: second), .settings)
+        model.navigateForward()
+        XCTAssertEqual(model.requestEditorSection(for: second), .variables)
+        model.navigateBack()
+        XCTAssertEqual(model.requestEditorSection(for: second), .settings)
 
         XCTAssertEqual(model.request(for: second)?.url, "https://example.test/unsent")
         XCTAssertEqual(model.request(for: second)?.body, "preserved draft")
@@ -160,7 +164,7 @@ final class AppModelTests: XCTestCase {
         try await model.flushPendingSaves()
     }
 
-    func testRequestAccordionRestorationReopensCollapsedSectionButOrdinaryOpenDoesNot() async throws {
+    func testRequestTabHistoryPreservesManualAccordionChoices() async throws {
         let root = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
         let model = try makeModel(root: root)
@@ -169,35 +173,29 @@ final class AppModelTests: XCTestCase {
         await model.createRequest(in: collectionID, name: "First")
         let first = try XCTUnwrap(model.selectedIdentity)
         await model.createRequest(in: collectionID, name: "Second")
-        let second = try XCTUnwrap(model.selectedIdentity)
         let content = RequestEditorContentSnapshot(queryCount: 0, pathNames: [])
+        let allSections = Set(RequestEditorAccordion.allCases)
         model.reconcileRequestEditorExpansion(
             for: first,
-            initiallyExpanded: [.variables],
+            initiallyExpanded: allSections,
             content: content
         )
-        model.setRequestEditorAccordionExpanded(.variables, isExpanded: false, for: first)
+        model.setRequestEditorAccordionExpanded(.query, isExpanded: false, for: first)
 
         model.openRequest(first)
-        XCTAssertFalse(model.requestEditorExpansionState(for: first).isExpanded(.variables))
-        XCTAssertNil(model.requestEditorRestoration)
-
-        model.setRequestEditorAccordionExpanded(.variables, isExpanded: true, for: first)
-        model.setRequestEditorAccordionExpanded(.variables, isExpanded: false, for: first)
-        XCTAssertFalse(model.requestEditorExpansionState(for: first).isExpanded(.variables))
-        model.openRequest(second)
-        XCTAssertNil(model.requestEditorRestoration)
+        XCTAssertFalse(model.requestEditorExpansionState(for: first).isExpanded(.query))
+        model.setRequestEditorSection(.settings, for: first)
+        model.setRequestEditorSection(.variables, for: first)
 
         model.navigateBack()
 
         XCTAssertEqual(model.selectedIdentity, first)
+        XCTAssertEqual(model.requestEditorSection(for: first), .settings)
+        XCTAssertFalse(model.requestEditorExpansionState(for: first).isExpanded(.query))
+
+        model.navigateForward()
         XCTAssertEqual(model.requestEditorSection(for: first), .variables)
-        XCTAssertTrue(model.requestEditorExpansionState(for: first).isExpanded(.variables))
-        let restoration = try XCTUnwrap(model.requestEditorRestoration)
-        XCTAssertEqual(restoration.identity, first)
-        XCTAssertEqual(restoration.section, .variables)
-        model.consumeRequestEditorRestoration(restoration.id)
-        XCTAssertNil(model.requestEditorRestoration)
+        XCTAssertFalse(model.requestEditorExpansionState(for: first).isExpanded(.query))
         try await model.flushPendingSaves()
     }
 

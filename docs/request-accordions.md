@@ -1,6 +1,6 @@
 # Request accordions and inherited value inspection
 
-Approved 2026-10-18. Complete locally.
+Approved 2026-10-18. Completed locally; T-78 subsequently supersedes the all-accordion layout/defaults described below. Current layout: request-tabs-restoration.md. T-75 inherited popups remain.
 
 - [x] T-74: replace request tabs with stacked Query parameters, Path parameters, Headers, Body, Authentication, Variables and Settings accordions in the existing request pane. Full headings toggle disclosure. Counts describe rows; headers distinguish local and inherited rows. Auth/settings use summaries.
 - [x] Empty sections start collapsed. Configured local content starts expanded; inherited-only headers/auth start collapsed. New query/path entries expand their section. Preserve manual choices during the session, with explicit definition/history navigation opening its destination.
@@ -21,6 +21,6 @@ Variables retain ordinary row drafts while collapsed; secret buffers clear. Auth
 
 Future T-76: bulk key/value text editing for query parameters and headers, with reversible switching to table editing. Parsing, duplicate keys, disabled rows and multiline values need a concrete specification before implementation.
 
-Future T-77: request tabs. Back/Forward must activate the relevant open request tab as it restores a request destination; opening/restoring a request must preserve its draft and never send it. Tab lifetime, closing behavior and session persistence remain undecided. This is separate from the removed request-section tabs.
+Future T-77: request tabs. Back/Forward must activate the relevant open request tab as it restores a request destination; opening/restoring a request must preserve its draft and never send it. Tab lifetime, closing behavior and session persistence remain undecided. This is separate from the editor-section tabs restored by T-78.
 
 Final release packaging and strict signature verification passed. The isolated app was closed and the temporary keep-awake assertion stopped. No new Keychain item was created.

@@ -6,6 +6,10 @@ This document records the approved high-level breakdown. User agreed on 2026-10-
 
 ## Shared task contract
 
+## T-78 — Restore request section tabs (complete locally)
+
+Requested 2026-10-18: restore Request/Auth/Variables/Settings tabs. Request keeps Query/Path/Headers/Body accordions, all expanded initially. Preserve session collapse choices, inherited variable popups, secret lifecycle and navigation. See request-tabs-restoration.md. This supersedes the relevant T-74 layout choice; multi-request tabs T-77 remain deferred.
+
 ## T-74–T-75 — Request accordions and inherited value inspection (complete locally)
 
 Approved 2026-10-18: one request pane with counted accordions instead of section tabs, configured-content defaults and automatic query/path expansion, plus inherited-header variable popups. See request-accordions.md for scope and gates. T-76 bulk key/value editing and T-77 request tabs are deferred; future Back/Forward must activate the destination request tab. No M5 or memory-budget expansion.
@@ -179,7 +183,7 @@ Decisions approved 2026-10-17: target the primary Mac initially (its intended OS
 
 T-35 gate: supported quoted/multiline curl input becomes a previewable draft, never shell execution, automatic file access or network sending. Preserve documented supported flag semantics and reject unsupported constructs visibly. Verify supported cURL export/import round trips, raw body preservation, auth encryption and no original-command persistence. See curl-import.md. T-27 also depends on T-35.
 
-Latest UI clarification, 2026-10-18: T-74 replaces request-section tabs with stacked Query/Path/Headers/Body/Authentication/Variables/Settings accordions; see request-accordions.md. T-06/T-21 stack response exchange sections with redirect hops initially collapsed and final response expanded. No separate response Body/Headers/Redirects tabs. T-19/T-21 offer only None/JSON syntax; switching changes presentation, not bytes or Content-Type, and None preserves template cues. Verify defaults, independent scrolling and explicit formatting; XML/other languages remain deferred.
+Latest UI clarification, 2026-10-18: T-78 restores Request/Auth/Variables/Settings tabs. Query/Path/Headers/Body remain initially expanded accordions on Request; see request-tabs-restoration.md. T-06/T-21 stack response exchange sections with redirect hops initially collapsed and final response expanded. No separate response Body/Headers/Redirects tabs. T-19/T-21 offer only None/JSON syntax; switching changes presentation, not bytes or Content-Type, and None preserves template cues. Verify defaults, independent scrolling and explicit formatting; XML/other languages remain deferred.
 
 UI clarification, 2026-10-17: side-by-side request/response initially; layout toggle deferred. T-31 groups snapshots beneath originating requests in the sidebar and must preserve discoverability after source deletion. Physical snapshot storage stays separate for simpler deletion independence. Current visual concepts and exact image-generation prompts are in docs/mockups/README.md; concepts are not an implemented or approved interface.
 

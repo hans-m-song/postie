@@ -16,12 +16,6 @@ struct VariableDefinitionRequest: Identifiable {
     let name: String
 }
 
-struct RequestEditorRestoration: Identifiable, Equatable {
-    let id = UUID()
-    let identity: RequestIdentity
-    let section: RequestEditorSection
-}
-
 @MainActor
 final class AppModel: ObservableObject {
     static let shared = AppModel()
@@ -68,7 +62,6 @@ final class AppModel: ObservableObject {
     @Published private(set) var collectionEditorSection: CollectionEditorSection = .variables
     @Published private(set) var requestEditorSections: [RequestIdentity: RequestEditorSection] = [:]
     @Published private(set) var requestEditorExpansionStates: [RequestIdentity: RequestEditorExpansionState] = [:]
-    @Published private(set) var requestEditorRestoration: RequestEditorRestoration?
     @Published private(set) var variableDefinitionRequest: VariableDefinitionRequest?
     @Published private(set) var showsOngoingRequests = false
     @Published private(set) var now = Date()
@@ -215,21 +208,7 @@ final class AppModel: ObservableObject {
             requestEditorExpansionStates[identity] = state
         }
         guard isExpanded else { return }
-        setRequestEditorSection(section.navigationSection, for: identity)
-    }
-
-    func expandRequestEditorAccordion(_ section: RequestEditorAccordion, for identity: RequestIdentity) {
-        guard drafts[identity] != nil else { return }
-        let previous = requestEditorExpansionState(for: identity)
-        var state = requestEditorExpansionState(for: identity)
-        state.expand(section)
-        guard state != previous else { return }
-        requestEditorExpansionStates[identity] = state
-    }
-
-    func consumeRequestEditorRestoration(_ id: UUID) {
-        guard requestEditorRestoration?.id == id else { return }
-        requestEditorRestoration = nil
+        setRequestEditorSection(.request, for: identity)
     }
 
     func request(for identity: RequestIdentity) -> HTTPRequestConfiguration? {
@@ -268,7 +247,6 @@ final class AppModel: ObservableObject {
     }
 
     func select(_ identity: RequestIdentity?) {
-        requestEditorRestoration = nil
         variableDefinitionRequest = nil
         selectedIdentity = identity
         selectedCollectionID = nil
@@ -346,7 +324,6 @@ final class AppModel: ObservableObject {
     }
 
     private func showRequest(_ identity: RequestIdentity) {
-        requestEditorRestoration = nil
         variableDefinitionRequest = nil
         selectedIdentity = identity
         selectedCollectionID = nil
@@ -355,7 +332,6 @@ final class AppModel: ObservableObject {
     }
 
     private func recordNavigation(_ location: NavigationLocation) {
-        requestEditorRestoration = nil
         guard isAvailableNavigationLocation(location) else { return }
         navigationHistory.visit(location)
     }
@@ -390,17 +366,12 @@ final class AppModel: ObservableObject {
 
     private func restoreNavigation(to location: NavigationLocation) {
         guard isAvailableNavigationLocation(location) else { return }
-        requestEditorRestoration = nil
         variableDefinitionRequest = nil
 
         switch location {
         case let .request(identity, section):
             showRequest(identity)
             requestEditorSections[identity] = section
-            if let accordion = RequestEditorAccordion.restored(for: section) {
-                expandRequestEditorAccordion(accordion, for: identity)
-            }
-            requestEditorRestoration = RequestEditorRestoration(identity: identity, section: section)
         case let .requestVariableDefinition(identity, name):
             showRequest(identity)
             requestEditorSections[identity] = .variables

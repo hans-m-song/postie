@@ -2,51 +2,43 @@ import XCTest
 @testable import PostieApp
 
 final class RequestEditorExpansionTests: XCTestCase {
-    func testInitialExpansionKeepsEmptySectionsClosedAndManualCollapseAcrossReconcile() {
+    func testAllRequestSectionsStartOpenAndManualCollapsePersists() {
         var state = RequestEditorExpansionState()
-        let content = RequestEditorContentSnapshot(queryCount: 1, pathNames: ["itemID"])
+        let content = RequestEditorContentSnapshot(queryCount: 0, pathNames: [])
+        let allSections = Set(RequestEditorAccordion.allCases)
 
-        state.reconcile(initiallyExpanded: [.query, .path, .headers], content: content)
+        state.reconcile(initiallyExpanded: allSections, content: content)
 
-        XCTAssertTrue(state.isExpanded(.query))
-        XCTAssertTrue(state.isExpanded(.path))
-        XCTAssertTrue(state.isExpanded(.headers))
-        XCTAssertFalse(state.isExpanded(.body))
+        XCTAssertEqual(Set(allSections.filter(state.isExpanded)), allSections)
 
         state.setExpanded(.query, false)
         state.setExpanded(.headers, false)
-        state.reconcile(initiallyExpanded: Set(RequestEditorAccordion.allCases), content: content)
+        state.reconcile(initiallyExpanded: allSections, content: content)
 
         XCTAssertFalse(state.isExpanded(.query))
         XCTAssertFalse(state.isExpanded(.headers))
         XCTAssertTrue(state.isExpanded(.path))
+        XCTAssertTrue(state.isExpanded(.body))
     }
 
     func testQueryAndNewPathParameterAdditionsExpandTheirSections() {
         var state = RequestEditorExpansionState()
         let empty = RequestEditorContentSnapshot(queryCount: 0, pathNames: [])
-        state.reconcile(initiallyExpanded: [], content: empty)
+        let allSections = Set(RequestEditorAccordion.allCases)
+        state.reconcile(initiallyExpanded: allSections, content: empty)
         state.setExpanded(.query, false)
         state.setExpanded(.path, false)
         state.setExpanded(.headers, false)
+        state.setExpanded(.body, false)
 
         state.reconcile(
-            initiallyExpanded: [.headers],
+            initiallyExpanded: allSections,
             content: RequestEditorContentSnapshot(queryCount: 1, pathNames: ["itemID"])
         )
 
         XCTAssertTrue(state.isExpanded(.query))
         XCTAssertTrue(state.isExpanded(.path))
         XCTAssertFalse(state.isExpanded(.headers))
-    }
-
-    func testDefinitionJumpCanReopenManuallyCollapsedVariables() {
-        var state = RequestEditorExpansionState()
-        state.reconcile(initiallyExpanded: [.variables], content: .init(queryCount: 0, pathNames: []))
-        state.setExpanded(.variables, false)
-
-        state.expand(.variables)
-
-        XCTAssertTrue(state.isExpanded(.variables))
+        XCTAssertFalse(state.isExpanded(.body))
     }
 }
