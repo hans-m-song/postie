@@ -81,7 +81,7 @@ public struct CollectionRequestDefaults: Codable, Equatable, Sendable {
     }
 }
 
-public enum VariableScope: String, CaseIterable, Sendable {
+public enum VariableScope: String, Codable, CaseIterable, Sendable {
     case global
     case collection
     case request
@@ -123,6 +123,7 @@ public struct PreparedHTTPRequest: Sendable {
     public let configuration: HTTPRequestConfiguration
     public let request: URLRequest
     public let referencedInputs: [String: ResolvedVariable]
+    public let snapshotCapture: SnapshotPreparationCapture?
     public let sensitiveRequestHeaderNames: Set<String>
     public let secretRequestHeaderNames: Set<String>
     public let requestHeaderSources: [String: HTTPHeaderSource]
@@ -133,8 +134,10 @@ public struct PreparedHTTPRequest: Sendable {
         referencedInputs: [String: ResolvedVariable],
         sensitiveRequestHeaderNames: Set<String> = [],
         secretRequestHeaderNames: Set<String> = [],
-        requestHeaderSources: [String: HTTPHeaderSource] = [:]
+        requestHeaderSources: [String: HTTPHeaderSource] = [:],
+        snapshotCapture: SnapshotPreparationCapture? = nil
     ) {
+        self.snapshotCapture = snapshotCapture
         self.configuration = configuration
         self.request = request
         self.referencedInputs = referencedInputs

@@ -220,7 +220,7 @@ public struct WorkspaceLoad: Sendable {
     }
 }
 
-public struct HTTPRedirect: Identifiable, Sendable {
+public struct HTTPRedirect: Identifiable, Codable, Sendable {
     public let id: UUID
     public let statusCode: Int
     public let url: URL
@@ -273,6 +273,8 @@ public struct HTTPProgress: Sendable {
 }
 
 public struct HTTPResponseRecord: Sendable {
+    public let snapshotCapture: SnapshotPreparationCapture?
+    public let completedAt: Date
     public let runID: UUID
     public let request: HTTPRequestConfiguration
     public let finalURL: URL
@@ -308,8 +310,12 @@ public struct HTTPResponseRecord: Sendable {
         pendingRedirect: HTTPRedirect? = nil,
         sensitiveRequestHeaderNames: Set<String> = [],
         secretRequestHeaderNames: Set<String> = [],
-        requestHeaderSources: [String: HTTPHeaderSource] = [:]
+        requestHeaderSources: [String: HTTPHeaderSource] = [:],
+        snapshotCapture: SnapshotPreparationCapture? = nil,
+        completedAt: Date = Date()
     ) {
+        self.snapshotCapture = snapshotCapture
+        self.completedAt = completedAt
         self.runID = runID
         self.request = request
         self.finalURL = finalURL

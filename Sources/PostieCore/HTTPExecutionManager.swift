@@ -69,6 +69,7 @@ private enum HTTPDownloadOutcome: Sendable {
 }
 
 private struct ActiveHTTPRun {
+    let snapshotCapture: SnapshotPreparationCapture?
     let identity: RequestIdentity
     let configuration: HTTPRequestConfiguration
     let preparedRequest: URLRequest
@@ -86,6 +87,7 @@ private struct ActiveHTTPRun {
 }
 
 private struct RetainedHTTPResponse {
+    let snapshotCapture: SnapshotPreparationCapture?
     let identity: RequestIdentity
     let bodyURL: URL
     let requestHeaderSources: [String: HTTPHeaderSource]
@@ -281,6 +283,8 @@ public actor HTTPExecutionManager {
     private var runByIdentity: [RequestIdentity: UUID] = [:]
     private var retainedBodies: Set<URL> = []
     private var retainedResponses: [UUID: RetainedHTTPResponse] = [:]
+    private var bodyLeases: [UUID: HTTPBodyLease] = [:]
+    private var pendingBodyDiscards: Set<URL> = []
     private var shutdownWaiters: [CheckedContinuation<Void, Never>] = []
     private var isShutDown = false
     private var shutdownCompleted = false
@@ -306,6 +310,7 @@ public actor HTTPExecutionManager {
             requestHeaderSources: [:],
             sensitiveRequestHeaderNames: RequestPreparer.standardSensitiveRequestHeaderNames,
             secretRequestHeaderNames: [],
+            snapshotCapture: nil,
             redirects: [],
             followedRedirectCount: 0
         )
@@ -328,6 +333,7 @@ public actor HTTPExecutionManager {
             requestHeaderSources: prepared.requestHeaderSources,
             sensitiveRequestHeaderNames: prepared.sensitiveRequestHeaderNames,
             secretRequestHeaderNames: prepared.secretRequestHeaderNames,
+            snapshotCapture: prepared.snapshotCapture,
             redirects: [],
             followedRedirectCount: 0
         )
@@ -379,6 +385,7 @@ public actor HTTPExecutionManager {
             requestHeaderSources: requestHeaderSources,
             sensitiveRequestHeaderNames: retainedResponse.sensitiveRequestHeaderNames,
             secretRequestHeaderNames: retainedResponse.secretRequestHeaderNames,
+            snapshotCapture: retainedResponse.snapshotCapture,
             redirects: response.redirects,
             followedRedirectCount: response.redirects.count
         )
@@ -391,6 +398,7 @@ public actor HTTPExecutionManager {
         requestHeaderSources: [String: HTTPHeaderSource],
         sensitiveRequestHeaderNames: Set<String>,
         secretRequestHeaderNames: Set<String>,
+        snapshotCapture: SnapshotPreparationCapture?,
         redirects: [HTTPRedirect],
         followedRedirectCount: Int
     ) throws -> HTTPRun {
@@ -409,6 +417,7 @@ public actor HTTPExecutionManager {
         )
 
         activeRuns[runID] = ActiveHTTPRun(
+            snapshotCapture: snapshotCapture,
             identity: identity,
             configuration: configuration,
             preparedRequest: preparedRequest,
@@ -492,6 +501,11 @@ public actor HTTPExecutionManager {
             throw HTTPExecutionError.bodyUnavailable
         }
 
+        if bodyLeases.values.contains(where: { $0.bodyURL == resolvedURL }) {
+            pendingBodyDiscards.insert(resolvedURL)
+            return
+        }
+
         do {
             try FileManager.default.removeItem(at: resolvedURL)
             retainedBodies.remove(resolvedURL)
@@ -499,6 +513,60 @@ public actor HTTPExecutionManager {
         } catch {
             throw HTTPExecutionError.bodyStorageUnavailable
         }
+    }
+
+    public func acquireBodyLease(for response: HTTPResponseRecord) throws -> HTTPBodyLease {
+        guard !isShutDown else {
+            throw HTTPExecutionError.shutDown
+        }
+        let bodyURL = response.bodyFileURL.standardizedFileURL
+        guard let retained = retainedResponses[response.runID],
+              retained.bodyURL == bodyURL,
+              retainedBodies.contains(bodyURL),
+              !pendingBodyDiscards.contains(bodyURL) else {
+            throw HTTPExecutionError.bodyNotOwned
+        }
+        let values = try bodyURL.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
+        guard values.isRegularFile == true, values.isSymbolicLink != true,
+              values.fileSize.map(Int64.init) == response.bodyByteCount else {
+            throw HTTPExecutionError.bodyUnavailable
+        }
+        let lease = HTTPBodyLease(token: UUID(), runID: response.runID, bodyURL: bodyURL)
+        bodyLeases[lease.token] = lease
+        return lease
+    }
+
+    func retainCompletedResponse(_ response: HTTPResponseRecord, identity: RequestIdentity) throws {
+        let bodyURL = response.bodyFileURL.standardizedFileURL
+        guard bodyURL.deletingLastPathComponent() == bodyDirectory else {
+            throw HTTPExecutionError.bodyNotOwned
+        }
+        let values = try bodyURL.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
+        guard values.isRegularFile == true, values.isSymbolicLink != true,
+              values.fileSize.map(Int64.init) == response.bodyByteCount else {
+            throw HTTPExecutionError.bodyUnavailable
+        }
+        retainedBodies.insert(bodyURL)
+        retainedResponses[response.runID] = RetainedHTTPResponse(
+            snapshotCapture: response.snapshotCapture, identity: identity, bodyURL: bodyURL,
+            requestHeaderSources: response.requestHeaderSources,
+            sensitiveRequestHeaderNames: response.sensitiveRequestHeaderNames,
+            secretRequestHeaderNames: response.secretRequestHeaderNames
+        )
+    }
+
+    public func releaseBodyLease(_ lease: HTTPBodyLease) {
+        guard let retainedLease = bodyLeases[lease.token],
+              retainedLease.runID == lease.runID, retainedLease.bodyURL == lease.bodyURL else {
+            return
+        }
+        bodyLeases.removeValue(forKey: lease.token)
+        if pendingBodyDiscards.contains(lease.bodyURL),
+           !bodyLeases.values.contains(where: { $0.bodyURL == lease.bodyURL }) {
+            pendingBodyDiscards.remove(lease.bodyURL)
+            try? discardBody(at: lease.bodyURL)
+        }
+        completeShutdownIfPossible()
     }
 
     public func shutdown() async {
@@ -626,16 +694,7 @@ public actor HTTPExecutionManager {
 
         switch outcome {
         case .completed(let metadata):
-            let bodyURL = metadata.bodyFileURL.standardizedFileURL.resolvingSymlinksInPath()
-            retainedBodies.insert(bodyURL)
-            retainedResponses[runID] = RetainedHTTPResponse(
-                identity: activeRun.identity,
-                bodyURL: bodyURL,
-                requestHeaderSources: metadata.requestHeaderSources,
-                sensitiveRequestHeaderNames: activeRun.sensitiveRequestHeaderNames,
-                secretRequestHeaderNames: activeRun.secretRequestHeaderNames
-            )
-            activeRun.continuation.yield(.completed(HTTPResponseRecord(
+            let response = HTTPResponseRecord(
                 runID: runID,
                 request: activeRun.configuration,
                 finalURL: metadata.finalURL,
@@ -652,8 +711,17 @@ public actor HTTPExecutionManager {
                 pendingRedirect: metadata.pendingRedirect,
                 sensitiveRequestHeaderNames: activeRun.sensitiveRequestHeaderNames,
                 secretRequestHeaderNames: activeRun.secretRequestHeaderNames,
-                requestHeaderSources: metadata.requestHeaderSources
-            )))
+                requestHeaderSources: metadata.requestHeaderSources,
+                snapshotCapture: activeRun.snapshotCapture,
+                completedAt: Date()
+            )
+            do {
+                try retainCompletedResponse(response, identity: activeRun.identity)
+                activeRun.continuation.yield(.completed(response))
+            } catch {
+                try? FileManager.default.removeItem(at: metadata.bodyFileURL)
+                activeRun.continuation.yield(.failed("The complete response body is unavailable."))
+            }
         case .failed(let message, let bodyFileURL):
             if let bodyFileURL {
                 try? FileManager.default.removeItem(at: bodyFileURL)
@@ -674,11 +742,13 @@ public actor HTTPExecutionManager {
 
     private func removeOwnedBodyStore() {
         retainedBodies.removeAll()
+        retainedResponses.removeAll()
+        pendingBodyDiscards.removeAll()
         bodyStore.removeSessionDirectory()
     }
 
     private func completeShutdownIfPossible() {
-        guard isShutDown, !shutdownCompleted, activeRuns.isEmpty else {
+        guard isShutDown, !shutdownCompleted, activeRuns.isEmpty, bodyLeases.isEmpty else {
             return
         }
 

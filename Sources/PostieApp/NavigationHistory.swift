@@ -5,6 +5,7 @@ enum NavigationLocation: Hashable {
     case request(RequestIdentity, section: RequestEditorSection)
     case requestVariableDefinition(RequestIdentity, name: String)
     case collection(UUID, section: CollectionEditorSection)
+    case snapshot(UUID)
     case globalVariables
     case globalSettings
     case ongoingRequests

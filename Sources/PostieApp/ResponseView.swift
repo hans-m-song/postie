@@ -7,7 +7,7 @@ struct ResponseView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
+            HStack(spacing: 10) {
                 Text("Response")
                     .font(.title3.weight(.semibold))
                 Spacer(minLength: 0)
@@ -17,7 +17,21 @@ struct ResponseView: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
-                        .frame(minWidth: 0)
+                        .layoutPriority(-1)
+                    if model.canSaveSnapshot(for: identity) || model.isSavingSnapshot(for: identity) {
+                        Button {
+                            model.saveSnapshot(for: identity)
+                        } label: {
+                            ViewThatFits(in: .horizontal) {
+                                Text(model.isSavingSnapshot(for: identity) ? "Saving Snapshot…" : "Save Snapshot")
+                                Text(model.isSavingSnapshot(for: identity) ? "Saving…" : "Save")
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(model.isSavingSnapshot(for: identity))
+                        .accessibilityLabel(model.isSavingSnapshot(for: identity) ? "Saving Snapshot" : "Save Snapshot")
+                        .help("Save this completed request and response")
+                    }
                 }
             }
             .padding(.horizontal, 18)

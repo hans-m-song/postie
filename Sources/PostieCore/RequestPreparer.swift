@@ -223,13 +223,39 @@ public enum RequestPreparer {
             }
         }
 
+        let capturedNames = Set(try referencedNames(in: sources + (secretTemplate.map { [$0] } ?? [])))
+        let capture = SnapshotPreparationCapture(
+            template: SnapshotRequestTemplate(configuration: configuration, headers: headers),
+            referencedInputs: resolvedVariables.filter { capturedNames.contains($0.key) }.mapValues {
+                SnapshotInput(value: $0.value, scope: $0.scope, isSecret: $0.isSecret)
+            },
+            authentication: SnapshotAuthenticationInput(
+                kind: authenticationToPrepare.kind,
+                username: authenticationToPrepare.kind == .basic ? authenticationToPrepare.username : "",
+                secretTemplate: secretTemplate,
+                resolvedSecret: try secretTemplate.map { try substitute($0, values: variableValues) },
+                apiKeyHeaderName: authenticationToPrepare.kind == .apiKey ? selectedAuthenticationHeaderName : nil
+            ),
+            submitted: SnapshotTransportRequest(
+                method: request.httpMethod ?? configuration.method,
+                url: request.url!,
+                headers: (request.allHTTPHeaderFields ?? [:]).map { HTTPField(name: $0.key, value: $0.value) }
+                    .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending },
+                body: request.httpBody.map { String(decoding: $0, as: UTF8.self) },
+                headerSources: requestHeaderSources,
+                sensitiveNames: sensitiveRequestHeaderNames,
+                secretNames: secretRequestHeaderNames
+            )
+        )
+
         return PreparedHTTPRequest(
             configuration: configuration,
             request: request,
             referencedInputs: resolvedVariables,
             sensitiveRequestHeaderNames: sensitiveRequestHeaderNames,
             secretRequestHeaderNames: secretRequestHeaderNames,
-            requestHeaderSources: requestHeaderSources
+            requestHeaderSources: requestHeaderSources,
+            snapshotCapture: capture
         )
     }
 

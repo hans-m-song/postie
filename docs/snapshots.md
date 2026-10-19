@@ -1,6 +1,6 @@
 # Saved request/response snapshots
 
-Recorded 2026-10-17. User requested saving an instance of a request and response, described as Postman-like snapshots. This document defines Postie's proposed behaviour; it does not assert parity with a particular Postman feature. No implementation exists.
+Updated 2026-10-19. Native snapshots are implemented locally; user acceptance is pending. This document defines Postie's capture contract, without asserting parity with a particular Postman feature. See [implementation contract](snapshot-implementation.md) for concrete types and storage boundaries.
 
 Clarified 2026-10-18: native metadata plus body-sidecar storage is selected; HAR export is deferred to a future feature. Snapshots can be renamed and deleted. Immutable means the captured request/response content stays fixed; the user-facing name is mutable and independent of snapshot identity. Save initially proposes the request name and capture time. See deferred-features.md for grouped future capabilities.
 
@@ -14,7 +14,7 @@ Retain at most the latest completed exchange per request during the session, con
 
 Initial capture is for completed HTTP responses, including non-2xx status codes. Transport failures, cancelled exchanges and responses stopped by size limits are not presented as complete snapshots. Their future capture is outside this initial feature. Copy the complete file-backed response body as a sidecar, without JSON/Base64 expansion or full-body memory buffering. Missing request body and zero-length body must remain distinguishable where execution distinguishes them. Retain observed redirect statuses/URLs/headers as specified in execution.md, not intermediate response bodies or a raw wire trace.
 
-## Storage proposal
+## Storage
 
 ```text
 ~/.config/postie/
@@ -28,13 +28,15 @@ Snapshots are self-contained directories with versioned metadata and immutable s
 
 Snapshot captured input values are independent encrypted copies, not references to mutable live variables/credentials. Capture one effective value for each referenced variable name after scope precedence, plus the structured auth inputs needed for reconstruction. Ordinary literal sensitive headers/bodies/responses remain plaintext and user-accessible. Automatic secret detection is not required. There are no per-snapshot Keychain entries: the app-level key decrypts the snapshot's input envelope.
 
-Persist only after encryption succeeds with an established Keychain key. Stage metadata and a copy of the completed body in a separate directory on the same volume, then publish the complete directory; handle failed copies and clean abandoned staging without publishing partial snapshots. Preserve the source temporary body during staging. Snapshot deletion removes its directory, never the app key or live values. Full resolved material remains transient; do not persist a resolved duplicate alongside templates and encrypted inputs. Preparation compatibility, metadata/body consistency and publication/recovery semantics remain T-31 prerequisites.
+Persist only after encryption succeeds with an established Keychain key. Stage metadata and a copy of the completed body in a separate directory on the same volume, then publish the complete directory; handle failed copies and clean abandoned staging without publishing partial snapshots. Preserve the source temporary body during staging through execution-manager leases. Snapshot deletion removes its directory, never the app key or live values. Resolved submitted/observed request transport and redirect URLs are persisted inside the encrypted context, never as plaintext duplicates. Version 1 opens recorded transport without re-running preparation or consulting live scopes. Unreadable or uncertain snapshot storage blocks replacement-key creation.
 
-## UI proposal and acceptance: T-31
+## UI and acceptance: T-31
 
-Show snapshots beneath their originating request in sidebar navigation, labelled with capture date/status; selection opens a read-only capture in the side-by-side request/response layout. This is not user-created folder nesting. Keep physical snapshot storage separate to preserve captures after source deletion; source IDs provide UI grouping. Deleted-source navigation follows the approved placeholder policy below.
+Show snapshots beneath their originating request in sidebar navigation, labelled with their editable name, capture date and status; selection opens a read-only capture using the remembered side-by-side or stacked layout. This is not user-created folder nesting. Keep physical snapshot storage separate to preserve captures after source deletion; source IDs provide UI grouping. Deleted-source navigation follows the approved placeholder policy below.
 
 User approved the recommended deleted-source behaviour on 2026-10-17: retain a dimmed, non-executable source-request entry containing its snapshots until the last snapshot is deleted. If the source collection is also deleted, retain a dimmed historical collection grouping. These are navigation placeholders derived from snapshot metadata, not live request configurations; exclude them from normal request search and Send actions.
+
+Copying follow-up, 2026-10-20: displayed snapshot fields support text selection. Copy as JSON exports pretty, sorted JSON with frozen resolved submitted/observed request fields, actual captured variable/authentication values (including secrets), source metadata and response details. It does not substitute current workspace values or export unresolved templates as an executable request. Missing encrypted context is explicitly unavailable. Response content is capped at a 1 MiB clipboard preview, with original/preview byte counts and a truncation flag; binary content is Base64. Copying does not change the saved files or their encryption. No new per-field copy buttons or Finder action were added.
 
 - Save a completed response with its submitted request through an explicit action.
 - View saved snapshots in a small list with capture date, request name and response status; no persisted custom ordering/index is needed.
@@ -48,4 +50,4 @@ User approved the recommended deleted-source behaviour on 2026-10-17: retain a d
 - Verify malformed records, unsupported versions, failed writes and explicit deletion without loss of unrelated data.
 - Verify large-body snapshot copying does not require loading the entire body, interrupted staging is not published, and saving A remains correct while A's request runs again or B completes.
 
-Before implementation, settle capture/reconstruction format, encryption envelope, body limits, staged publication/recovery and the concrete UI. No snapshot-search extension to the request palette is assumed. Copying a snapshot without its Keychain-held key does not make the captured inputs portable.
+No snapshot-search extension to the request palette is implemented. Copying a snapshot without its Keychain-held key does not make the captured inputs portable. Missing or unavailable keys leave the original response inspectable while encrypted request details report an error.

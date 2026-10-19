@@ -23,6 +23,7 @@ struct ResponseHeaderRow: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
+            .textSelection(.enabled)
             .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
             Divider()
             VStack(alignment: .leading, spacing: 5) {

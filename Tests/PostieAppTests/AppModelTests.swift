@@ -1132,6 +1132,198 @@ final class AppModelTests: XCTestCase {
         XCTAssertTrue(terminated)
     }
 
+    func testSnapshotKeepsFrozenRequestAndSourceAfterEditsDeletionAndRestart() async throws {
+        let fixture = try AppHTTPFixture()
+        let root = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let keyStore = AppModelKeyStore()
+        let capturedURL = try fixture.url(path: "/echo", query: [URLQueryItem(name: "source", value: "captured")])
+        weak var firstModel: AppModel?
+        var savedSnapshotID: UUID?
+        var savedIdentity: RequestIdentity?
+        do {
+            let model = try makeModel(root: root, secretVault: SecretVault(keyStore: keyStore))
+            firstModel = model
+            try await waitUntil { model.canEditVariables(.global) }
+
+            await model.createCollection(name: "Captured collection")
+            let collectionID = try XCTUnwrap(model.collections.first?.id)
+            await model.createRequest(in: collectionID, name: "Captured request")
+            let identity = try XCTUnwrap(model.selectedIdentity)
+            savedIdentity = identity
+            model.updateDraft(identity) {
+                $0.method = "POST"
+                $0.url = capturedURL
+                $0.body = "captured request body"
+                $0.bodyEnabled = true
+            }
+            try await model.flushPendingSaves()
+
+            XCTAssertFalse(model.canSaveSnapshot(for: identity))
+            model.startRequest(identity)
+            try await waitUntil {
+                model.activeRuns[identity] == nil && model.latestResponses[identity]?.response.statusCode == 200
+            }
+            XCTAssertTrue(model.canSaveSnapshot(for: identity))
+
+            await model.renameCollection(id: collectionID, name: "Edited collection")
+            model.updateDraft(identity) {
+                $0.name = "Edited request"
+                $0.url = fixture.baseURL + "/echo?source=edited"
+                $0.body = "edited request body"
+            }
+            try await model.flushPendingSaves()
+
+            model.saveSnapshot(for: identity)
+            try await waitUntil { model.snapshots.count == 1 && model.savingSnapshotRunIDs.isEmpty }
+            let saved = try XCTUnwrap(model.snapshots.first)
+            savedSnapshotID = saved.id
+            XCTAssertEqual(saved.source.collectionName, "Captured collection")
+            XCTAssertEqual(saved.source.requestName, "Captured request")
+
+            model.selectSnapshot(saved.id)
+            try await waitUntil { model.openedSnapshots[saved.id] != nil }
+            let opened = try XCTUnwrap(model.openedSnapshots[saved.id])
+            XCTAssertEqual(opened.template.method, "POST")
+            XCTAssertEqual(opened.template.url, capturedURL)
+            XCTAssertEqual(opened.template.body, "captured request body")
+            XCTAssertEqual(opened.response.finalURL.absoluteString, capturedURL)
+
+            await model.renameSnapshot(id: saved.id, name: "Reviewed exchange")
+            XCTAssertEqual(model.snapshots.first?.name, "Reviewed exchange")
+            XCTAssertEqual(model.openedSnapshots[saved.id]?.summary.name, "Reviewed exchange")
+
+            await model.deleteRequest(identity)
+            XCTAssertNil(model.request(for: identity))
+            XCTAssertEqual(model.selectedSnapshotID, saved.id)
+            XCTAssertEqual(model.snapshots(for: identity).map(\.id), [saved.id])
+            XCTAssertEqual(model.snapshots.first?.source.collectionName, "Captured collection")
+
+            let terminated = await model.prepareForTermination()
+            XCTAssertTrue(terminated)
+        }
+        try await waitUntil { firstModel == nil }
+
+        let reloaded = try makeModel(root: root, secretVault: SecretVault(keyStore: keyStore))
+        try await waitUntil {
+            reloaded.snapshots.count == 1 || reloaded.snapshotLoadError != nil || reloaded.startupError != nil
+        }
+        XCTAssertNil(reloaded.startupError)
+        XCTAssertNil(reloaded.snapshotLoadError)
+        XCTAssertTrue(reloaded.snapshotStorageIssues.isEmpty)
+        XCTAssertTrue(reloaded.canEditVariables(.global))
+        XCTAssertTrue(reloaded.collections.first?.requests.isEmpty ?? true)
+        let reloadedSummary = try XCTUnwrap(reloaded.snapshots.first)
+        XCTAssertEqual(reloadedSummary.name, "Reviewed exchange")
+        XCTAssertEqual(reloadedSummary.source.collectionName, "Captured collection")
+        XCTAssertEqual(reloadedSummary.source.requestName, "Captured request")
+
+        let snapshotID = try XCTUnwrap(savedSnapshotID)
+        let identity = try XCTUnwrap(savedIdentity)
+        reloaded.selectSnapshot(snapshotID)
+        try await waitUntil {
+            reloaded.openedSnapshots[snapshotID] != nil || reloaded.snapshotOpenError(for: snapshotID) != nil
+        }
+        XCTAssertNil(reloaded.snapshotOpenError(for: snapshotID))
+        let reloadedSnapshot = try XCTUnwrap(reloaded.openedSnapshots[snapshotID])
+        XCTAssertEqual(reloadedSnapshot.template.url, capturedURL)
+        XCTAssertNotNil(reloadedSnapshot.context)
+        XCTAssertEqual(reloadedSnapshot.response.statusCode, 200)
+        let responseBody = try Data(contentsOf: reloadedSnapshot.response.bodyFileURL)
+        let responseJSON = try XCTUnwrap(JSONSerialization.jsonObject(with: responseBody) as? [String: Any])
+        XCTAssertEqual(responseJSON["method"] as? String, "POST")
+        XCTAssertEqual(responseJSON["body"] as? String, "captured request body")
+
+        await reloaded.deleteSnapshot(id: snapshotID)
+        XCTAssertTrue(reloaded.snapshots.isEmpty)
+        XCTAssertNil(reloaded.selectedSnapshotID)
+        XCTAssertEqual(reloaded.snapshots(for: identity), [])
+        let reloadedTerminated = await reloaded.prepareForTermination()
+        XCTAssertTrue(reloadedTerminated)
+    }
+
+    func testSnapshotCiphertextBlocksReplacementKeyAfterDeletingSourceCollection() async throws {
+        let fixture = try AppHTTPFixture()
+        let root = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let sourceKeyStore = AppModelKeyStore()
+        weak var sourceModel: AppModel?
+        var savedSnapshotID: UUID?
+        do {
+            let model = try makeModel(root: root, secretVault: SecretVault(keyStore: sourceKeyStore))
+            sourceModel = model
+            try await waitUntil { model.canEditVariables(.global) }
+
+            await model.createCollection(name: "Encrypted source")
+            let collectionID = try XCTUnwrap(model.collections.first?.id)
+            await model.createRequest(in: collectionID, name: "Credential request")
+            let identity = try XCTUnwrap(model.selectedIdentity)
+            try await model.setVariable(
+                name: "token",
+                value: "synthetic snapshot credential",
+                isSecret: true,
+                owner: .request(identity)
+            )
+            model.updateDraft(identity) {
+                $0.url = fixture.baseURL + "/presentation"
+                $0.headers = [HTTPField(name: "X-Snapshot-Token", value: "{{token}}")]
+            }
+            try await model.flushPendingSaves()
+
+            model.startRequest(identity)
+            try await waitUntil {
+                model.activeRuns[identity] == nil && model.latestResponses[identity]?.response.statusCode == 200
+            }
+            model.saveSnapshot(for: identity)
+            try await waitUntil { model.snapshots.count == 1 && model.savingSnapshotRunIDs.isEmpty }
+            let snapshotID = try XCTUnwrap(model.snapshots.first?.id)
+            savedSnapshotID = snapshotID
+
+            await model.deleteCollection(id: collectionID)
+            XCTAssertTrue(model.collections.isEmpty)
+            XCTAssertEqual(model.snapshots.map(\.id), [snapshotID])
+            let terminated = await model.prepareForTermination()
+            XCTAssertTrue(terminated)
+        }
+        try await waitUntil { sourceModel == nil }
+
+        let missingKeyStore = MissingCollectionKeyStore()
+        let reloaded = try makeModel(root: root, secretVault: SecretVault(keyStore: missingKeyStore))
+        try await waitUntil {
+            reloaded.snapshots.count == 1 || reloaded.snapshotLoadError != nil || reloaded.startupError != nil
+        }
+        XCTAssertNil(reloaded.startupError)
+        XCTAssertNil(reloaded.snapshotLoadError)
+        XCTAssertTrue(reloaded.snapshotStorageIssues.isEmpty)
+        XCTAssertTrue(reloaded.canEditVariables(.global))
+        XCTAssertTrue(reloaded.collections.isEmpty)
+        XCTAssertEqual(missingKeyStore.creationCount, 0)
+
+        let snapshotID = try XCTUnwrap(savedSnapshotID)
+        reloaded.selectSnapshot(snapshotID)
+        try await waitUntil {
+            reloaded.openedSnapshots[snapshotID] != nil || reloaded.snapshotOpenError(for: snapshotID) != nil
+        }
+        XCTAssertNil(reloaded.snapshotOpenError(for: snapshotID))
+        let opened = try XCTUnwrap(reloaded.openedSnapshots[snapshotID])
+        XCTAssertNil(opened.context)
+        XCTAssertNotNil(opened.contextError)
+        XCTAssertEqual(opened.response.statusCode, 200)
+        XCTAssertEqual(opened.response.finalURL.absoluteString, "about:blank")
+
+        try reloaded.setPlainVariable(name: "replacement", value: "synthetic", owner: .global)
+        do {
+            try await reloaded.setVariableSecret(true, named: "replacement", owner: .global)
+            XCTFail("Snapshot ciphertext must prevent replacement-key creation after source deletion.")
+        } catch {
+            XCTAssertEqual(error as? SecretVaultError, .keyCreationNotAllowed)
+        }
+        XCTAssertEqual(missingKeyStore.creationCount, 0)
+        XCTAssertEqual(reloaded.globalVariables["replacement"], .plain("synthetic"))
+        let reloadedTerminated = await reloaded.prepareForTermination()
+        XCTAssertTrue(reloadedTerminated)
+    }
+
     private func makeModel(root: URL, secretVault: SecretVault? = nil) throws -> AppModel {
         let dataDirectory = root.appendingPathComponent("data", isDirectory: true)
         let bodyDirectory = root.appendingPathComponent("bodies", isDirectory: true)

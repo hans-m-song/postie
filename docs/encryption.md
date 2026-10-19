@@ -1,6 +1,6 @@
 # Encryption
 
-Recorded 2026-10-17. User authorised the straightforward M3 at-rest design; implementation and verification are tracked in implementation-m3-m4.md. No existing-data migration is performed. Snapshot-specific sections below remain M5 design, not implemented behavior. See review.md for earlier design history.
+Updated 2026-10-19. User authorised the straightforward M3 at-rest design; implementation and verification are tracked in implementation-m3-m4.md. No existing-data migration is performed. Snapshot encryption is implemented locally; see snapshot-implementation.md for its versioned contract. See review.md for earlier design history.
 
 ## Purpose and limits
 
@@ -28,7 +28,7 @@ The variable table uses a reversible Secret checkbox. Conversion succeeds before
 
 Retain send-time templates and an independent map of effective values for referenced variable names; encrypt the entire captured-input map, including ordinary referenced values and structured auth inputs, as one snapshot-owned payload. Live secret values and snapshot captures use the same encryption service, not mutable shared value references. Snapshot request literals/templates and the original response remain plaintext.
 
-The retained exchange captures URL, ordered query/header and body templates, effective input values, preparation format version and response together at send time. Include separate query-editor entries, duplicate keys and empty values; do not assume all query data is in the URL template. Persist enough immutable preparation settings to reconstruct application-level request intent (substitution, URL encoding and auth generation); never resolve historical templates against current scopes. Do not persist a second resolved request copy that leaks the protected inputs. Before implementation, specify and verify the reconstruction contract across app versions. A restored snapshot is view-only; no replay engine is required.
+The retained exchange captures URL, ordered query/header and body templates, effective input values, preparation format version and response together at send time. Include separate query-editor entries, duplicate keys and empty values; do not assume all query data is in the URL template. Version 1 stores submitted and observed request transport plus redirect URLs inside the encrypted context, alongside captured inputs and auth. It opens this recorded transport without resolving historical templates against current scopes. No plaintext resolved request duplicate is written. A restored snapshot is view-only; no replay engine is required.
 
 ## Key lifecycle and failures
 

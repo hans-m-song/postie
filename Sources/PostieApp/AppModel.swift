@@ -29,6 +29,7 @@ final class AppModel: ObservableObject {
 
         let token: UUID
         let request: HTTPRequestConfiguration
+        let snapshotSource: SnapshotSource?
         let startedAt: Date
         var phase: Phase
         var runID: UUID?
@@ -39,6 +40,7 @@ final class AppModel: ObservableObject {
 
     struct LatestResponse {
         let response: HTTPResponseRecord
+        let snapshotSource: SnapshotSource?
         var preview: BodyPreview?
         var previewError: String?
         var isLoadingPreview: Bool
@@ -60,7 +62,15 @@ final class AppModel: ObservableObject {
     @Published private(set) var cancelledRequests: Set<RequestIdentity> = []
     @Published private(set) var autosaveErrors: [RequestIdentity: String] = [:]
     @Published private(set) var storageIssues: [StorageIssue] = []
+    @Published private(set) var snapshots: [SavedSnapshot] = []
+    @Published private(set) var snapshotStorageIssues: [StorageIssue] = []
+    @Published private(set) var snapshotLoadError: String?
+    @Published private(set) var openedSnapshots: [UUID: OpenedSnapshot] = [:]
+    @Published private(set) var openingSnapshots: Set<UUID> = []
+    @Published private(set) var snapshotOpenErrors: [UUID: String] = [:]
+    @Published private(set) var savingSnapshotRunIDs: Set<UUID> = []
     @Published private(set) var selectedIdentity: RequestIdentity?
+    @Published private(set) var selectedSnapshotID: UUID?
     @Published private(set) var selectedCollectionID: UUID?
     @Published private(set) var collectionEditorSection: CollectionEditorSection = .variables
     @Published private(set) var requestEditorSections: [RequestIdentity: RequestEditorSection] = [:]
@@ -109,12 +119,14 @@ final class AppModel: ObservableObject {
     private var secretCommitErrors: [SecretEditTarget: String] = [:]
     private var preparationTasks: [RequestIdentity: Task<Void, Never>] = [:]
     private var store: CollectionStore?
+    private var snapshotStore: SnapshotStore?
     private var executionManager: HTTPExecutionManager?
     private var editVersions: [RequestIdentity: UInt64] = [:]
     private var dirtyDrafts: Set<RequestIdentity> = []
     private var pendingSaveTasks: [RequestIdentity: Task<Void, Never>] = [:]
     private var saveChains: [RequestIdentity: Task<Void, Never>] = [:]
     private var previewTasks: [RequestIdentity: PendingPreview] = [:]
+    private var snapshotSaveTasks: [UUID: [UUID: Task<Void, Never>]] = [:]
     private var navigationHistory = NavigationHistory()
     private var settlementWaiters: [RequestIdentity: [CheckedContinuation<Void, Never>]] = [:]
     private var collectionMutationTasks: [UUID: Task<Void, Never>] = [:]
@@ -131,6 +143,10 @@ final class AppModel: ObservableObject {
         do {
             let directories = try Self.directories(from: arguments)
             store = try CollectionStore(rootURL: directories.data)
+            snapshotStore = SnapshotStore(
+                rootURL: directories.data.appendingPathComponent("snapshots", isDirectory: true),
+                vault: self.secretVault
+            )
             executionManager = try HTTPExecutionManager(bodyDirectory: directories.body)
             initialWorkspaceLoadTask = Task { [weak self] in
                 await self?.loadWorkspace()
@@ -176,6 +192,7 @@ final class AppModel: ObservableObject {
         }
         guard selectedIdentity == identity,
               selectedCollectionID == nil,
+              selectedSnapshotID == nil,
               !showsOngoingRequests,
               !showsGlobalVariables,
               !showsGlobalSettings else { return }
@@ -253,7 +270,9 @@ final class AppModel: ObservableObject {
     func select(_ identity: RequestIdentity?) {
         showsGlobalSettings = false
         variableDefinitionRequest = nil
+        clearSelectedSnapshotContext()
         selectedIdentity = identity
+        selectedSnapshotID = nil
         selectedCollectionID = nil
         showsOngoingRequests = false
         showsGlobalVariables = false
@@ -263,6 +282,8 @@ final class AppModel: ObservableObject {
     func showOngoingRequests() {
         showsGlobalSettings = false
         variableDefinitionRequest = nil
+        clearSelectedSnapshotContext()
+        selectedSnapshotID = nil
         selectedCollectionID = nil
         showsGlobalVariables = false
         showsOngoingRequests = true
@@ -272,6 +293,8 @@ final class AppModel: ObservableObject {
     func showRequests() {
         showsGlobalSettings = false
         variableDefinitionRequest = nil
+        clearSelectedSnapshotContext()
+        selectedSnapshotID = nil
         selectedCollectionID = nil
         showsOngoingRequests = false
         showsGlobalVariables = false
@@ -289,9 +312,24 @@ final class AppModel: ObservableObject {
         recordNavigation(.request(identity, section: requestEditorSection(for: identity)))
     }
 
+    func selectSnapshot(_ id: UUID) {
+        guard !isTerminating, snapshots.contains(where: { $0.id == id }) else { return }
+        if selectedSnapshotID != id { clearSelectedSnapshotContext() }
+        showsGlobalSettings = false
+        variableDefinitionRequest = nil
+        selectedCollectionID = nil
+        showsOngoingRequests = false
+        showsGlobalVariables = false
+        selectedSnapshotID = id
+        recordNavigation(.snapshot(id))
+        openSnapshotIfNeeded(id)
+    }
+
     func showGlobalVariables() {
         showsGlobalSettings = false
         variableDefinitionRequest = nil
+        clearSelectedSnapshotContext()
+        selectedSnapshotID = nil
         selectedCollectionID = nil
         showsGlobalVariables = true
         showsOngoingRequests = false
@@ -305,6 +343,8 @@ final class AppModel: ObservableObject {
 
     func showGlobalSettings() {
         variableDefinitionRequest = nil
+        clearSelectedSnapshotContext()
+        selectedSnapshotID = nil
         selectedCollectionID = nil
         showsGlobalVariables = false
         showsOngoingRequests = false
@@ -334,6 +374,8 @@ final class AppModel: ObservableObject {
         showsGlobalSettings = false
         guard collections.contains(where: { $0.id == id }) else { return }
         variableDefinitionRequest = nil
+        clearSelectedSnapshotContext()
+        selectedSnapshotID = nil
         collectionEditorSection = section
         selectedCollectionID = id
         showsGlobalVariables = false
@@ -362,6 +404,8 @@ final class AppModel: ObservableObject {
     private func showRequest(_ identity: RequestIdentity) {
         showsGlobalSettings = false
         variableDefinitionRequest = nil
+        clearSelectedSnapshotContext()
+        selectedSnapshotID = nil
         selectedIdentity = identity
         selectedCollectionID = nil
         showsOngoingRequests = false
@@ -389,6 +433,8 @@ final class AppModel: ObservableObject {
             return isAvailableRequest(identity) && variables(for: .request(identity))[name] != nil
         case let .collection(id, _):
             return collections.contains { $0.id == id }
+        case let .snapshot(id):
+            return snapshots.contains { $0.id == id }
         case .globalVariables, .globalSettings, .ongoingRequests:
             return true
         }
@@ -415,23 +461,38 @@ final class AppModel: ObservableObject {
             requestEditorSections[identity] = .variables
             variableDefinitionRequest = VariableDefinitionRequest(owner: .request(identity), name: name)
         case let .collection(id, section):
+            clearSelectedSnapshotContext()
+            selectedSnapshotID = nil
             collectionEditorSection = section
             selectedCollectionID = id
             showsGlobalVariables = false
             showsOngoingRequests = false
         case .globalVariables:
+            clearSelectedSnapshotContext()
+            selectedSnapshotID = nil
             selectedCollectionID = nil
             showsGlobalVariables = true
             showsOngoingRequests = false
         case .globalSettings:
+            clearSelectedSnapshotContext()
+            selectedSnapshotID = nil
             selectedCollectionID = nil
             showsGlobalVariables = false
             showsOngoingRequests = false
             showsGlobalSettings = true
         case .ongoingRequests:
+            clearSelectedSnapshotContext()
+            selectedSnapshotID = nil
             selectedCollectionID = nil
             showsGlobalVariables = false
             showsOngoingRequests = true
+        case let .snapshot(id):
+            if selectedSnapshotID != id { clearSelectedSnapshotContext() }
+            selectedSnapshotID = id
+            selectedCollectionID = nil
+            showsGlobalVariables = false
+            showsOngoingRequests = false
+            openSnapshotIfNeeded(id)
         }
     }
 
@@ -545,11 +606,17 @@ final class AppModel: ObservableObject {
     }
 
     private var activeVariableOwner: VariableOwner? {
-        guard !showsOngoingRequests, !showsGlobalSettings else { return nil }
+        guard selectedSnapshotID == nil, !showsOngoingRequests, !showsGlobalSettings else { return nil }
         if showsGlobalVariables { return .global }
         if let selectedCollectionID { return .collection(selectedCollectionID) }
         if let selectedIdentity { return .request(selectedIdentity) }
         return nil
+    }
+
+    private func clearSelectedSnapshotContext() {
+        openedSnapshots.removeAll()
+        openingSnapshots.removeAll()
+        snapshotOpenErrors.removeAll()
     }
 
     func setVariable(
@@ -1095,6 +1162,7 @@ final class AppModel: ObservableObject {
             for identity in Array(preparationTasks.keys) where activeRuns[identity]?.runID == nil {
                 cancelRequest(identity)
             }
+            await waitForSnapshotSaves()
             await executionManager?.shutdown()
             return true
         } catch {
@@ -1108,19 +1176,27 @@ final class AppModel: ObservableObject {
         guard canEdit(identity),
               activeRuns[identity] == nil,
               var configuration = drafts[identity],
+              let collection = collection(for: identity),
               let executionManager else { return }
 
         configuration.options = requestOptionOverrides(for: identity).resolve(against: globalOptions)
+        let snapshotSource = SnapshotSource(
+            identity: identity,
+            collectionName: collection.name,
+            requestName: configuration.name
+        )
 
         let token = UUID()
         let context = variableContext(for: identity)
-        let collectionDefaults = collection(for: identity).map {
-            CollectionRequestDefaults(headers: $0.headers, authentication: $0.authentication)
-        } ?? CollectionRequestDefaults()
+        let collectionDefaults = CollectionRequestDefaults(
+            headers: collection.headers,
+            authentication: collection.authentication
+        )
         let secretVault = secretVault
         activeRuns[identity] = ActiveRun(
             token: token,
             request: configuration,
+            snapshotSource: snapshotSource,
             startedAt: Date(),
             phase: .preparing,
             runID: nil,
@@ -1168,6 +1244,7 @@ final class AppModel: ObservableObject {
         activeRuns[identity] = ActiveRun(
             token: token,
             request: currentRequest,
+            snapshotSource: latestResponses[identity]?.snapshotSource,
             startedAt: Date(),
             phase: .preparing,
             runID: nil,
@@ -1301,8 +1378,175 @@ final class AppModel: ObservableObject {
         latestResponses[identity]
     }
 
+    func snapshots(for identity: RequestIdentity) -> [SavedSnapshot] {
+        snapshots.filter { $0.source.identity == identity }
+    }
+
+    func canSaveSnapshot(for identity: RequestIdentity) -> Bool {
+        guard !isTerminating,
+              snapshotStore != nil,
+              executionManager != nil,
+              let latest = latestResponses[identity],
+              latest.snapshotSource != nil,
+              latest.response.snapshotCapture != nil else { return false }
+        return !savingSnapshotRunIDs.contains(latest.response.runID)
+    }
+
+    func isSavingSnapshot(for identity: RequestIdentity) -> Bool {
+        guard let runID = latestResponses[identity]?.response.runID else { return false }
+        return savingSnapshotRunIDs.contains(runID)
+    }
+
+    func saveSnapshot(for identity: RequestIdentity) {
+        guard canSaveSnapshot(for: identity),
+              let latest = latestResponses[identity],
+              let source = latest.snapshotSource else { return }
+
+        let response = latest.response
+        let runID = response.runID
+        let operationID = UUID()
+        let name = Self.defaultSnapshotName(source: source, completedAt: response.completedAt)
+        let task = Task { @MainActor [self] in
+            await performSnapshotSave(
+                response: response,
+                source: source,
+                name: name,
+                runID: runID,
+                operationID: operationID
+            )
+        }
+        snapshotSaveTasks[runID, default: [:]][operationID] = task
+        savingSnapshotRunIDs.insert(runID)
+    }
+
+    func renameSnapshot(id: UUID, name: String) async {
+        guard !isTerminating, let snapshotStore else { return }
+        do {
+            let saved = try await snapshotStore.rename(id: id, name: name)
+            upsertSnapshot(saved)
+        } catch {
+            operationError = error.localizedDescription
+        }
+    }
+
+    func deleteSnapshot(id: UUID) async {
+        guard !isTerminating, let snapshotStore else { return }
+        do {
+            try await snapshotStore.delete(id: id)
+            markWorkspaceChanged()
+            snapshots.removeAll { $0.id == id }
+            openedSnapshots.removeValue(forKey: id)
+            openingSnapshots.remove(id)
+            snapshotOpenErrors.removeValue(forKey: id)
+            if selectedSnapshotID == id { selectedSnapshotID = nil }
+        } catch {
+            operationError = error.localizedDescription
+        }
+    }
+
+    func snapshotOpenError(for id: UUID) -> String? {
+        snapshotOpenErrors[id]
+    }
+
     func elapsed(for identity: RequestIdentity) -> TimeInterval? {
         activeRuns[identity].map { max(0, now.timeIntervalSince($0.startedAt)) }
+    }
+
+    private func performSnapshotSave(
+        response: HTTPResponseRecord,
+        source: SnapshotSource,
+        name: String,
+        runID: UUID,
+        operationID: UUID
+    ) async {
+        defer { finishSnapshotSave(runID: runID, operationID: operationID) }
+        guard let snapshotStore, let executionManager else { return }
+
+        let lease: HTTPBodyLease
+        do {
+            lease = try await executionManager.acquireBodyLease(for: response)
+        } catch {
+            operationError = error.localizedDescription
+            return
+        }
+
+        do {
+            let saved = try await snapshotStore.save(
+                response: response,
+                source: source,
+                name: name,
+                bodyLease: lease
+            )
+            upsertSnapshot(saved)
+        } catch {
+            operationError = error.localizedDescription
+        }
+        await executionManager.releaseBodyLease(lease)
+    }
+
+    private func finishSnapshotSave(runID: UUID, operationID: UUID) {
+        snapshotSaveTasks[runID]?.removeValue(forKey: operationID)
+        if snapshotSaveTasks[runID]?.isEmpty == true {
+            snapshotSaveTasks.removeValue(forKey: runID)
+            savingSnapshotRunIDs.remove(runID)
+        }
+    }
+
+    private func upsertSnapshot(_ snapshot: SavedSnapshot) {
+        markWorkspaceChanged()
+        snapshots.removeAll { $0.id == snapshot.id }
+        snapshots.append(snapshot)
+        snapshots = Self.sortedSnapshots(snapshots)
+        if let opened = openedSnapshots[snapshot.id] {
+            openedSnapshots[snapshot.id] = OpenedSnapshot(
+                summary: snapshot,
+                template: opened.template,
+                context: opened.context,
+                contextError: opened.contextError,
+                response: opened.response
+            )
+        }
+    }
+
+    private func openSnapshotIfNeeded(_ id: UUID) {
+        guard openedSnapshots[id] == nil,
+              !openingSnapshots.contains(id),
+              let snapshotStore else { return }
+        openingSnapshots.insert(id)
+        snapshotOpenErrors.removeValue(forKey: id)
+        Task { @MainActor [weak self, snapshotStore] in
+            do {
+                let opened = try await snapshotStore.open(id: id)
+                guard let self else { return }
+                if self.selectedSnapshotID == id,
+                   self.snapshots.contains(where: { $0.id == id }) {
+                    self.openedSnapshots[id] = opened
+                }
+                self.openingSnapshots.remove(id)
+            } catch {
+                guard let self else { return }
+                if self.selectedSnapshotID == id {
+                    self.snapshotOpenErrors[id] = error.localizedDescription
+                }
+                self.openingSnapshots.remove(id)
+            }
+        }
+    }
+
+    private static func defaultSnapshotName(source: SnapshotSource, completedAt: Date) -> String {
+        "\(source.requestName) · \(completedAt.formatted(date: .numeric, time: .shortened))"
+    }
+
+    private static func sortedSnapshots(_ snapshots: [SavedSnapshot]) -> [SavedSnapshot] {
+        snapshots.sorted {
+            if $0.capturedAt != $1.capturedAt { return $0.capturedAt > $1.capturedAt }
+            return $0.id.uuidString < $1.id.uuidString
+        }
+    }
+
+    private func waitForSnapshotSaves() async {
+        let tasks = snapshotSaveTasks.values.flatMap(\.values)
+        for task in tasks { await task.value }
     }
 
     private func loadWorkspace() async {
@@ -1313,6 +1557,15 @@ final class AppModel: ObservableObject {
             let revision = workspaceRevision
             do {
                 let loaded = try await store.load()
+                let snapshotLoad: SnapshotLoad?
+                let snapshotError: String?
+                do {
+                    snapshotLoad = try await snapshotStore?.load()
+                    snapshotError = nil
+                } catch {
+                    snapshotLoad = nil
+                    snapshotError = error.localizedDescription
+                }
                 guard revision == workspaceRevision else { continue }
                 let available = Dictionary(uniqueKeysWithValues: loaded.collections.flatMap { collection in
                     collection.requests.map { (RequestIdentity(collectionID: collection.id, requestID: $0.id), $0) }
@@ -1357,7 +1610,10 @@ final class AppModel: ObservableObject {
                     loaded.collections.contains(where: Self.containsCiphertext) ||
                     available.values.contains(where: Self.containsCiphertext) ||
                     nextDrafts.values.contains(where: Self.containsCiphertext)
-                await secretVault.setAllowsKeyCreation(!hasCiphertext && loaded.issues.isEmpty &&
+                let snapshotKeyStateIsSafe = snapshotError == nil &&
+                    snapshotLoad?.containsEncryptedData == false &&
+                    snapshotLoad?.issues.isEmpty == true
+                await secretVault.setAllowsKeyCreation(!hasCiphertext && snapshotKeyStateIsSafe && loaded.issues.isEmpty &&
                     !loaded.globalVariablesAreReadOnly && !loaded.collections.contains(where: \.isReadOnly))
                 guard revision == workspaceRevision else {
                     await secretVault.setAllowsKeyCreation(false)
@@ -1368,6 +1624,18 @@ final class AppModel: ObservableObject {
                     removeLocalRequestState(for: identity)
                 }
                 collections = nextCollections
+                snapshotLoadError = snapshotError
+                if let snapshotLoad {
+                    snapshots = Self.sortedSnapshots(snapshotLoad.snapshots)
+                    snapshotStorageIssues = snapshotLoad.issues
+                    let loadedIDs = Set(snapshotLoad.snapshots.map(\.id))
+                    openedSnapshots = openedSnapshots.filter { loadedIDs.contains($0.key) }
+                    openingSnapshots.formIntersection(loadedIDs)
+                    snapshotOpenErrors = snapshotOpenErrors.filter { loadedIDs.contains($0.key) }
+                    if let selectedSnapshotID, !loadedIDs.contains(selectedSnapshotID) {
+                        self.selectedSnapshotID = nil
+                    }
+                }
                 if let selectedCollectionID, !nextCollections.contains(where: { $0.id == selectedCollectionID }) {
                     self.selectedCollectionID = nil
                 }
@@ -1581,7 +1849,7 @@ final class AppModel: ObservableObject {
             return false
         case let .completed(response):
             guard response.runID == runID else { return false }
-            replaceLatestResponse(response, for: identity)
+            replaceLatestResponse(response, for: identity, source: active.snapshotSource)
             activeRuns[identity]?.redirects = response.redirects
             settleRun(identity, token: token)
             return true
@@ -1611,13 +1879,18 @@ final class AppModel: ObservableObject {
         waiters.forEach { $0.resume() }
     }
 
-    private func replaceLatestResponse(_ response: HTTPResponseRecord, for identity: RequestIdentity) {
+    private func replaceLatestResponse(
+        _ response: HTTPResponseRecord,
+        for identity: RequestIdentity,
+        source: SnapshotSource?
+    ) {
         if let previous = latestResponses[identity] {
             discardBody(previous.response.bodyFileURL, for: identity, after: previous.response.runID)
         }
         previewTasks.removeValue(forKey: identity)
         latestResponses[identity] = LatestResponse(
             response: response,
+            snapshotSource: source,
             preview: nil,
             previewError: nil,
             isLoadingPreview: false
@@ -1858,9 +2131,13 @@ final class AppModel: ObservableObject {
     private func discardBody(_ url: URL, for identity: RequestIdentity, after runID: UUID?) {
         guard let executionManager else { return }
         let pending = previewTasks[identity].flatMap { $0.runID == runID ? $0.task : nil }
+        let pendingSnapshotSaves = runID.flatMap { snapshotSaveTasks[$0].map { Array($0.values) } } ?? []
         Task { [weak self] in
             if let pending {
                 _ = try? await pending.value
+            }
+            for save in pendingSnapshotSaves {
+                await save.value
             }
             do {
                 try await executionManager.discardBody(at: url)
@@ -1903,6 +2180,7 @@ final class AppModel: ObservableObject {
         }
         if let selectedIdentity,
            selectedCollectionID == nil,
+           selectedSnapshotID == nil,
            !showsGlobalVariables,
            !showsGlobalSettings,
            !showsOngoingRequests {

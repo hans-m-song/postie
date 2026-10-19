@@ -4,6 +4,7 @@ import PostieCore
 
 struct ContentView: View {
     @EnvironmentObject private var model: AppModel
+    @AppStorage(RequestResponseLayout.preferenceKey) private var requestResponseLayout = RequestResponseLayout.sideBySide
     @State private var namePrompt: NamePrompt?
     @State private var deletionTarget: DeletionTarget?
     @State private var searchResponder: NSResponder?
@@ -18,6 +19,19 @@ struct ContentView: View {
             detail
         }
         .toolbar {
+            ToolbarItem {
+                Menu {
+                    Picker("Request and response layout", selection: $requestResponseLayout) {
+                        ForEach(RequestResponseLayout.allCases) { layout in
+                            Label(layout.title, systemImage: layout.symbolName).tag(layout)
+                        }
+                    }
+                } label: {
+                    Image(systemName: requestResponseLayout.symbolName)
+                }
+                .help("Request and response layout")
+                .accessibilityLabel("Request and response layout")
+            }
             ToolbarItemGroup(placement: .navigation) {
                 Button { model.navigateBack() } label: {
                     Image(systemName: "chevron.backward")
@@ -96,6 +110,9 @@ struct ContentView: View {
             )
         } else if model.showsOngoingRequests {
             OngoingRequestsView()
+        } else if let snapshotID = model.selectedSnapshotID {
+            SnapshotDetailView(snapshotID: snapshotID, layout: requestResponseLayout)
+                .id(snapshotID)
         } else if model.showsGlobalVariables {
             VStack(alignment: .leading, spacing: 0) {
                 Text("Global Variables").font(.title3.weight(.semibold)).padding(18)
@@ -111,7 +128,7 @@ struct ContentView: View {
             VStack(spacing: 0) {
                 RequestToolbar(identity: identity)
                 Divider()
-                RequestResponseSplit(model: model, identity: identity)
+                RequestResponseSplit(model: model, identity: identity, layout: requestResponseLayout)
                     .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
             }
             .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
@@ -239,6 +256,18 @@ private struct SidebarView: View {
                         )
                     }
 
+                    HistoricalSnapshotCollectionsSidebar(
+                        snapshots: model.snapshots,
+                        liveCollectionIDs: Set(model.collections.map(\.id))
+                    )
+
+                    if model.snapshotLoadError != nil || !model.snapshotStorageIssues.isEmpty {
+                        SnapshotStorageIssuesSection(
+                            loadError: model.snapshotLoadError,
+                            issues: model.snapshotStorageIssues
+                        )
+                    }
+
                     if !model.storageIssues.isEmpty {
                         storageIssues
                     }
@@ -343,6 +372,12 @@ private struct CollectionSidebarSection: View {
                                       canEdit: model.canEdit(identity), namePrompt: $namePrompt,
                                       deletionTarget: $deletionTarget)
                 }
+                let liveRequestIDs = Set(collection.requests.map(\.id))
+                let deletedRequestSnapshots = model.snapshots.filter {
+                    $0.source.identity.collectionID == collection.id &&
+                        !liveRequestIDs.contains($0.source.identity.requestID)
+                }
+                DeletedRequestSnapshotGroups(snapshots: deletedRequestSnapshots)
             }
         }
         .padding(.vertical, 3)
@@ -386,57 +421,63 @@ private struct RequestSidebarRow: View {
     }
 
     var body: some View {
-        Button {
-            model.select(identity)
-        } label: {
-            HStack(spacing: 8) {
-                if let active = model.activeRuns[identity] {
-                    ProgressView()
-                        .controlSize(.small)
-                        .frame(width: 14)
-                        .accessibilityLabel(active.phase == .cancelling ? "Cancelling" : "Request in progress")
-                } else {
-                    Text(currentRequest.method.uppercased())
-                        .font(.system(size: 10, weight: .bold, design: .rounded))
-                        .foregroundStyle(methodColor(currentRequest.method))
-                        .frame(width: 32, alignment: .leading)
-                }
-                Text(currentRequest.name)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-            }
-            .font(.system(size: 13))
-            .padding(.leading, 7)
-            .padding(.trailing, 7)
-            .padding(.vertical, 6)
-            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-            .background(model.selectedIdentity == identity && model.selectedCollectionID == nil && !model.showsOngoingRequests && !model.showsGlobalVariables && !model.showsGlobalSettings ? Color.accentColor.opacity(0.14) : .clear, in: RoundedRectangle(cornerRadius: 6))
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .contextMenu {
-            if canEdit {
-                Button("Rename request…") {
-                    namePrompt = NamePrompt(
-                        title: "Rename Request",
-                        initialValue: currentRequest.name,
-                        placeholder: "Request name",
-                        submitTitle: "Save"
-                    ) { name in
-                        model.updateDraft(identity) { $0.name = name }
+        VStack(alignment: .leading, spacing: 2) {
+            Button {
+                model.select(identity)
+            } label: {
+                HStack(spacing: 8) {
+                    if let active = model.activeRuns[identity] {
+                        ProgressView()
+                            .controlSize(.small)
+                            .frame(width: 14)
+                            .accessibilityLabel(active.phase == .cancelling ? "Cancelling" : "Request in progress")
+                    } else {
+                        Text(currentRequest.method.uppercased())
+                            .font(.system(size: 10, weight: .bold, design: .rounded))
+                            .foregroundStyle(methodColor(currentRequest.method))
+                            .frame(width: 32, alignment: .leading)
                     }
+                    Text(currentRequest.name)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
                 }
-                Button("Duplicate request") { Task { await model.duplicateRequest(identity) } }
-                Button("Move up") { Task { await model.moveRequest(identity, by: -1) } }
-                    .disabled(!canMoveUp)
-                Button("Move down") { Task { await model.moveRequest(identity, by: 1) } }
-                    .disabled(!canMoveDown)
-                Divider()
-                Button("Delete request", role: .destructive) { deletionTarget = .request(identity) }
+                .font(.system(size: 13))
+                .padding(.leading, 7)
+                .padding(.trailing, 7)
+                .padding(.vertical, 6)
+                .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+                .background(model.selectedIdentity == identity && model.selectedCollectionID == nil && model.selectedSnapshotID == nil && !model.showsOngoingRequests && !model.showsGlobalVariables && !model.showsGlobalSettings ? Color.accentColor.opacity(0.14) : .clear, in: RoundedRectangle(cornerRadius: 6))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .contextMenu {
+                if canEdit {
+                    Button("Rename request…") {
+                        namePrompt = NamePrompt(
+                            title: "Rename Request",
+                            initialValue: currentRequest.name,
+                            placeholder: "Request name",
+                            submitTitle: "Save"
+                        ) { name in
+                            model.updateDraft(identity) { $0.name = name }
+                        }
+                    }
+                    Button("Duplicate request") { Task { await model.duplicateRequest(identity) } }
+                    Button("Move up") { Task { await model.moveRequest(identity, by: -1) } }
+                        .disabled(!canMoveUp)
+                    Button("Move down") { Task { await model.moveRequest(identity, by: 1) } }
+                        .disabled(!canMoveDown)
+                    Divider()
+                    Button("Delete request", role: .destructive) { deletionTarget = .request(identity) }
+                }
+            }
+            .accessibilityAddTraits(model.selectedIdentity == identity && model.selectedCollectionID == nil && model.selectedSnapshotID == nil && !model.showsOngoingRequests && !model.showsGlobalVariables && !model.showsGlobalSettings ? .isSelected : [])
+
+            ForEach(model.snapshots(for: identity)) { snapshot in
+                SnapshotSidebarRow(snapshot: snapshot)
             }
         }
-        .accessibilityAddTraits(model.selectedIdentity == identity && model.selectedCollectionID == nil && !model.showsOngoingRequests && !model.showsGlobalVariables && !model.showsGlobalSettings ? .isSelected : [])
     }
 
     private func methodColor(_ method: String) -> Color {

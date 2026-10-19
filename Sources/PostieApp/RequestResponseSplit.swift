@@ -6,6 +6,7 @@ import SwiftUI
 struct RequestResponseSplit: NSViewControllerRepresentable {
     let model: AppModel
     let identity: RequestIdentity
+    let layout: RequestResponseLayout
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
@@ -13,7 +14,6 @@ struct RequestResponseSplit: NSViewControllerRepresentable {
 
     func makeNSViewController(context: Context) -> NSSplitViewController {
         let splitController = NSSplitViewController()
-        splitController.splitView.isVertical = true
         splitController.splitView.dividerStyle = .thin
 
         let requestController = NSHostingController(
@@ -21,7 +21,6 @@ struct RequestResponseSplit: NSViewControllerRepresentable {
         )
         requestController.sizingOptions = []
         let requestItem = NSSplitViewItem(viewController: requestController)
-        requestItem.minimumThickness = 320
         requestItem.preferredThicknessFraction = 0.5
         requestItem.canCollapse = false
         requestItem.canCollapseFromWindowResize = false
@@ -31,27 +30,54 @@ struct RequestResponseSplit: NSViewControllerRepresentable {
         )
         responseController.sizingOptions = []
         let responseItem = NSSplitViewItem(viewController: responseController)
-        responseItem.minimumThickness = 300
         responseItem.preferredThicknessFraction = 0.5
         responseItem.canCollapse = false
         responseItem.canCollapseFromWindowResize = false
 
         splitController.addSplitViewItem(requestItem)
         splitController.addSplitViewItem(responseItem)
+        configure(splitController)
+
         context.coordinator.requestController = requestController
         context.coordinator.responseController = responseController
+        context.coordinator.requestIdentity = identity
+        context.coordinator.modelIdentifier = ObjectIdentifier(model)
         return splitController
     }
 
     func updateNSViewController(_ splitController: NSSplitViewController, context: Context) {
-        context.coordinator.requestController?.rootView = RequestPaneRoot(model: model, identity: identity)
-        context.coordinator.responseController?.rootView = ResponsePaneRoot(model: model, identity: identity)
+        let coordinator = context.coordinator
+        let modelIdentifier = ObjectIdentifier(model)
+        if coordinator.modelIdentifier != modelIdentifier || coordinator.requestIdentity != identity {
+            coordinator.requestController?.rootView = RequestPaneRoot(model: model, identity: identity)
+            coordinator.responseController?.rootView = ResponsePaneRoot(model: model, identity: identity)
+            coordinator.modelIdentifier = modelIdentifier
+            coordinator.requestIdentity = identity
+        }
+
+        configure(splitController)
+    }
+
+    private func configure(_ splitController: NSSplitViewController) {
+        let splitView = splitController.splitView
+        let layoutChanged = splitView.isVertical != layout.isVertical
+        let splitItems = splitController.splitViewItems
+        splitItems[0].minimumThickness = layout.requestMinimumThickness
+        splitItems[1].minimumThickness = layout.responseMinimumThickness
+
+        if layoutChanged {
+            splitItems.forEach { $0.preferredThicknessFraction = 0.5 }
+        }
+
+        splitView.isVertical = layout.isVertical
     }
 
     @MainActor
     final class Coordinator {
         fileprivate var requestController: NSHostingController<RequestPaneRoot>?
         fileprivate var responseController: NSHostingController<ResponsePaneRoot>?
+        fileprivate var requestIdentity: RequestIdentity?
+        fileprivate var modelIdentifier: ObjectIdentifier?
     }
 }
 
