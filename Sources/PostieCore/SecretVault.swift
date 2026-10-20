@@ -6,6 +6,7 @@ public enum SecretVaultError: Error, Equatable, LocalizedError, Sendable {
     case keyCreationNotAllowed
     case missingKey
     case keyUnavailable
+    case keyConflict
     case invalidKeyLength
     case unsupportedEnvelopeVersion
     case malformedEnvelope
@@ -21,6 +22,8 @@ public enum SecretVaultError: Error, Equatable, LocalizedError, Sendable {
             "The encryption key is missing."
         case .keyUnavailable:
             "The encryption key is unavailable."
+        case .keyConflict:
+            "A different encryption key is already stored."
         case .invalidKeyLength:
             "The encryption key is invalid."
         case .unsupportedEnvelopeVersion:
@@ -35,6 +38,11 @@ public enum SecretVaultError: Error, Equatable, LocalizedError, Sendable {
             "The value could not be encrypted."
         }
     }
+}
+
+public enum SecretKeyImportResult: Equatable, Sendable {
+    case imported
+    case alreadyPresent
 }
 
 public actor SecretVault: SecretValueDecrypting {
@@ -52,6 +60,58 @@ public actor SecretVault: SecretValueDecrypting {
 
     public func setAllowsKeyCreation(_ allowsKeyCreation: Bool) {
         self.allowsKeyCreation = allowsKeyCreation
+    }
+
+    public func exportKey() throws -> Data {
+        guard let existingKey = try loadKey() else {
+            throw SecretVaultError.missingKey
+        }
+
+        try validateKey(existingKey)
+        if let cachedKey, cachedKey != existingKey {
+            throw SecretVaultError.keyConflict
+        }
+
+        return existingKey
+    }
+
+    public func importKey(
+        _ keyData: Data,
+        validating envelopes: [SecretEnvelope]
+    ) throws -> SecretKeyImportResult {
+        try validateKey(keyData)
+        if let cachedKey, cachedKey != keyData {
+            throw SecretVaultError.keyConflict
+        }
+
+        for envelope in envelopes {
+            _ = try decrypt(decodeSealedBox(envelope), using: keyData)
+        }
+
+        if let existingKey = try loadKey() {
+            try validateKey(existingKey)
+            guard existingKey == keyData else {
+                throw SecretVaultError.keyConflict
+            }
+
+            cachedKey = existingKey
+            return .alreadyPresent
+        }
+
+        let createdKey: Data
+        do {
+            createdKey = try keyStore.createKey(keyData)
+        } catch {
+            throw SecretVaultError.keyUnavailable
+        }
+
+        try validateKey(createdKey)
+        guard createdKey == keyData else {
+            throw SecretVaultError.keyConflict
+        }
+
+        cachedKey = createdKey
+        return .imported
     }
 
     public func encrypt(_ value: String) async throws -> SecretEnvelope {
@@ -76,6 +136,12 @@ public actor SecretVault: SecretValueDecrypting {
     }
 
     public func decrypt(_ envelope: SecretEnvelope) async throws -> String {
+        let sealedBox = try decodeSealedBox(envelope)
+        let keyData = try decryptionKey()
+        return try decrypt(sealedBox, using: keyData)
+    }
+
+    private func decodeSealedBox(_ envelope: SecretEnvelope) throws -> AES.GCM.SealedBox {
         guard envelope.version == 1 else {
             throw SecretVaultError.unsupportedEnvelopeVersion
         }
@@ -88,14 +154,14 @@ public actor SecretVault: SecretValueDecrypting {
             throw SecretVaultError.malformedEnvelope
         }
 
-        let sealedBox: AES.GCM.SealedBox
         do {
-            sealedBox = try AES.GCM.SealedBox(combined: combined)
+            return try AES.GCM.SealedBox(combined: combined)
         } catch {
             throw SecretVaultError.malformedEnvelope
         }
+    }
 
-        let keyData = try decryptionKey()
+    private func decrypt(_ sealedBox: AES.GCM.SealedBox, using keyData: Data) throws -> String {
         let plaintext: Data
 
         do {

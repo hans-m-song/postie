@@ -122,6 +122,32 @@ public actor SnapshotStore {
         return SnapshotLoad(snapshots: snapshots, issues: issues, containsEncryptedData: containsEncryptedData)
     }
 
+    public func encryptionEnvelopes() throws -> [SecretEnvelope] {
+        guard try pathExists(rootURL) else { return [] }
+        try requireDirectory(rootURL)
+
+        let entries = try fileManager.contentsOfDirectory(at: rootURL, includingPropertiesForKeys: nil)
+        var envelopes: [SecretEnvelope] = []
+        for entry in entries {
+            if entry.lastPathComponent == ".staging" {
+                try requireDirectory(entry)
+                guard try fileManager.contentsOfDirectory(at: entry, includingPropertiesForKeys: nil).isEmpty else {
+                    throw SnapshotStoreError.invalidPath
+                }
+                continue
+            }
+            guard let id = UUID(uuidString: entry.lastPathComponent),
+                  id.uuidString == entry.lastPathComponent else {
+                throw SnapshotStoreError.invalidPath
+            }
+
+            let envelope = try readDocument(id: id).encryptedContext
+            try validate(envelope)
+            envelopes.append(envelope)
+        }
+        return envelopes
+    }
+
     public func save(response: HTTPResponseRecord, source: SnapshotSource, name: String,
                      bodyLease: HTTPBodyLease) async throws -> SavedSnapshot {
         try validateName(name)
@@ -283,6 +309,15 @@ public actor SnapshotStore {
         }
         try requireBody(entry.appendingPathComponent("response.body"), byteCount: document.response.bodyByteCount)
         return document
+    }
+
+    private func validate(_ envelope: SecretEnvelope) throws {
+        guard envelope.version == 1 else { throw SnapshotStoreError.unsupportedVersion }
+        guard let combined = Data(base64Encoded: envelope.combined),
+              combined.base64EncodedString() == envelope.combined,
+              combined.count >= 12 + 16 else {
+            throw SnapshotStoreError.malformedSnapshot
+        }
     }
 
     private func prepareDirectories() throws {

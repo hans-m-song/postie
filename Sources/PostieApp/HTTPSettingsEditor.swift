@@ -29,6 +29,10 @@ struct GlobalSettingsPage: View {
 
                     Divider()
 
+                    EncryptionSettingsView()
+
+                    Divider()
+
                     if let error = model.variableSaveErrors[.global] {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Settings were not saved")

@@ -1,6 +1,6 @@
 # Local storage design
 
-Recorded 2026-10-17. Collection index/per-request layout, three variable scopes and encrypted authentication are implemented. Snapshots remain M5 design; that subtree below is not created by the current app. Default root is ~/.config/postie without implicit migration/merge. iCloud sync remains deferred.
+Updated 2026-10-20. Collection index/per-request layout, three variable scopes, encrypted authentication and native snapshots are implemented. Default root is ~/.config/postie without implicit migration/merge. Native iCloud data sync is selected for research/design (T99); manual local-Keychain import/export (T100) is the current implementation slice, not automatic sync.
 
 ## Layout and identity
 

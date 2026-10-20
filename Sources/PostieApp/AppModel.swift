@@ -16,6 +16,23 @@ struct VariableDefinitionRequest: Identifiable {
     let name: String
 }
 
+private enum EncryptionKeyTransferError: LocalizedError {
+    case workspaceUnavailable
+    case storageNeedsRepair
+    case workspaceChanged
+
+    var errorDescription: String? {
+        switch self {
+        case .workspaceUnavailable:
+            "The workspace could not be checked for encrypted values."
+        case .storageNeedsRepair:
+            "Key import is unavailable while workspace or snapshot storage has unresolved issues."
+        case .workspaceChanged:
+            "The workspace changed during key import. Try again."
+        }
+    }
+}
+
 @MainActor
 final class AppModel: ObservableObject {
     static let shared = AppModel()
@@ -1448,6 +1465,17 @@ final class AppModel: ObservableObject {
         snapshotOpenErrors[id]
     }
 
+    func exportEncryptionKey() async throws -> Data {
+        try await secretVault.exportKey()
+    }
+
+    func importEncryptionKey(_ key: Data) async throws -> SecretKeyImportResult {
+        let envelopes = try await encryptionEnvelopesForKeyImport()
+        let result = try await secretVault.importKey(key, validating: envelopes)
+        await refreshSelectedSnapshotAfterKeyImport()
+        return result
+    }
+
     func elapsed(for identity: RequestIdentity) -> TimeInterval? {
         activeRuns[identity].map { max(0, now.timeIntervalSince($0.startedAt)) }
     }
@@ -1547,6 +1575,114 @@ final class AppModel: ObservableObject {
     private func waitForSnapshotSaves() async {
         let tasks = snapshotSaveTasks.values.flatMap(\.values)
         for task in tasks { await task.value }
+    }
+
+    private func encryptionEnvelopesForKeyImport() async throws -> [SecretEnvelope] {
+        guard workspaceLoaded, !isTerminating, let store, let snapshotStore else {
+            throw EncryptionKeyTransferError.workspaceUnavailable
+        }
+
+        let currentGlobals = globalVariables
+        let currentCollections = collections
+        let currentDrafts = drafts
+        let currentSnapshots = snapshots
+        let currentStorageIssues = storageIssues
+        let currentSnapshotStorageIssues = snapshotStorageIssues
+        let currentSnapshotLoadError = snapshotLoadError
+        guard !globalVariablesAreReadOnly, !globalOptionsAreReadOnly,
+              !currentCollections.contains(where: \.isReadOnly), currentStorageIssues.isEmpty,
+              currentSnapshotStorageIssues.isEmpty, currentSnapshotLoadError == nil,
+              variableSaveErrors.isEmpty, scopeSaveErrors.isEmpty, autosaveErrors.isEmpty else {
+            throw EncryptionKeyTransferError.storageNeedsRepair
+        }
+
+        let loaded: WorkspaceLoad
+        do {
+            loaded = try await store.load()
+        } catch {
+            throw EncryptionKeyTransferError.workspaceUnavailable
+        }
+        guard loaded.issues.isEmpty, !loaded.globalVariablesAreReadOnly, !loaded.globalOptionsAreReadOnly,
+              !loaded.collections.contains(where: \.isReadOnly) else {
+            throw EncryptionKeyTransferError.storageNeedsRepair
+        }
+
+        let snapshotEnvelopes: [SecretEnvelope]
+        do {
+            snapshotEnvelopes = try await snapshotStore.encryptionEnvelopes()
+        } catch {
+            throw EncryptionKeyTransferError.storageNeedsRepair
+        }
+
+        guard workspaceLoaded, !isTerminating,
+              globalVariables == currentGlobals, collections == currentCollections,
+              drafts == currentDrafts, snapshots == currentSnapshots,
+              storageIssues == currentStorageIssues, snapshotStorageIssues == currentSnapshotStorageIssues,
+              snapshotLoadError == currentSnapshotLoadError,
+              !globalVariablesAreReadOnly, !globalOptionsAreReadOnly,
+              !collections.contains(where: \.isReadOnly), variableSaveErrors.isEmpty,
+              scopeSaveErrors.isEmpty, autosaveErrors.isEmpty else {
+            throw EncryptionKeyTransferError.workspaceChanged
+        }
+
+        var envelopes = Self.encryptedEnvelopes(in: currentGlobals)
+        envelopes += Self.encryptedEnvelopes(in: loaded.globalVariables)
+        for collection in currentCollections + loaded.collections {
+            envelopes += Self.encryptedEnvelopes(in: collection)
+        }
+        for request in currentDrafts.values {
+            envelopes += Self.encryptedEnvelopes(in: request)
+        }
+        return envelopes + snapshotEnvelopes
+    }
+
+    private static func encryptedEnvelopes(in values: VariableValues) -> [SecretEnvelope] {
+        values.values.compactMap { value in
+            guard case let .encrypted(envelope) = value else { return nil }
+            return envelope
+        }
+    }
+
+    private static func encryptedEnvelopes(in authentication: RequestAuthentication) -> [SecretEnvelope] {
+        [authentication.password, authentication.token, authentication.apiKey].compactMap { $0 }
+    }
+
+    private static func encryptedEnvelopes(in request: HTTPRequestConfiguration) -> [SecretEnvelope] {
+        encryptedEnvelopes(in: request.variables) + encryptedEnvelopes(in: request.authentication)
+    }
+
+    private static func encryptedEnvelopes(in collection: RequestCollection) -> [SecretEnvelope] {
+        var envelopes = encryptedEnvelopes(in: collection.variables) + encryptedEnvelopes(in: collection.authentication)
+        for request in collection.requests {
+            envelopes += encryptedEnvelopes(in: request)
+        }
+        return envelopes
+    }
+
+    private func refreshSelectedSnapshotAfterKeyImport() async {
+        guard !isTerminating,
+              let id = selectedSnapshotID,
+              snapshots.contains(where: { $0.id == id }),
+              !openingSnapshots.contains(id),
+              let opened = openedSnapshots[id],
+              opened.context == nil,
+              opened.contextError?.contains(SecretVaultError.missingKey.localizedDescription) == true,
+              let snapshotStore else { return }
+
+        openedSnapshots.removeValue(forKey: id)
+        snapshotOpenErrors.removeValue(forKey: id)
+        openingSnapshots.insert(id)
+        do {
+            let refreshed = try await snapshotStore.open(id: id)
+            if selectedSnapshotID == id, snapshots.contains(where: { $0.id == id }), !isTerminating {
+                openedSnapshots[id] = refreshed
+            }
+        } catch {
+            if selectedSnapshotID == id {
+                snapshotOpenErrors[id] = error.localizedDescription
+            }
+        }
+        openingSnapshots.remove(id)
     }
 
     private func loadWorkspace() async {
