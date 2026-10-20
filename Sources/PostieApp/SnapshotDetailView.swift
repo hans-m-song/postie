@@ -134,7 +134,6 @@ struct SnapshotDetailView: View {
         } else {
             ProgressView("Loading snapshot…")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .task(id: snapshotID) { model.selectSnapshot(snapshotID) }
         }
     }
 

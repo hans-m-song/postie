@@ -1,5 +1,7 @@
 # Saved request/response snapshots
 
+Navigation regression follow-up, 2026-10-20: removed a redundant selection-changing task from the snapshot loading view. A delayed callback from a disappearing snapshot could previously reselect it after a sidebar or history navigation. Selection and history restoration already initiate loading in AppModel; rendering the loading indicator now has no navigation side effect. The actual hosted-view regression failed twice before the fix and passed afterward, together with11 existing snapshot/history checks. User confirmation remains pending.
+
 Updated 2026-10-19. Native snapshots are implemented locally; user acceptance is pending. This document defines Postie's capture contract, without asserting parity with a particular Postman feature. See [implementation contract](snapshot-implementation.md) for concrete types and storage boundaries.
 
 Clarified 2026-10-18: native metadata plus body-sidecar storage is selected; HAR export is deferred to a future feature. Snapshots can be renamed and deleted. Immutable means the captured request/response content stays fixed; the user-facing name is mutable and independent of snapshot identity. Save initially proposes the request name and capture time. See deferred-features.md for grouped future capabilities.
