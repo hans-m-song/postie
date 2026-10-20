@@ -145,6 +145,7 @@ struct ContentView: View {
 
 private struct SidebarView: View {
     @EnvironmentObject private var model: AppModel
+    @StateObject private var snapshotSidebarExpansion = SnapshotSidebarExpansion()
     @Binding var namePrompt: NamePrompt?
     @Binding var deletionTarget: DeletionTarget?
 
@@ -286,6 +287,7 @@ private struct SidebarView: View {
         }
         .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
         .background(.regularMaterial)
+        .environmentObject(snapshotSidebarExpansion)
     }
 
     private var sidebarIcon: NSImage {
@@ -408,6 +410,7 @@ private struct CollectionSidebarSection: View {
 
 private struct RequestSidebarRow: View {
     @EnvironmentObject private var model: AppModel
+    @EnvironmentObject private var snapshotSidebarExpansion: SnapshotSidebarExpansion
     let request: HTTPRequestConfiguration
     let identity: RequestIdentity
     let canMoveUp: Bool
@@ -415,13 +418,33 @@ private struct RequestSidebarRow: View {
     let canEdit: Bool
     @Binding var namePrompt: NamePrompt?
     @Binding var deletionTarget: DeletionTarget?
-
     private var currentRequest: HTTPRequestConfiguration {
         model.request(for: identity) ?? request
     }
 
+    private var isSelected: Bool {
+        model.selectedIdentity == identity && model.selectedCollectionID == nil && model.selectedSnapshotID == nil &&
+            !model.showsOngoingRequests && !model.showsGlobalVariables && !model.showsGlobalSettings
+    }
+
     var body: some View {
+        let snapshots = model.snapshots(for: identity)
+        let snapshotsExpanded = snapshotSidebarExpansion.isExpanded(identity: identity)
+
         VStack(alignment: .leading, spacing: 2) {
+            liveRequestRow(snapshotCount: snapshots.count, snapshotsExpanded: snapshotsExpanded)
+
+            if snapshotsExpanded {
+                ForEach(snapshots) { snapshot in
+                    SnapshotSidebarRow(snapshot: snapshot)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func liveRequestRow(snapshotCount: Int, snapshotsExpanded: Bool) -> some View {
+        let row = HStack(spacing: 0) {
             Button {
                 model.select(identity)
             } label: {
@@ -447,37 +470,68 @@ private struct RequestSidebarRow: View {
                 .padding(.trailing, 7)
                 .padding(.vertical, 6)
                 .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-                .background(model.selectedIdentity == identity && model.selectedCollectionID == nil && model.selectedSnapshotID == nil && !model.showsOngoingRequests && !model.showsGlobalVariables && !model.showsGlobalSettings ? Color.accentColor.opacity(0.14) : .clear, in: RoundedRectangle(cornerRadius: 6))
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .contextMenu {
-                if canEdit {
-                    Button("Rename request…") {
-                        namePrompt = NamePrompt(
-                            title: "Rename Request",
-                            initialValue: currentRequest.name,
-                            placeholder: "Request name",
-                            submitTitle: "Save"
-                        ) { name in
-                            model.updateDraft(identity) { $0.name = name }
-                        }
-                    }
-                    Button("Duplicate request") { Task { await model.duplicateRequest(identity) } }
-                    Button("Move up") { Task { await model.moveRequest(identity, by: -1) } }
-                        .disabled(!canMoveUp)
-                    Button("Move down") { Task { await model.moveRequest(identity, by: 1) } }
-                        .disabled(!canMoveDown)
-                    Divider()
-                    Button("Delete request", role: .destructive) { deletionTarget = .request(identity) }
-                }
-            }
-            .accessibilityAddTraits(model.selectedIdentity == identity && model.selectedCollectionID == nil && model.selectedSnapshotID == nil && !model.showsOngoingRequests && !model.showsGlobalVariables && !model.showsGlobalSettings ? .isSelected : [])
+            .accessibilityAddTraits(isSelected ? .isSelected : [])
 
-            ForEach(model.snapshots(for: identity)) { snapshot in
-                SnapshotSidebarRow(snapshot: snapshot)
+
+            if snapshotCount > 0 {
+                snapshotDisclosureButton(count: snapshotCount, isExpanded: snapshotsExpanded)
             }
         }
+        .frame(minWidth: 0, maxWidth: .infinity)
+        .background(isSelected ? Color.accentColor.opacity(0.14) : .clear, in: RoundedRectangle(cornerRadius: 6))
+        .contentShape(Rectangle())
+        .contextMenu {
+            if canEdit {
+                Button("Rename request…") {
+                    namePrompt = NamePrompt(
+                        title: "Rename Request",
+                        initialValue: currentRequest.name,
+                        placeholder: "Request name",
+                        submitTitle: "Save"
+                    ) { name in
+                        model.updateDraft(identity) { $0.name = name }
+                    }
+                }
+                Button("Duplicate request") { Task { await model.duplicateRequest(identity) } }
+                Button("Move up") { Task { await model.moveRequest(identity, by: -1) } }
+                    .disabled(!canMoveUp)
+                Button("Move down") { Task { await model.moveRequest(identity, by: 1) } }
+                    .disabled(!canMoveDown)
+                Divider()
+                Button("Delete request", role: .destructive) { deletionTarget = .request(identity) }
+            }
+        }
+
+        row
+    }
+
+    private func snapshotDisclosureButton(count: Int, isExpanded: Bool) -> some View {
+        Button {
+            snapshotSidebarExpansion.toggle(identity: identity)
+        } label: {
+            HStack(spacing: 5) {
+                Text("\(count)")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(.quaternary, in: Capsule())
+                Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 10)
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 6)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("\(isExpanded ? "Hide" : "Show") \(count) snapshots")
+        .accessibilityLabel("\(isExpanded ? "Hide" : "Show") \(count) snapshots for \(currentRequest.name)")
+        .accessibilityHint("Expands or collapses saved snapshots for this request.")
     }
 
     private func methodColor(_ method: String) -> Color {

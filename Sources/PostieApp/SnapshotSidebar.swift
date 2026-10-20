@@ -1,6 +1,23 @@
 import SwiftUI
 import PostieCore
 
+@MainActor
+final class SnapshotSidebarExpansion: ObservableObject {
+    @Published private(set) var expandedRequests: Set<RequestIdentity> = []
+
+    func isExpanded(identity: RequestIdentity) -> Bool {
+        expandedRequests.contains(identity)
+    }
+
+    func toggle(identity: RequestIdentity) {
+        var expanded = expandedRequests
+        if !expanded.insert(identity).inserted {
+            expanded.remove(identity)
+        }
+        expandedRequests = expanded
+    }
+}
+
 struct SnapshotSidebarRow: View {
     @EnvironmentObject private var model: AppModel
     let snapshot: SavedSnapshot
@@ -148,6 +165,7 @@ private struct HistoricalSnapshotCollectionSection: View {
 }
 
 struct DeletedRequestSnapshotGroups: View {
+    @EnvironmentObject private var snapshotSidebarExpansion: SnapshotSidebarExpansion
     let snapshots: [SavedSnapshot]
 
     private var requestGroups: [HistoricalRequestGroup] {
@@ -161,6 +179,9 @@ struct DeletedRequestSnapshotGroups: View {
 
     var body: some View {
         ForEach(requestGroups) { group in
+            let snapshots = group.snapshots.sorted { $0.capturedAt > $1.capturedAt }
+            let isExpanded = snapshotSidebarExpansion.isExpanded(identity: group.identity)
+
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 7) {
                     Image(systemName: "arrow.up.right.square")
@@ -174,13 +195,38 @@ struct DeletedRequestSnapshotGroups: View {
                     Text("Deleted request")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
+                    Button {
+                        snapshotSidebarExpansion.toggle(identity: group.identity)
+                    } label: {
+                        HStack(spacing: 5) {
+                            Text("\(snapshots.count)")
+                                .font(.caption2.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(.quaternary, in: Capsule())
+                            Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 10)
+                        }
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 5)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("\(isExpanded ? "Hide" : "Show") \(snapshots.count) snapshots")
+                    .accessibilityLabel("\(isExpanded ? "Hide" : "Show") \(snapshots.count) snapshots for deleted request \(group.latestSnapshot.source.requestName)")
+                    .accessibilityHint("Expands or collapses saved snapshots for this deleted request.")
                 }
                 .padding(.leading, 18)
                 .padding(.vertical, 3)
                 .opacity(0.58)
 
-                ForEach(group.snapshots.sorted { $0.capturedAt > $1.capturedAt }) { snapshot in
-                    SnapshotSidebarRow(snapshot: snapshot, isHistorical: true)
+                if isExpanded {
+                    ForEach(snapshots) { snapshot in
+                        SnapshotSidebarRow(snapshot: snapshot, isHistorical: true)
+                    }
                 }
             }
         }

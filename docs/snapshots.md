@@ -34,6 +34,8 @@ Persist only after encryption succeeds with an established Keychain key. Stage m
 
 ## UI and acceptance: T-31
 
+Sidebar disclosure follow-up, 2026-10-21: snapshot children start collapsed. A separate count badge and chevron at the right of each request shows or hides its snapshots without opening the request. Deleted-request groups use the same control. Expansion is kept in sidebar session state, survives collection collapse, and is not written to configuration. Moving a request between collections resets its disclosure state. User confirmed the changes working on 2026-10-21; eight focused checks and the app rebuild/signature check passed.
+
 Show snapshots beneath their originating request in sidebar navigation, labelled with their editable name, capture date and status; selection opens a read-only capture using the remembered side-by-side or stacked layout. This is not user-created folder nesting. Keep physical snapshot storage separate to preserve captures after source deletion; source IDs provide UI grouping. Deleted-source navigation follows the approved placeholder policy below.
 
 User approved the recommended deleted-source behaviour on 2026-10-17: retain a dimmed, non-executable source-request entry containing its snapshots until the last snapshot is deleted. If the source collection is also deleted, retain a dimmed historical collection grouping. These are navigation placeholders derived from snapshot metadata, not live request configurations; exclude them from normal request search and Send actions.
