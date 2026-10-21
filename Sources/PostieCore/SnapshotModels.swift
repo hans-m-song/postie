@@ -82,21 +82,33 @@ public struct SnapshotTransportRequest: Codable, Equatable, Sendable {
     }
 }
 
+public struct SnapshotRedactionCapture: Codable, Equatable, Sendable {
+    public let inputs: [String: SnapshotInput]
+    public let isComplete: Bool
+
+    public init(inputs: [String: SnapshotInput], isComplete: Bool) {
+        self.inputs = inputs
+        self.isComplete = isComplete
+    }
+}
+
 public struct SnapshotPreparationCapture: Codable, Equatable, Sendable {
     public let preparationVersion: Int
     public let template: SnapshotRequestTemplate
     public let referencedInputs: [String: SnapshotInput]
     public let authentication: SnapshotAuthenticationInput
     public let submitted: SnapshotTransportRequest
+    public let redactionInputs: SnapshotRedactionCapture?
 
     public init(preparationVersion: Int = 1, template: SnapshotRequestTemplate,
                 referencedInputs: [String: SnapshotInput], authentication: SnapshotAuthenticationInput,
-                submitted: SnapshotTransportRequest) {
+                submitted: SnapshotTransportRequest, redactionInputs: SnapshotRedactionCapture? = nil) {
         self.preparationVersion = preparationVersion
         self.template = template
         self.referencedInputs = referencedInputs
         self.authentication = authentication
         self.submitted = submitted
+        self.redactionInputs = redactionInputs
     }
 }
 

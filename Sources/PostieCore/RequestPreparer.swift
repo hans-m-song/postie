@@ -102,7 +102,8 @@ public enum RequestPreparer {
         _ configuration: HTTPRequestConfiguration,
         context: VariableContext,
         decryptor: (any SecretValueDecrypting)?,
-        collection: CollectionRequestDefaults = .init()
+        collection: CollectionRequestDefaults = .init(),
+        captureRedactionInputs: Bool = false
     ) async throws -> PreparedHTTPRequest {
         try validateOptions(configuration.options)
 
@@ -224,6 +225,9 @@ public enum RequestPreparer {
         }
 
         let capturedNames = Set(try referencedNames(in: sources + (secretTemplate.map { [$0] } ?? [])))
+        let redactionInputs = captureRedactionInputs
+            ? try await captureSecretInputs(in: effectiveContext, resolved: resolvedVariables, decryptor: decryptor)
+            : nil
         let capture = SnapshotPreparationCapture(
             template: SnapshotRequestTemplate(configuration: configuration, headers: headers),
             referencedInputs: resolvedVariables.filter { capturedNames.contains($0.key) }.mapValues {
@@ -245,7 +249,8 @@ public enum RequestPreparer {
                 headerSources: requestHeaderSources,
                 sensitiveNames: sensitiveRequestHeaderNames,
                 secretNames: secretRequestHeaderNames
-            )
+            ),
+            redactionInputs: redactionInputs
         )
 
         return PreparedHTTPRequest(
@@ -268,6 +273,57 @@ public enum RequestPreparer {
             result.request[name] = value
         }
         return result
+    }
+
+    private static func captureSecretInputs(
+        in context: VariableContext,
+        resolved: [String: ResolvedVariable],
+        decryptor: (any SecretValueDecrypting)?
+    ) async throws -> SnapshotRedactionCapture {
+        let maximumSecretCount = 128
+        let maximumByteCount = 1_048_576
+        let names = Set(context.request.keys).union(context.collection.keys).union(context.global.keys).sorted()
+        var inputs: [String: SnapshotInput] = [:]
+        var attemptedCount = 0
+        var byteCount = 0
+        var isComplete = true
+
+        try Task.checkCancellation()
+        for name in names {
+            guard let (value, scope) = effectiveValue(named: name, in: context),
+                  case .encrypted(let envelope) = value else {
+                continue
+            }
+            try Task.checkCancellation()
+            let nameByteCount = name.utf8.count
+            guard attemptedCount < maximumSecretCount, byteCount < maximumByteCount,
+                  nameByteCount <= maximumByteCount - byteCount else {
+                isComplete = false
+                break
+            }
+            attemptedCount += 1
+            let plaintext: String
+            do {
+                if let existing = resolved[name] {
+                    plaintext = existing.value
+                } else {
+                    plaintext = try await decrypt(envelope, using: decryptor)
+                }
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                isComplete = false
+                continue
+            }
+            let valueByteCount = plaintext.utf8.count
+            guard valueByteCount <= maximumByteCount - byteCount - nameByteCount else {
+                isComplete = false
+                break
+            }
+            byteCount += nameByteCount + valueByteCount
+            inputs[name] = SnapshotInput(value: plaintext, scope: scope, isSecret: true)
+        }
+        return SnapshotRedactionCapture(inputs: inputs, isComplete: isComplete)
     }
 
     private static func templateSources(

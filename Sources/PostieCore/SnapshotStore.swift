@@ -68,6 +68,7 @@ private struct SnapshotDocument: Codable {
 
 private struct EncryptedSnapshotContext: Codable {
     let referencedInputs: [String: SnapshotInput]
+    let redactionInputs: SnapshotRedactionCapture?
     let authentication: SnapshotAuthenticationInput
     let submitted: SnapshotTransportRequest
     let observedTransport: SnapshotTransportRequest
@@ -160,6 +161,7 @@ public actor SnapshotStore {
         }
         let context = EncryptedSnapshotContext(
             referencedInputs: capture.referencedInputs,
+            redactionInputs: capture.redactionInputs,
             authentication: capture.authentication,
             submitted: capture.submitted,
             observedTransport: SnapshotTransportRequest(
@@ -229,7 +231,7 @@ public actor SnapshotStore {
                 preparation: SnapshotPreparationCapture(
                     preparationVersion: document.preparationVersion, template: document.template,
                     referencedInputs: decoded.referencedInputs, authentication: decoded.authentication,
-                    submitted: decoded.submitted
+                    submitted: decoded.submitted, redactionInputs: decoded.redactionInputs
                 ),
                 observedTransport: decoded.observedTransport, redirects: decoded.redirects
             )

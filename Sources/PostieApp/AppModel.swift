@@ -1226,7 +1226,10 @@ final class AppModel: ObservableObject {
 
         preparationTasks[identity] = Task { [weak self] in
             do {
-                let prepared = try await RequestPreparer.prepare(configuration, context: context, decryptor: secretVault, collection: collectionDefaults)
+                let prepared = try await RequestPreparer.prepare(
+                    configuration, context: context, decryptor: secretVault,
+                    collection: collectionDefaults, captureRedactionInputs: true
+                )
                 try Task.checkCancellation()
                 guard let self, self.activeRuns[identity]?.token == token else { return }
                 guard self.canEdit(identity), self.activeRuns[identity]?.cancelRequested == false else {
