@@ -6,12 +6,10 @@ public enum JSONPresentation {
     public static func pretty(at url: URL, maximumBytes: Int = maximumBytes) throws -> String {
         guard maximumBytes > 0, maximumBytes < Int.max else { throw PresentationError.tooLarge }
         let file: FileHandle
-        do { file = try FileHandle(forReadingFrom: url) }
-        catch { throw PresentationError.unreadable }
+        do { file = try FileHandle(forReadingFrom: url) } catch { throw PresentationError.unreadable }
         defer { try? file.close() }
         let data: Data
-        do { data = try file.read(upToCount: maximumBytes + 1) ?? Data() }
-        catch { throw PresentationError.unreadable }
+        do { data = try file.read(upToCount: maximumBytes + 1) ?? Data() } catch { throw PresentationError.unreadable }
         guard data.count <= maximumBytes else { throw PresentationError.tooLarge }
         return try pretty(data, maximumBytes: maximumBytes)
     }
@@ -19,7 +17,8 @@ public enum JSONPresentation {
     public static func pretty(_ data: Data, maximumBytes: Int = maximumBytes) throws -> String {
         guard maximumBytes > 0, data.count <= maximumBytes else { throw PresentationError.tooLarge }
         guard String(data: data, encoding: .utf8) != nil,
-              (try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])) != nil else {
+            (try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])) != nil
+        else {
             throw PresentationError.invalidJSON
         }
         let source = Array(data)
@@ -42,9 +41,13 @@ public enum JSONPresentation {
         for (index, byte) in source.enumerated() {
             if quoted {
                 try append([byte])
-                if escaped { escaped = false }
-                else if byte == 92 { escaped = true }
-                else if byte == 34 { quoted = false }
+                if escaped {
+                    escaped = false
+                } else if byte == 92 {
+                    escaped = true
+                } else if byte == 34 {
+                    quoted = false
+                }
                 continue
             }
             if [9, 10, 13, 32].contains(byte) { continue }

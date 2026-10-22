@@ -37,20 +37,23 @@ final class VariableCompletionTests: XCTestCase {
 
     func testCompletionContextRejectsEscapedOpenersSelectionsAndInvalidPrefixes() {
         let escaped = "https://api.example.test/\\{{host"
-        XCTAssertNil(VariableCompletionMatcher.context(
-            in: escaped,
-            selection: NSRange(location: (escaped as NSString).length, length: 0)
-        ))
+        XCTAssertNil(
+            VariableCompletionMatcher.context(
+                in: escaped,
+                selection: NSRange(location: (escaped as NSString).length, length: 0)
+            ))
 
         let token = "https://api.example.test/{{api-|}}"
-        XCTAssertNil(VariableCompletionMatcher.context(
-            in: token,
-            selection: NSRange(location: (token as NSString).range(of: "api-").location + 4, length: 0)
-        ))
-        XCTAssertNil(VariableCompletionMatcher.context(
-            in: token,
-            selection: NSRange(location: (token as NSString).range(of: "api").location + 3, length: 1)
-        ))
+        XCTAssertNil(
+            VariableCompletionMatcher.context(
+                in: token,
+                selection: NSRange(location: (token as NSString).range(of: "api-").location + 4, length: 0)
+            ))
+        XCTAssertNil(
+            VariableCompletionMatcher.context(
+                in: token,
+                selection: NSRange(location: (token as NSString).range(of: "api").location + 3, length: 1)
+            ))
     }
 
     func testUnclosedTokenReplacementIncludesIdentifierSuffixAfterCaret() throws {
@@ -70,14 +73,14 @@ final class VariableCompletionTests: XCTestCase {
             VariableCompletion(name: "apiHost", scope: .request, isSecret: false),
             VariableCompletion(name: "API_HOST", scope: .collection, isSecret: false),
             VariableCompletion(name: "API_HOST", scope: .request, isSecret: true),
-            VariableCompletion(name: "API-HOST", scope: .global, isSecret: false)
+            VariableCompletion(name: "API-HOST", scope: .global, isSecret: false),
         ]
 
         XCTAssertEqual(
             VariableCompletionMatcher.suggestions(for: context, from: variables),
             [
                 VariableCompletion(name: "API_HOST", scope: .collection, isSecret: false),
-                VariableCompletion(name: "API_TOKEN", scope: .global, isSecret: true)
+                VariableCompletion(name: "API_TOKEN", scope: .global, isSecret: true),
             ]
         )
 
@@ -92,9 +95,10 @@ final class VariableCompletionTests: XCTestCase {
             manyVariables.prefix(VariableCompletionMatcher.maximumSuggestionCount).map(\.name).sorted()
         )
 
-        let boundedInput = (0..<VariableCompletionMatcher.maximumCandidatesInspected).map {
-            VariableCompletion(name: "miss\($0)", scope: .request, isSecret: false)
-        } + [VariableCompletion(name: "target", scope: .request, isSecret: false)]
+        let boundedInput =
+            (0..<VariableCompletionMatcher.maximumCandidatesInspected).map {
+                VariableCompletion(name: "miss\($0)", scope: .request, isSecret: false)
+            } + [VariableCompletion(name: "target", scope: .request, isSecret: false)]
         let target = VariableCompletionContext(prefix: "target", replacementRange: NSRange(location: 0, length: 0))
         XCTAssertTrue(VariableCompletionMatcher.suggestions(for: target, from: boundedInput).isEmpty)
     }
@@ -102,10 +106,11 @@ final class VariableCompletionTests: XCTestCase {
     func testCompletionContextRejectsOversizedInput() {
         let value = String(repeating: "x", count: VariableCompletionMatcher.maximumInputLength + 1) + "{{host"
 
-        XCTAssertNil(VariableCompletionMatcher.context(
-            in: value,
-            selection: NSRange(location: (value as NSString).length, length: 0)
-        ))
+        XCTAssertNil(
+            VariableCompletionMatcher.context(
+                in: value,
+                selection: NSRange(location: (value as NSString).length, length: 0)
+            ))
     }
 
     func testBodyContextFindsCaretLocalTokenInLargeBody() throws {
@@ -113,10 +118,11 @@ final class VariableCompletionTests: XCTestCase {
         let value = prefix + "{{host}} after"
         let caret = (prefix + "{{ho").utf16.count
 
-        let context = try XCTUnwrap(VariableCompletionMatcher.bodyContext(
-            in: value,
-            selection: NSRange(location: caret, length: 0)
-        ))
+        let context = try XCTUnwrap(
+            VariableCompletionMatcher.bodyContext(
+                in: value,
+                selection: NSRange(location: caret, length: 0)
+            ))
 
         XCTAssertEqual(context.prefix, "ho")
         XCTAssertEqual(
@@ -128,10 +134,11 @@ final class VariableCompletionTests: XCTestCase {
     func testBodyContextRejectsEscapedLocalToken() {
         let value = String(repeating: "x", count: VariableCompletionMatcher.maximumInputLength + 5) + "\\{{host"
 
-        XCTAssertNil(VariableCompletionMatcher.bodyContext(
-            in: value,
-            selection: NSRange(location: (value as NSString).length, length: 0)
-        ))
+        XCTAssertNil(
+            VariableCompletionMatcher.bodyContext(
+                in: value,
+                selection: NSRange(location: (value as NSString).length, length: 0)
+            ))
     }
 
     func testReplacementProducesOneCanonicalTemplateToken() {

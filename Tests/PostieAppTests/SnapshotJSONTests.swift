@@ -17,7 +17,9 @@ final class SnapshotJSONTests: XCTestCase {
         let inputs = try XCTUnwrap(capturedContext["referencedInputs"] as? [String: [String: Any]])
 
         XCTAssertEqual(request["url"] as? String, "https://api.example.invalid/customers/42?token=actual-query-secret")
-        XCTAssertEqual(headers.first(where: { $0["name"] as? String == "Authorization" })?["value"] as? String, "Basic c3ludGhldGljLXVzZXI6YWN0dWFsLXBhc3N3b3Jk")
+        XCTAssertEqual(
+            headers.first(where: { $0["name"] as? String == "Authorization" })?["value"] as? String,
+            "Basic c3ludGhldGljLXVzZXI6YWN0dWFsLXBhc3N3b3Jk")
         XCTAssertEqual(request["body"] as? String, "{\"customer\":42,\"token\":\"actual-body-secret\"}")
         XCTAssertEqual(authentication["resolvedSecret"] as? String, "actual-password")
         XCTAssertNil(authentication["secretTemplate"])
@@ -72,7 +74,8 @@ final class SnapshotJSONTests: XCTestCase {
     }
 
     private func makeSnapshot(body: Data, hasContext: Bool) throws -> (snapshot: OpenedSnapshot, bodyURL: URL) {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let bodyURL = directory.appendingPathComponent("synthetic-response.body")
         try body.write(to: bodyURL)
@@ -80,7 +83,8 @@ final class SnapshotJSONTests: XCTestCase {
         let collectionID = UUID()
         let requestID = UUID()
         let identity = RequestIdentity(collectionID: collectionID, requestID: requestID)
-        let source = SnapshotSource(identity: identity, collectionName: "Synthetic collection", requestName: "Synthetic request")
+        let source = SnapshotSource(
+            identity: identity, collectionName: "Synthetic collection", requestName: "Synthetic request")
         let templateConfiguration = HTTPRequestConfiguration(
             name: "Synthetic request",
             method: "POST",
@@ -103,12 +107,14 @@ final class SnapshotJSONTests: XCTestCase {
             template: template,
             referencedInputs: [
                 "customerId": SnapshotInput(value: "42", scope: .collection, isSecret: false),
-                "token": SnapshotInput(value: "actual-query-secret", scope: .global, isSecret: true)
+                "token": SnapshotInput(value: "actual-query-secret", scope: .global, isSecret: true),
             ],
-            authentication: SnapshotAuthenticationInput(kind: .basic, username: "synthetic-user", resolvedSecret: "actual-password"),
+            authentication: SnapshotAuthenticationInput(
+                kind: .basic, username: "synthetic-user", resolvedSecret: "actual-password"),
             submitted: submitted
         )
-        let context = hasContext
+        let context =
+            hasContext
             ? FrozenSnapshotContext(preparation: preparation, observedTransport: submitted, redirects: [])
             : nil
         let responseURL = context?.observedTransport.url ?? URL(string: "about:blank")!
@@ -119,15 +125,17 @@ final class SnapshotJSONTests: XCTestCase {
             statusCode: 201,
             requestHeaders: context?.observedTransport.headers ?? [],
             responseHeaders: [HTTPField(name: "Content-Type", value: "application/octet-stream")],
-            redirects: [HTTPRedirect(
-                statusCode: 302,
-                url: context?.observedTransport.url ?? responseURL,
-                nextURL: context?.observedTransport.url ?? responseURL,
-                method: "POST",
-                nextMethod: "GET",
-                requestHeaders: context?.observedTransport.headers ?? [],
-                responseHeaders: [HTTPField(name: "Location", value: "/next")]
-            )],
+            redirects: [
+                HTTPRedirect(
+                    statusCode: 302,
+                    url: context?.observedTransport.url ?? responseURL,
+                    nextURL: context?.observedTransport.url ?? responseURL,
+                    method: "POST",
+                    nextMethod: "GET",
+                    requestHeaders: context?.observedTransport.headers ?? [],
+                    responseHeaders: [HTTPField(name: "Location", value: "/next")]
+                )
+            ],
             bodyFileURL: bodyURL,
             bodyByteCount: Int64(body.count),
             duration: 0.25,

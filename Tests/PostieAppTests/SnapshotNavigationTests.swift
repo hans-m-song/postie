@@ -116,7 +116,7 @@ final class SnapshotNavigationTests: XCTestCase {
             arguments: [
                 "PostieSnapshotNavigationTests",
                 "--data-directory", root.appendingPathComponent("data", isDirectory: true).path,
-                "--body-directory", root.appendingPathComponent("bodies", isDirectory: true).path
+                "--body-directory", root.appendingPathComponent("bodies", isDirectory: true).path,
             ],
             secretVault: SecretVault(keyStore: keyStore)
         )

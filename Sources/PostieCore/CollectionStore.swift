@@ -1,9 +1,9 @@
 import Foundation
 
 #if canImport(Darwin)
-import Darwin
+    import Darwin
 #else
-import Glibc
+    import Glibc
 #endif
 
 public enum CollectionStoreError: LocalizedError, Sendable {
@@ -72,7 +72,8 @@ public actor CollectionStore {
         self.rootURL = resolvedRoot
         self.collectionsURL = resolvedRoot.appendingPathComponent(Self.collectionsDirectoryName, isDirectory: true)
         self.globalsURL = resolvedRoot.appendingPathComponent(Self.globalsFilename, isDirectory: false)
-        self.deletionStagingURL = resolvedRoot.appendingPathComponent(Self.deletionStagingDirectoryName, isDirectory: true)
+        self.deletionStagingURL = resolvedRoot.appendingPathComponent(
+            Self.deletionStagingDirectoryName, isDirectory: true)
         let lockURL = resolvedRoot.appendingPathComponent(Self.lockFilename, isDirectory: false)
         self.lockPath = lockURL.path
 
@@ -141,11 +142,17 @@ public actor CollectionStore {
         var validDirectories: [(id: UUID, url: URL)] = []
         for url in collectionEntries {
             guard Self.isDirectory(url) else {
-                issues.append(makeIssue(.unexpectedCollectionEntry, detail: url.lastPathComponent, message: "An unrecognised item in the collections directory was preserved."))
+                issues.append(
+                    makeIssue(
+                        .unexpectedCollectionEntry, detail: url.lastPathComponent,
+                        message: "An unrecognised item in the collections directory was preserved."))
                 continue
             }
             guard let id = UUID(uuidString: url.lastPathComponent) else {
-                issues.append(makeIssue(.invalidCollectionDirectory, detail: url.lastPathComponent, message: "A collection directory has an invalid identity and was preserved."))
+                issues.append(
+                    makeIssue(
+                        .invalidCollectionDirectory, detail: url.lastPathComponent,
+                        message: "A collection directory has an invalid identity and was preserved."))
                 continue
             }
             validDirectories.append((id, url))
@@ -154,8 +161,14 @@ public actor CollectionStore {
         let groupedDirectories = Dictionary(grouping: validDirectories, by: \.id)
         var collections: [RequestCollection] = []
         for id in groupedDirectories.keys.sorted(by: { $0.uuidString < $1.uuidString }) {
-            guard let directories = groupedDirectories[id], directories.count == 1, let directory = directories.first?.url else {
-                issues.append(makeIssue(.duplicateCollectionDirectory, collectionID: id, message: "More than one collection directory has this identity; the collection was not loaded."))
+            guard let directories = groupedDirectories[id], directories.count == 1,
+                let directory = directories.first?.url
+            else {
+                issues.append(
+                    makeIssue(
+                        .duplicateCollectionDirectory, collectionID: id,
+                        message: "More than one collection directory has this identity; the collection was not loaded.")
+                )
                 collections.append(RequestCollection(id: id, name: "Ambiguous collection", isReadOnly: true))
                 continue
             }
@@ -200,7 +213,8 @@ public actor CollectionStore {
             do {
                 _ = try Self.decodeHTTPOptions(existing)
             } catch {
-                throw CollectionStoreError.ioFailure(operation: "save global HTTP settings because their stored value is malformed")
+                throw CollectionStoreError.ioFailure(
+                    operation: "save global HTTP settings because their stored value is malformed")
             }
             object["httpOptions"] = Self.mergeUnknownData(existing, with: incoming)
         } else {
@@ -215,7 +229,9 @@ public actor CollectionStore {
         var updated = record
         let incoming = try Self.variableJSONValue(variables)
         updated.object["variables"] = Self.mergeOwnedVariables(existing, with: incoming)
-        try replaceJSON(updated.jsonValue, at: directory.appendingPathComponent("collection.json"), operation: "save collection variables")
+        try replaceJSON(
+            updated.jsonValue, at: directory.appendingPathComponent("collection.json"),
+            operation: "save collection variables")
     }
 
     public func saveCollectionConfiguration(
@@ -226,8 +242,9 @@ public actor CollectionStore {
         let (directory, record) = try writableCollection(id: collectionID)
         let settings = try Self.collectionDefaultsJSONValue(defaults)
         guard case .object(let settingsObject) = settings,
-              let incomingHeaders = settingsObject["headers"],
-              let incomingAuthentication = settingsObject["authentication"] else {
+            let incomingHeaders = settingsObject["headers"],
+            let incomingAuthentication = settingsObject["authentication"]
+        else {
             throw CollectionStoreError.ioFailure(operation: "encode collection settings")
         }
 
@@ -235,9 +252,13 @@ public actor CollectionStore {
         let existingVariables = updated.object["variables"] ?? .object([:])
         let incomingVariables = try Self.variableJSONValue(variables)
         updated.object["variables"] = Self.mergeOwnedVariables(existingVariables, with: incomingVariables)
-        updated.object["headers"] = Self.mergeUnknownData(updated.object["headers"] ?? .array([]), with: incomingHeaders)
-        updated.object["authentication"] = Self.mergeAuthentication(updated.object["authentication"] ?? .object([:]), with: incomingAuthentication)
-        try replaceJSON(updated.jsonValue, at: directory.appendingPathComponent("collection.json"), operation: "save collection configuration")
+        updated.object["headers"] = Self.mergeUnknownData(
+            updated.object["headers"] ?? .array([]), with: incomingHeaders)
+        updated.object["authentication"] = Self.mergeAuthentication(
+            updated.object["authentication"] ?? .object([:]), with: incomingAuthentication)
+        try replaceJSON(
+            updated.jsonValue, at: directory.appendingPathComponent("collection.json"),
+            operation: "save collection configuration")
     }
 
     public func createCollection(name: String) throws -> RequestCollection {
@@ -248,7 +269,9 @@ public actor CollectionStore {
                 try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: false)
                 let record = CollectionRecord(name: name, entries: [])
                 do {
-                    try writeNewJSON(record.jsonValue, to: directoryURL.appendingPathComponent("collection.json"), operation: "create collection metadata")
+                    try writeNewJSON(
+                        record.jsonValue, to: directoryURL.appendingPathComponent("collection.json"),
+                        operation: "create collection metadata")
                 } catch {
                     do {
                         let remaining = try FileManager.default.contentsOfDirectory(atPath: directoryURL.path)
@@ -279,7 +302,9 @@ public actor CollectionStore {
         let (directory, record) = try writableCollection(id: id)
         var renamed = record
         renamed.name = name
-        try replaceJSON(renamed.jsonValue, at: directory.appendingPathComponent("collection.json"), operation: "rename the collection")
+        try replaceJSON(
+            renamed.jsonValue, at: directory.appendingPathComponent("collection.json"),
+            operation: "rename the collection")
     }
 
     public func deleteCollection(id: UUID) throws {
@@ -299,7 +324,8 @@ public actor CollectionStore {
 
         var stagedURL: URL?
         for _ in 0..<4 {
-            let candidate = deletionStagingURL.appendingPathComponent("\(id.uuidString.lowercased())-\(UUID().uuidString.lowercased())", isDirectory: true)
+            let candidate = deletionStagingURL.appendingPathComponent(
+                "\(id.uuidString.lowercased())-\(UUID().uuidString.lowercased())", isDirectory: true)
             if FileManager.default.fileExists(atPath: candidate.path) {
                 continue
             }
@@ -334,7 +360,8 @@ public actor CollectionStore {
             if Self.uuidValue(entry) == request.id { count += 1 }
         }
         guard membershipCount == 0 else {
-            throw membershipCount > 1 ? CollectionStoreError.requestIsAmbiguous : CollectionStoreError.requestAlreadyExists
+            throw membershipCount > 1
+                ? CollectionStoreError.requestIsAmbiguous : CollectionStoreError.requestAlreadyExists
         }
 
         let requestFiles = try requestFileURLs(in: directory)
@@ -353,9 +380,12 @@ public actor CollectionStore {
         var updated = record
         updated.entries.append(.string(Self.canonicalID(request.id)))
         do {
-            try replaceJSON(updated.jsonValue, at: directory.appendingPathComponent("collection.json"), operation: "update collection membership")
+            try replaceJSON(
+                updated.jsonValue, at: directory.appendingPathComponent("collection.json"),
+                operation: "update collection membership")
         } catch {
-            throw CollectionStoreError.partialFailure(operation: "create the request; it remains available for explicit recovery")
+            throw CollectionStoreError.partialFailure(
+                operation: "create the request; it remains available for explicit recovery")
         }
     }
 
@@ -365,7 +395,8 @@ public actor CollectionStore {
             if Self.uuidValue(entry) == request.id { count += 1 }
         }
         guard membershipCount == 1 else {
-            throw membershipCount > 1 ? CollectionStoreError.requestIsAmbiguous : CollectionStoreError.requestIsNotIndexed
+            throw membershipCount > 1
+                ? CollectionStoreError.requestIsAmbiguous : CollectionStoreError.requestIsNotIndexed
         }
 
         let requestFiles = try requestFileURLs(in: directory)
@@ -384,7 +415,8 @@ public actor CollectionStore {
         let (directory, record) = try writableCollection(id: collectionID)
         let matchingIndices = record.entries.indices.filter { Self.uuidValue(record.entries[$0]) == id }
         guard matchingIndices.count == 1, let matchingIndex = matchingIndices.first else {
-            throw matchingIndices.count > 1 ? CollectionStoreError.requestIsAmbiguous : CollectionStoreError.requestIsNotIndexed
+            throw matchingIndices.count > 1
+                ? CollectionStoreError.requestIsAmbiguous : CollectionStoreError.requestIsNotIndexed
         }
 
         let requestFiles = try requestFileURLs(in: directory)
@@ -395,7 +427,9 @@ public actor CollectionStore {
 
         var updated = record
         updated.entries.remove(at: matchingIndex)
-        try replaceJSON(updated.jsonValue, at: directory.appendingPathComponent("collection.json"), operation: "remove request membership")
+        try replaceJSON(
+            updated.jsonValue, at: directory.appendingPathComponent("collection.json"),
+            operation: "remove request membership")
 
         guard let requestURL = urls.first else { return }
         if Self.isDirectory(requestURL) && !Self.isSymbolicLink(requestURL) {
@@ -414,7 +448,8 @@ public actor CollectionStore {
             if Self.uuidValue(entry) == id { count += 1 }
         }
         guard membershipCount == 0 else {
-            throw membershipCount > 1 ? CollectionStoreError.requestIsAmbiguous : CollectionStoreError.requestAlreadyExists
+            throw membershipCount > 1
+                ? CollectionStoreError.requestIsAmbiguous : CollectionStoreError.requestAlreadyExists
         }
 
         let requestFiles = try requestFileURLs(in: directory)
@@ -426,7 +461,9 @@ public actor CollectionStore {
 
         var updated = record
         updated.entries.append(.string(Self.canonicalID(id)))
-        try replaceJSON(updated.jsonValue, at: directory.appendingPathComponent("collection.json"), operation: "recover the request")
+        try replaceJSON(
+            updated.jsonValue, at: directory.appendingPathComponent("collection.json"), operation: "recover the request"
+        )
     }
 
     public func reorderRequests(ids: [UUID], in collectionID: UUID) throws {
@@ -441,7 +478,9 @@ public actor CollectionStore {
         for (index, entry) in record.entries.enumerated() {
             guard let id = Self.uuidValue(entry), counts[id] == 1 else { continue }
             let urls = requestFiles[id, default: []]
-            guard urls.count == 1, let url = urls.first, (try? readRequest(at: url, identity: id)) != nil else { continue }
+            guard urls.count == 1, let url = urls.first, (try? readRequest(at: url, identity: id)) != nil else {
+                continue
+            }
             movableIndices.append(index)
             movableIDs.append(id)
         }
@@ -455,7 +494,8 @@ public actor CollectionStore {
         for (index, id) in zip(movableIndices, ids) {
             updated.entries[index] = .string(Self.canonicalID(id))
         }
-        try replaceJSON(updated.jsonValue, at: directory.appendingPathComponent("collection.json"), operation: "reorder requests")
+        try replaceJSON(
+            updated.jsonValue, at: directory.appendingPathComponent("collection.json"), operation: "reorder requests")
     }
 
     private static func initializeGlobalsIfMissing(at url: URL) throws {
@@ -464,7 +504,7 @@ public actor CollectionStore {
         let emptyGlobals = JSONValue.object([
             "formatVersion": .number(Decimal(currentFormatVersion)),
             "variables": .object([:]),
-            "httpOptions": options
+            "httpOptions": options,
         ])
         do {
             let data = try JSONEncoder.postieEncoder.encode(emptyGlobals)
@@ -482,16 +522,21 @@ public actor CollectionStore {
         optionsAreReadOnly: Bool
     ) {
         guard Self.isRegularFile(globalsURL), let data = try? Data(contentsOf: globalsURL) else {
-            issues.append(makeIssue(.missingGlobals, message: "The globals document is missing or unreadable and was preserved."))
+            issues.append(
+                makeIssue(.missingGlobals, message: "The globals document is missing or unreadable and was preserved."))
             return ([:], true, HTTPOptions(), true)
         }
         guard case .object(let object) = try? JSONDecoder().decode(JSONValue.self, from: data),
-              case .number(let version)? = object["formatVersion"] else {
+            case .number(let version)? = object["formatVersion"]
+        else {
             issues.append(makeIssue(.malformedGlobals, message: "The globals document is malformed and was preserved."))
             return ([:], true, HTTPOptions(), true)
         }
         guard version == Decimal(Self.currentFormatVersion) else {
-            issues.append(makeIssue(.unsupportedGlobalsVersion, message: "The globals document uses an unsupported format and was preserved."))
+            issues.append(
+                makeIssue(
+                    .unsupportedGlobalsVersion,
+                    message: "The globals document uses an unsupported format and was preserved."))
             return ([:], true, HTTPOptions(), true)
         }
 
@@ -515,11 +560,12 @@ public actor CollectionStore {
             do {
                 options = try Self.decodeHTTPOptions(rawOptions)
             } catch {
-                issues.append(makeIssue(
-                    .malformedGlobals,
-                    detail: "httpOptions",
-                    message: "The global HTTP settings are malformed and were preserved."
-                ))
+                issues.append(
+                    makeIssue(
+                        .malformedGlobals,
+                        detail: "httpOptions",
+                        message: "The global HTTP settings are malformed and were preserved."
+                    ))
                 options = HTTPOptions()
                 optionsAreReadOnly = true
             }
@@ -531,14 +577,16 @@ public actor CollectionStore {
     }
 
     private func writableGlobalsObject() throws -> [String: JSONValue] {
-        let unavailable = CollectionStoreError.ioFailure(operation: "save global variables because the globals document is unavailable or unsupported")
+        let unavailable = CollectionStoreError.ioFailure(
+            operation: "save global variables because the globals document is unavailable or unsupported")
         guard Self.isRegularFile(globalsURL), let data = try? Data(contentsOf: globalsURL) else {
             throw unavailable
         }
         guard case .object(let object) = try? JSONDecoder().decode(JSONValue.self, from: data),
-              case .number(let version)? = object["formatVersion"],
-              version == Decimal(Self.currentFormatVersion),
-              let rawVariables = object["variables"] else {
+            case .number(let version)? = object["formatVersion"],
+            version == Decimal(Self.currentFormatVersion),
+            let rawVariables = object["variables"]
+        else {
             throw unavailable
         }
         do {
@@ -552,7 +600,10 @@ public actor CollectionStore {
     private func loadCollection(id: UUID, at directory: URL, issues: inout [StorageIssue]) -> RequestCollection {
         let metadataURL = directory.appendingPathComponent("collection.json", isDirectory: false)
         guard Self.isRegularFile(metadataURL), let data = try? Data(contentsOf: metadataURL) else {
-            issues.append(makeIssue(.missingCollectionMetadata, collectionID: id, message: "Collection metadata is missing or unreadable; the collection files were preserved."))
+            issues.append(
+                makeIssue(
+                    .missingCollectionMetadata, collectionID: id,
+                    message: "Collection metadata is missing or unreadable; the collection files were preserved."))
             return RequestCollection(id: id, name: "Unavailable collection", isReadOnly: true)
         }
 
@@ -560,13 +611,20 @@ public actor CollectionStore {
         do {
             raw = try JSONDecoder().decode(JSONValue.self, from: data)
         } catch {
-            issues.append(makeIssue(.malformedCollectionMetadata, collectionID: id, message: "Collection metadata is malformed; the collection files were preserved."))
+            issues.append(
+                makeIssue(
+                    .malformedCollectionMetadata, collectionID: id,
+                    message: "Collection metadata is malformed; the collection files were preserved."))
             return RequestCollection(id: id, name: "Unavailable collection", isReadOnly: true)
         }
 
         guard case .object(let object) = raw,
-              case .number(let version)? = object["formatVersion"] else {
-            issues.append(makeIssue(.malformedCollectionMetadata, collectionID: id, message: "Collection metadata is malformed; the collection files were preserved."))
+            case .number(let version)? = object["formatVersion"]
+        else {
+            issues.append(
+                makeIssue(
+                    .malformedCollectionMetadata, collectionID: id,
+                    message: "Collection metadata is malformed; the collection files were preserved."))
             return RequestCollection(id: id, name: "Unavailable collection", isReadOnly: true)
         }
 
@@ -578,12 +636,19 @@ public actor CollectionStore {
         }
 
         guard version == Decimal(Self.currentFormatVersion) else {
-            issues.append(makeIssue(.unsupportedCollectionVersion, collectionID: id, message: "This collection uses an unsupported format and is read-only."))
+            issues.append(
+                makeIssue(
+                    .unsupportedCollectionVersion, collectionID: id,
+                    message: "This collection uses an unsupported format and is read-only."))
             return RequestCollection(id: id, name: displayName, isReadOnly: true)
         }
         guard object["id"] == nil,
-              case .array(let entries)? = object["requests"], case .string? = object["name"] else {
-            issues.append(makeIssue(.malformedCollectionMetadata, collectionID: id, message: "Collection metadata is malformed; the collection files were preserved."))
+            case .array(let entries)? = object["requests"], case .string? = object["name"]
+        else {
+            issues.append(
+                makeIssue(
+                    .malformedCollectionMetadata, collectionID: id,
+                    message: "Collection metadata is malformed; the collection files were preserved."))
             return RequestCollection(id: id, name: "Unavailable collection", isReadOnly: true)
         }
 
@@ -593,7 +658,12 @@ public actor CollectionStore {
             do {
                 variables = try Self.decodeVariables(rawVariables)
             } catch {
-                issues.append(makeIssue(.malformedCollectionVariables, collectionID: id, message: "Collection variables are malformed; the collection was loaded read-only and its files were preserved."))
+                issues.append(
+                    makeIssue(
+                        .malformedCollectionVariables, collectionID: id,
+                        message:
+                            "Collection variables are malformed; the collection was loaded read-only and its files were preserved."
+                    ))
                 variables = [:]
                 collectionIsReadOnly = true
             }
@@ -605,7 +675,12 @@ public actor CollectionStore {
         do {
             defaults = try Self.decodeCollectionDefaults(from: object)
         } catch {
-            issues.append(makeIssue(.malformedCollectionSettings, collectionID: id, message: "Collection headers or authentication are malformed; the collection was loaded read-only and its files were preserved."))
+            issues.append(
+                makeIssue(
+                    .malformedCollectionSettings, collectionID: id,
+                    message:
+                        "Collection headers or authentication are malformed; the collection was loaded read-only and its files were preserved."
+                ))
             defaults = .init()
             collectionIsReadOnly = true
         }
@@ -615,7 +690,10 @@ public actor CollectionStore {
         do {
             requestFiles = try requestFileURLs(in: directory)
         } catch {
-            issues.append(makeIssue(.unreadableCollectionContents, collectionID: id, message: "Collection contents could not be listed; the files were preserved."))
+            issues.append(
+                makeIssue(
+                    .unreadableCollectionContents, collectionID: id,
+                    message: "Collection contents could not be listed; the files were preserved."))
             return RequestCollection(id: id, name: displayName, isReadOnly: true)
         }
 
@@ -628,24 +706,41 @@ public actor CollectionStore {
         var requests: [HTTPRequestConfiguration] = []
         for (index, entry) in record.entries.enumerated() {
             guard let rawID = entry.stringValue else {
-                issues.append(makeIssue(.malformedIndexEntry, collectionID: id, detail: String(index), message: "A malformed request index entry was preserved."))
+                issues.append(
+                    makeIssue(
+                        .malformedIndexEntry, collectionID: id, detail: String(index),
+                        message: "A malformed request index entry was preserved."))
                 continue
             }
             guard let requestID = UUID(uuidString: rawID) else {
-                issues.append(makeIssue(.invalidIndexIdentity, collectionID: id, detail: "\(index)-\(rawID)", message: "A request index entry has an invalid identity and was preserved."))
+                issues.append(
+                    makeIssue(
+                        .invalidIndexIdentity, collectionID: id, detail: "\(index)-\(rawID)",
+                        message: "A request index entry has an invalid identity and was preserved."))
                 continue
             }
             if indexCounts[requestID, default: 0] > 1 {
-                issues.append(makeIssue(.duplicateIndexIdentity, collectionID: id, requestID: requestID, message: "A request appears more than once in the collection index; all index entries were preserved."))
+                issues.append(
+                    makeIssue(
+                        .duplicateIndexIdentity, collectionID: id, requestID: requestID,
+                        message:
+                            "A request appears more than once in the collection index; all index entries were preserved."
+                    ))
             }
             guard loadedIDs.insert(requestID).inserted else { continue }
 
             let urls = requestFiles[requestID, default: []]
             guard urls.count == 1, let url = urls.first else {
                 if urls.isEmpty {
-                    issues.append(makeIssue(.indexedRequestMissing, collectionID: id, requestID: requestID, message: "An indexed request file is missing; its index entry was preserved."))
+                    issues.append(
+                        makeIssue(
+                            .indexedRequestMissing, collectionID: id, requestID: requestID,
+                            message: "An indexed request file is missing; its index entry was preserved."))
                 } else {
-                    issues.append(makeIssue(.duplicateRequestFile, collectionID: id, requestID: requestID, message: "More than one request file has this identity; all files were preserved."))
+                    issues.append(
+                        makeIssue(
+                            .duplicateRequestFile, collectionID: id, requestID: requestID,
+                            message: "More than one request file has this identity; all files were preserved."))
                 }
                 continue
             }
@@ -654,16 +749,27 @@ public actor CollectionStore {
             case .success(let request):
                 requests.append(request)
             case .failure(.unsupported):
-                issues.append(makeIssue(.unsupportedRequestVersion, collectionID: id, requestID: requestID, message: "The request uses an unsupported format and was preserved."))
+                issues.append(
+                    makeIssue(
+                        .unsupportedRequestVersion, collectionID: id, requestID: requestID,
+                        message: "The request uses an unsupported format and was preserved."))
             case .failure(.malformed):
-                issues.append(makeIssue(.malformedRequest, collectionID: id, requestID: requestID, message: "The request is malformed and was preserved."))
+                issues.append(
+                    makeIssue(
+                        .malformedRequest, collectionID: id, requestID: requestID,
+                        message: "The request is malformed and was preserved."))
             case .failure(.unreadable):
-                issues.append(makeIssue(.unreadableRequest, collectionID: id, requestID: requestID, message: "The request could not be read and was preserved."))
+                issues.append(
+                    makeIssue(
+                        .unreadableRequest, collectionID: id, requestID: requestID,
+                        message: "The request could not be read and was preserved."))
             }
         }
 
         appendUnknownEntryIssues(in: directory, collectionID: id, requestFiles: requestFiles, issues: &issues)
-        appendOrphanIssues(in: directory, collectionID: id, requestFiles: requestFiles, indexedIDs: Set(indexCounts.keys), issues: &issues)
+        appendOrphanIssues(
+            in: directory, collectionID: id, requestFiles: requestFiles, indexedIDs: Set(indexCounts.keys),
+            issues: &issues)
         return RequestCollection(
             id: id,
             name: record.name,
@@ -675,32 +781,62 @@ public actor CollectionStore {
         )
     }
 
-    private func appendUnknownEntryIssues(in directory: URL, collectionID: UUID, requestFiles: [UUID: [URL]], issues: inout [StorageIssue]) {
+    private func appendUnknownEntryIssues(
+        in directory: URL, collectionID: UUID, requestFiles: [UUID: [URL]], issues: inout [StorageIssue]
+    ) {
         let knownPaths = Set(requestFiles.values.flatMap { $0.map(\.standardizedFileURL.path) })
-        guard let entries = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.isDirectoryKey], options: []) else { return }
-        for url in entries where url.lastPathComponent != "collection.json" && !knownPaths.contains(url.standardizedFileURL.path) {
-            issues.append(makeIssue(.unknownCollectionData, collectionID: collectionID, detail: url.lastPathComponent, message: "Unrecognised collection data was preserved."))
+        guard
+            let entries = try? FileManager.default.contentsOfDirectory(
+                at: directory, includingPropertiesForKeys: [.isDirectoryKey], options: [])
+        else { return }
+        for url in entries
+        where url.lastPathComponent != "collection.json" && !knownPaths.contains(url.standardizedFileURL.path) {
+            issues.append(
+                makeIssue(
+                    .unknownCollectionData, collectionID: collectionID, detail: url.lastPathComponent,
+                    message: "Unrecognised collection data was preserved."))
         }
     }
 
-    private func appendOrphanIssues(in directory: URL, collectionID: UUID, requestFiles: [UUID: [URL]], indexedIDs: Set<UUID>, issues: inout [StorageIssue]) {
-        for requestID in requestFiles.keys.sorted(by: { $0.uuidString < $1.uuidString }) where !indexedIDs.contains(requestID) {
+    private func appendOrphanIssues(
+        in directory: URL, collectionID: UUID, requestFiles: [UUID: [URL]], indexedIDs: Set<UUID>,
+        issues: inout [StorageIssue]
+    ) {
+        for requestID in requestFiles.keys.sorted(by: { $0.uuidString < $1.uuidString })
+        where !indexedIDs.contains(requestID) {
             let urls = requestFiles[requestID, default: []]
             guard urls.count == 1, let url = urls.first else {
                 if urls.count > 1 {
-                    issues.append(makeIssue(.duplicateRequestFile, collectionID: collectionID, requestID: requestID, message: "More than one unindexed request file has this identity; all files were preserved."))
+                    issues.append(
+                        makeIssue(
+                            .duplicateRequestFile, collectionID: collectionID, requestID: requestID,
+                            message: "More than one unindexed request file has this identity; all files were preserved."
+                        ))
                 }
                 continue
             }
             switch readRequestForLoad(at: url, identity: requestID) {
             case .success:
-                issues.append(makeIssue(.orphanRequest, collectionID: collectionID, requestID: requestID, message: "A valid unindexed request can be added to this collection through explicit recovery.", canRecover: true))
+                issues.append(
+                    makeIssue(
+                        .orphanRequest, collectionID: collectionID, requestID: requestID,
+                        message: "A valid unindexed request can be added to this collection through explicit recovery.",
+                        canRecover: true))
             case .failure(.unsupported):
-                issues.append(makeIssue(.unsupportedRequestVersion, collectionID: collectionID, requestID: requestID, message: "An unindexed request uses an unsupported format and was preserved."))
+                issues.append(
+                    makeIssue(
+                        .unsupportedRequestVersion, collectionID: collectionID, requestID: requestID,
+                        message: "An unindexed request uses an unsupported format and was preserved."))
             case .failure(.malformed):
-                issues.append(makeIssue(.malformedOrphanRequest, collectionID: collectionID, requestID: requestID, message: "An unindexed request is malformed and was preserved."))
+                issues.append(
+                    makeIssue(
+                        .malformedOrphanRequest, collectionID: collectionID, requestID: requestID,
+                        message: "An unindexed request is malformed and was preserved."))
             case .failure(.unreadable):
-                issues.append(makeIssue(.unreadableOrphanRequest, collectionID: collectionID, requestID: requestID, message: "An unindexed request could not be read and was preserved."))
+                issues.append(
+                    makeIssue(
+                        .unreadableOrphanRequest, collectionID: collectionID, requestID: requestID,
+                        message: "An unindexed request could not be read and was preserved."))
             }
         }
     }
@@ -708,18 +844,30 @@ public actor CollectionStore {
     private func appendStagedDeletionIssues(to issues: inout [StorageIssue]) {
         guard Self.fileMode(at: deletionStagingURL) != nil else { return }
         guard Self.isDirectory(deletionStagingURL) else {
-            issues.append(makeIssue(.unreadableDeletionStaging, message: "Staged collection data could not be listed and was preserved."))
+            issues.append(
+                makeIssue(
+                    .unreadableDeletionStaging, message: "Staged collection data could not be listed and was preserved."
+                ))
             return
         }
-        guard let entries = try? FileManager.default.contentsOfDirectory(at: deletionStagingURL, includingPropertiesForKeys: [.isDirectoryKey], options: []) else {
-            issues.append(makeIssue(.unreadableDeletionStaging, message: "Staged collection data could not be listed and was preserved."))
+        guard
+            let entries = try? FileManager.default.contentsOfDirectory(
+                at: deletionStagingURL, includingPropertiesForKeys: [.isDirectoryKey], options: [])
+        else {
+            issues.append(
+                makeIssue(
+                    .unreadableDeletionStaging, message: "Staged collection data could not be listed and was preserved."
+                ))
             return
         }
         for url in entries {
             let name = url.lastPathComponent
             let prefix = String(name.prefix(36))
             let collectionID = UUID(uuidString: prefix)
-            issues.append(makeIssue(.stagedCollectionDeletion, collectionID: collectionID, detail: name, message: "A collection deletion is incomplete; staged data was preserved."))
+            issues.append(
+                makeIssue(
+                    .stagedCollectionDeletion, collectionID: collectionID, detail: name,
+                    message: "A collection deletion is incomplete; staged data was preserved."))
         }
     }
 
@@ -731,7 +879,9 @@ public actor CollectionStore {
             throw CollectionStoreError.ioFailure(operation: "find the collection")
         }
         guard !directories.isEmpty else { throw CollectionStoreError.collectionNotFound }
-        guard directories.count == 1, let directory = directories.first else { throw CollectionStoreError.collectionIsAmbiguous }
+        guard directories.count == 1, let directory = directories.first else {
+            throw CollectionStoreError.collectionIsAmbiguous
+        }
 
         let metadataURL = directory.appendingPathComponent("collection.json", isDirectory: false)
         let data: Data
@@ -753,7 +903,8 @@ public actor CollectionStore {
     }
 
     private func collectionDirectories(matching id: UUID) throws -> [URL] {
-        let entries = try FileManager.default.contentsOfDirectory(at: collectionsURL, includingPropertiesForKeys: [.isDirectoryKey], options: [])
+        let entries = try FileManager.default.contentsOfDirectory(
+            at: collectionsURL, includingPropertiesForKeys: [.isDirectoryKey], options: [])
         return entries.filter { Self.isDirectory($0) && UUID(uuidString: $0.lastPathComponent) == id }
     }
 
@@ -762,9 +913,11 @@ public actor CollectionStore {
     }
 
     private func requestFileURLs(in directory: URL) throws -> [UUID: [URL]] {
-        let entries = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.isDirectoryKey], options: [])
+        let entries = try FileManager.default.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: [.isDirectoryKey], options: [])
         var result: [UUID: [URL]] = [:]
-        for url in entries where url.lastPathComponent != "collection.json" && url.pathExtension.lowercased() == "json" {
+        for url in entries where url.lastPathComponent != "collection.json" && url.pathExtension.lowercased() == "json"
+        {
             let stem = url.deletingPathExtension().lastPathComponent
             guard let id = UUID(uuidString: stem) else { continue }
             result[id, default: []].append(url)
@@ -794,7 +947,8 @@ public actor CollectionStore {
         }
     }
 
-    private func readRequestForLoad(at url: URL, identity: UUID) -> Result<HTTPRequestConfiguration, RequestLoadFailure> {
+    private func readRequestForLoad(at url: URL, identity: UUID) -> Result<HTTPRequestConfiguration, RequestLoadFailure>
+    {
         let data: Data
         guard Self.isRegularFile(url) else {
             return .failure(.unreadable)
@@ -822,7 +976,8 @@ public actor CollectionStore {
         let payload = StoredRequest(configuration: request)
         let data = try JSONEncoder.postieEncoder.encode(payload)
         guard case .object(var requestObject) = try JSONDecoder().decode(JSONValue.self, from: data),
-              case .object(var options)? = requestObject["options"] else {
+            case .object(var options)? = requestObject["options"]
+        else {
             throw CollectionStoreError.requestDocumentIsMalformed
         }
         if request.options.overallTimeout == nil {
@@ -840,7 +995,8 @@ public actor CollectionStore {
 
     private static func decodeVariables(_ value: JSONValue) throws -> VariableValues {
         guard case .object = value else {
-            throw DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "Variable values must be a JSON object."))
+            throw DecodingError.dataCorrupted(
+                .init(codingPath: [], debugDescription: "Variable values must be a JSON object."))
         }
         let data = try JSONEncoder.postieEncoder.encode(value)
         return try JSONDecoder().decode(VariableValues.self, from: data)
@@ -875,15 +1031,18 @@ public actor CollectionStore {
 
     private static func decodeHTTPOptions(_ value: JSONValue) throws -> HTTPOptions {
         guard case .object(let object) = value,
-              object["followRedirects"] != nil,
-              object["inactivityTimeout"] != nil,
-              object["overallTimeout"] != nil,
-              object["maximumResponseBytes"] != nil else {
-            throw DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "Global HTTP settings are incomplete."))
+            object["followRedirects"] != nil,
+            object["inactivityTimeout"] != nil,
+            object["overallTimeout"] != nil,
+            object["maximumResponseBytes"] != nil
+        else {
+            throw DecodingError.dataCorrupted(
+                .init(codingPath: [], debugDescription: "Global HTTP settings are incomplete."))
         }
         let options = try decodeJSON(value, as: HTTPOptions.self)
         guard valid(options) else {
-            throw DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "Global HTTP settings are outside their valid range."))
+            throw DecodingError.dataCorrupted(
+                .init(codingPath: [], debugDescription: "Global HTTP settings are outside their valid range."))
         }
         return options
     }
@@ -901,7 +1060,8 @@ public actor CollectionStore {
 
     private static func decodeCollectionDefaults(from object: [String: JSONValue]) throws -> CollectionRequestDefaults {
         let headers = try object["headers"].map { try decodeJSON($0, as: [HTTPField].self) } ?? []
-        let authentication = try object["authentication"].map { try decodeJSON($0, as: RequestAuthentication.self) } ?? .init()
+        let authentication =
+            try object["authentication"].map { try decodeJSON($0, as: RequestAuthentication.self) } ?? .init()
         return CollectionRequestDefaults(headers: headers, authentication: authentication)
     }
 
@@ -986,11 +1146,11 @@ public actor CollectionStore {
     private static func fileMode(at url: URL) -> mode_t? {
         var info = stat()
         let result = url.path.withCString { path in
-#if canImport(Darwin)
-            Darwin.lstat(path, &info)
-#else
-            Glibc.lstat(path, &info)
-#endif
+            #if canImport(Darwin)
+                Darwin.lstat(path, &info)
+            #else
+                Glibc.lstat(path, &info)
+            #endif
         }
         guard result == 0 else { return nil }
         return info.st_mode
@@ -1028,7 +1188,8 @@ public actor CollectionStore {
 
     private static func mergeRequestData(_ old: JSONValue, with incoming: JSONValue) -> JSONValue {
         guard case .object(let oldObject) = old,
-              case .object(let newObject) = incoming else {
+            case .object(let newObject) = incoming
+        else {
             return incoming
         }
 
@@ -1055,7 +1216,8 @@ public actor CollectionStore {
 
     private static func mergeOwnedVariables(_ old: JSONValue, with incoming: JSONValue) -> JSONValue {
         guard case .object(let oldValues) = old,
-              case .object(let newValues) = incoming else {
+            case .object(let newValues) = incoming
+        else {
             return incoming
         }
 
@@ -1072,7 +1234,8 @@ public actor CollectionStore {
 
     private static func mergeAuthentication(_ old: JSONValue, with incoming: JSONValue) -> JSONValue {
         guard case .object(let oldObject) = old,
-              case .object(let newObject) = incoming else {
+            case .object(let newObject) = incoming
+        else {
             return incoming
         }
 
@@ -1106,38 +1269,38 @@ public actor CollectionStore {
 
     private static func openLock(at url: URL) -> Int32 {
         url.path.withCString { path in
-#if canImport(Darwin)
-            Darwin.open(path, O_CREAT | O_RDWR | O_CLOEXEC, S_IRUSR | S_IWUSR)
-#else
-            Glibc.open(path, O_CREAT | O_RDWR | O_CLOEXEC, S_IRUSR | S_IWUSR)
-#endif
+            #if canImport(Darwin)
+                Darwin.open(path, O_CREAT | O_RDWR | O_CLOEXEC, S_IRUSR | S_IWUSR)
+            #else
+                Glibc.open(path, O_CREAT | O_RDWR | O_CLOEXEC, S_IRUSR | S_IWUSR)
+            #endif
         }
     }
 
     private static func lockExclusively(_ descriptor: Int32) -> Int32 {
-#if canImport(Darwin)
-        var lock = Darwin.flock()
-        lock.l_type = Int16(F_WRLCK)
-        lock.l_whence = Int16(SEEK_SET)
-        lock.l_start = 0
-        lock.l_len = 0
-        return Darwin.fcntl(descriptor, F_SETLK, &lock)
-#else
-        var lock = Glibc.flock()
-        lock.l_type = Int16(F_WRLCK)
-        lock.l_whence = Int16(SEEK_SET)
-        lock.l_start = 0
-        lock.l_len = 0
-        return Glibc.fcntl(descriptor, F_SETLK, &lock)
-#endif
+        #if canImport(Darwin)
+            var lock = Darwin.flock()
+            lock.l_type = Int16(F_WRLCK)
+            lock.l_whence = Int16(SEEK_SET)
+            lock.l_start = 0
+            lock.l_len = 0
+            return Darwin.fcntl(descriptor, F_SETLK, &lock)
+        #else
+            var lock = Glibc.flock()
+            lock.l_type = Int16(F_WRLCK)
+            lock.l_whence = Int16(SEEK_SET)
+            lock.l_start = 0
+            lock.l_len = 0
+            return Glibc.fcntl(descriptor, F_SETLK, &lock)
+        #endif
     }
 
     private static func closeDescriptor(_ descriptor: Int32) -> Int32 {
-#if canImport(Darwin)
-        Darwin.close(descriptor)
-#else
-        Glibc.close(descriptor)
-#endif
+        #if canImport(Darwin)
+            Darwin.close(descriptor)
+        #else
+            Glibc.close(descriptor)
+        #endif
     }
 
     private enum IssueKind: String {
@@ -1179,7 +1342,7 @@ public actor CollectionStore {
                 "formatVersion": .number(Decimal(CollectionStore.currentFormatVersion)),
                 "name": .string(name),
                 "variables": .object([:]),
-                "requests": .array(entries)
+                "requests": .array(entries),
             ]
             self.name = name
             self.entries = entries
@@ -1207,14 +1370,16 @@ public actor CollectionStore {
                 throw DocumentFailure.malformed
             }
             guard case .object(let object) = value,
-                  case .number(let version)? = object["formatVersion"] else {
+                case .number(let version)? = object["formatVersion"]
+            else {
                 throw DocumentFailure.malformed
             }
             guard version == Decimal(CollectionStore.currentFormatVersion) else {
                 throw DocumentFailure.unsupported
             }
             guard object["id"] == nil,
-                  case .string(let name)? = object["name"], case .array(let entries)? = object["requests"] else {
+                case .string(let name)? = object["name"], case .array(let entries)? = object["requests"]
+            else {
                 throw DocumentFailure.malformed
             }
             if let variables = object["variables"] {
@@ -1302,7 +1467,8 @@ public actor CollectionStore {
                 throw RequestDocumentFailure.malformed
             }
             guard case .object(let object) = raw,
-                  case .number(let version)? = object["formatVersion"] else {
+                case .number(let version)? = object["formatVersion"]
+            else {
                 throw RequestDocumentFailure.malformed
             }
             guard version == Decimal(CollectionStore.currentFormatVersion) else {
@@ -1451,7 +1617,8 @@ private enum AtomicFileWriter {
     private static func write(_ data: Data, to destination: URL, replacing: Bool) throws {
         let temporary = destination.deletingLastPathComponent()
             .appendingPathComponent(".\(destination.lastPathComponent).tmp-\(UUID().uuidString.lowercased())")
-        let descriptor = openPath(temporary.path, flags: O_CREAT | O_EXCL | O_WRONLY | O_CLOEXEC, mode: S_IRUSR | S_IWUSR)
+        let descriptor = openPath(
+            temporary.path, flags: O_CREAT | O_EXCL | O_WRONLY | O_CLOEXEC, mode: S_IRUSR | S_IWUSR)
         guard descriptor >= 0 else { throw FileWriteFailure(operation: "create temporary file") }
         var isOpen = true
         defer {
@@ -1482,7 +1649,8 @@ private enum AtomicFileWriter {
         }
         isOpen = false
 
-        let result = replacing
+        let result =
+            replacing
             ? renamePath(temporary.path, destination.path)
             : linkPath(temporary.path, destination.path)
         guard result == 0 else {
@@ -1491,55 +1659,55 @@ private enum AtomicFileWriter {
     }
 
     private static var currentErrno: Int32 {
-#if canImport(Darwin)
-        Darwin.errno
-#else
-        Glibc.errno
-#endif
+        #if canImport(Darwin)
+            Darwin.errno
+        #else
+            Glibc.errno
+        #endif
     }
 
     private static func openPath(_ path: String, flags: Int32, mode: mode_t) -> Int32 {
         path.withCString { pointer in
-#if canImport(Darwin)
-            Darwin.open(pointer, flags, mode)
-#else
-            Glibc.open(pointer, flags, mode)
-#endif
+            #if canImport(Darwin)
+                Darwin.open(pointer, flags, mode)
+            #else
+                Glibc.open(pointer, flags, mode)
+            #endif
         }
     }
 
     private static func writeDescriptor(_ descriptor: Int32, _ buffer: UnsafeRawPointer, _ count: Int) -> Int {
-#if canImport(Darwin)
-        Darwin.write(descriptor, buffer, count)
-#else
-        Glibc.write(descriptor, buffer, count)
-#endif
+        #if canImport(Darwin)
+            Darwin.write(descriptor, buffer, count)
+        #else
+            Glibc.write(descriptor, buffer, count)
+        #endif
     }
 
     private static func syncDescriptor(_ descriptor: Int32) -> Int32 {
-#if canImport(Darwin)
-        Darwin.fsync(descriptor)
-#else
-        Glibc.fsync(descriptor)
-#endif
+        #if canImport(Darwin)
+            Darwin.fsync(descriptor)
+        #else
+            Glibc.fsync(descriptor)
+        #endif
     }
 
     private static func closeDescriptor(_ descriptor: Int32) -> Int32 {
-#if canImport(Darwin)
-        Darwin.close(descriptor)
-#else
-        Glibc.close(descriptor)
-#endif
+        #if canImport(Darwin)
+            Darwin.close(descriptor)
+        #else
+            Glibc.close(descriptor)
+        #endif
     }
 
     private static func renamePath(_ source: String, _ destination: String) -> Int32 {
         source.withCString { sourcePath in
             destination.withCString { destinationPath in
-#if canImport(Darwin)
-                Darwin.rename(sourcePath, destinationPath)
-#else
-                Glibc.rename(sourcePath, destinationPath)
-#endif
+                #if canImport(Darwin)
+                    Darwin.rename(sourcePath, destinationPath)
+                #else
+                    Glibc.rename(sourcePath, destinationPath)
+                #endif
             }
         }
     }
@@ -1547,22 +1715,22 @@ private enum AtomicFileWriter {
     private static func linkPath(_ source: String, _ destination: String) -> Int32 {
         source.withCString { sourcePath in
             destination.withCString { destinationPath in
-#if canImport(Darwin)
-                Darwin.link(sourcePath, destinationPath)
-#else
-                Glibc.link(sourcePath, destinationPath)
-#endif
+                #if canImport(Darwin)
+                    Darwin.link(sourcePath, destinationPath)
+                #else
+                    Glibc.link(sourcePath, destinationPath)
+                #endif
             }
         }
     }
 
     private static func unlinkPath(_ path: String) -> Int32 {
         path.withCString { pointer in
-#if canImport(Darwin)
-            Darwin.unlink(pointer)
-#else
-            Glibc.unlink(pointer)
-#endif
+            #if canImport(Darwin)
+                Darwin.unlink(pointer)
+            #else
+                Glibc.unlink(pointer)
+            #endif
         }
     }
 }

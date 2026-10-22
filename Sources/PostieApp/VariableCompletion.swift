@@ -94,13 +94,15 @@ enum VariableCompletionMatcher {
             let identifierStart = cursor + 2
             var identifierEnd = identifierStart
             while identifierEnd < scanEnd,
-                  isIdentifierContinuation(source.character(at: identifierEnd)) {
+                isIdentifierContinuation(source.character(at: identifierEnd))
+            {
                 identifierEnd += 1
             }
 
             if identifierEnd == scanEnd,
-               scanEnd < source.length,
-               isIdentifierContinuation(source.character(at: scanEnd)) {
+                scanEnd < source.length,
+                isIdentifierContinuation(source.character(at: scanEnd))
+            {
                 return nil
             }
 
@@ -131,9 +133,7 @@ enum VariableCompletionMatcher {
     }
 
     private static func isInsertionPoint(_ selection: NSRange, in source: NSString) -> Bool {
-        selection.length == 0 &&
-            selection.location >= 0 &&
-            selection.location <= source.length
+        selection.length == 0 && selection.location >= 0 && selection.location <= source.length
     }
 
     static func suggestions(
@@ -144,8 +144,9 @@ enum VariableCompletionMatcher {
         var matches: [VariableCompletion] = []
         for variable in variables.prefix(maximumCandidatesInspected) {
             guard TemplateEngine.isValidVariableName(variable.name),
-                  variable.name.hasPrefix(context.prefix),
-                  seenNames.insert(variable.name).inserted else {
+                variable.name.hasPrefix(context.prefix),
+                seenNames.insert(variable.name).inserted
+            else {
                 continue
             }
 
@@ -173,21 +174,16 @@ enum VariableCompletionMatcher {
     }
 
     private static func isEscapedOpeningDelimiter(in source: NSString, at index: Int) -> Bool {
-        index + 2 < source.length &&
-            source.character(at: index) == 0x5C &&
-            isOpeningDelimiter(in: source, at: index + 1)
+        index + 2 < source.length && source.character(at: index) == 0x5C
+            && isOpeningDelimiter(in: source, at: index + 1)
     }
 
     private static func isOpeningDelimiter(in source: NSString, at index: Int) -> Bool {
-        index + 1 < source.length &&
-            source.character(at: index) == 0x7B &&
-            source.character(at: index + 1) == 0x7B
+        index + 1 < source.length && source.character(at: index) == 0x7B && source.character(at: index + 1) == 0x7B
     }
 
     private static func isIdentifierContinuation(_ character: unichar) -> Bool {
-        (0x41...0x5A).contains(character) ||
-            (0x61...0x7A).contains(character) ||
-            (0x30...0x39).contains(character) ||
-            character == 0x5F
+        (0x41...0x5A).contains(character) || (0x61...0x7A).contains(character) || (0x30...0x39).contains(character)
+            || character == 0x5F
     }
 }

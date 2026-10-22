@@ -17,23 +17,27 @@ final class HTTPIntegrationTests: XCTestCase {
             query: [
                 HTTPField(name: "tag", value: "first value"),
                 HTTPField(name: "disabled", value: "ignored", isEnabled: false),
-                HTTPField(name: "tag", value: "second")
+                HTTPField(name: "tag", value: "second"),
             ],
             headers: [HTTPField(name: "X-Integration", value: "get")]
         )
-        let getEvents = await collect(try await manager.start(
-            identity: RequestIdentity(collectionID: UUID(), requestID: get.id),
-            configuration: get
-        ))
+        let getEvents = await collect(
+            try await manager.start(
+                identity: RequestIdentity(collectionID: UUID(), requestID: get.id),
+                configuration: get
+            ))
         let getResponse = try completedResponse(in: getEvents)
         XCTAssertEqual(getResponse.effectiveMethod, "GET")
         XCTAssertEqual(getResponse.requestHeaderSources["x-integration"], .request)
         let getPayload = try responseJSON(getResponse)
         let rawQuery = try XCTUnwrap(getPayload["query"] as? String)
-        let returnedURL = try XCTUnwrap(URLComponents(string: fixture.baseURL + (getPayload["path"] as? String ?? "") + "?" + rawQuery))
+        let returnedURL = try XCTUnwrap(
+            URLComponents(string: fixture.baseURL + (getPayload["path"] as? String ?? "") + "?" + rawQuery))
         XCTAssertEqual(returnedURL.queryItems?.map(\.name), ["token", "x", "tag", "tag"])
         XCTAssertEqual(returnedURL.queryItems?.map(\.value), ["a+b/c", "1", "first value", "second"])
-        XCTAssertTrue(rawQuery.hasPrefix("token=a%2Bb%2Fc&x=1&"), "Existing percent-encoded query bytes must be preserved when fields are appended.")
+        XCTAssertTrue(
+            rawQuery.hasPrefix("token=a%2Bb%2Fc&x=1&"),
+            "Existing percent-encoded query bytes must be preserved when fields are appended.")
         XCTAssertEqual(try XCTUnwrap(requestHeader("X-Integration", in: getPayload)), "get")
         XCTAssertEqual(getPayload["method"] as? String, "GET")
         XCTAssertEqual(getPayload["body"] as? String, "")
@@ -46,10 +50,11 @@ final class HTTPIntegrationTests: XCTestCase {
             body: "payload from Postie",
             bodyEnabled: true
         )
-        let postEvents = await collect(try await manager.start(
-            identity: RequestIdentity(collectionID: UUID(), requestID: post.id),
-            configuration: post
-        ))
+        let postEvents = await collect(
+            try await manager.start(
+                identity: RequestIdentity(collectionID: UUID(), requestID: post.id),
+                configuration: post
+            ))
         let postResponse = try completedResponse(in: postEvents)
         XCTAssertEqual(postResponse.effectiveMethod, "POST")
         let postPayload = try responseJSON(postResponse)
@@ -75,13 +80,14 @@ final class HTTPIntegrationTests: XCTestCase {
             configuration,
             context: VariableContext(request: [
                 "headerValue": .plain("resolved header"),
-                "bodyValue": .plain("resolved body")
+                "bodyValue": .plain("resolved body"),
             ]),
             decryptor: nil
         )
         let identity = RequestIdentity(collectionID: UUID(), requestID: configuration.id)
 
-        let response = try completedResponse(in: await collect(try await manager.start(identity: identity, prepared: prepared)))
+        let response = try completedResponse(
+            in: await collect(try await manager.start(identity: identity, prepared: prepared)))
         let payload = try responseJSON(response)
 
         XCTAssertEqual(response.request, configuration)
@@ -100,28 +106,30 @@ final class HTTPIntegrationTests: XCTestCase {
         let root = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
         let manager = try HTTPExecutionManager(bodyDirectory: root.appendingPathComponent("bodies", isDirectory: true))
-        let redirectURL = try fixture.url(path: "/redirect", query: [
-            URLQueryItem(name: "to", value: "/echo"),
-            URLQueryItem(name: "status", value: "302")
-        ])
+        let redirectURL = try fixture.url(
+            path: "/redirect",
+            query: [
+                URLQueryItem(name: "to", value: "/echo"),
+                URLQueryItem(name: "status", value: "302"),
+            ])
         let credential = SecretEnvelope(combined: "captured-header-credential")
         let headerName = SecretEnvelope(combined: "captured-header-name")
         let decryptor = IntegrationSecretDecryptor(values: [
             credential.combined: "captured value",
-            headerName.combined: "X-Private"
+            headerName.combined: "X-Private",
         ])
         let sensitiveHeaders: Set<String> = [
             "authorization",
             "proxy-authorization",
             "cookie",
             "set-cookie",
-            "x-private"
+            "x-private",
         ]
         let secretHeaders: Set<String> = ["x-private"]
 
         var manualContext = VariableContext(request: [
             "credential": .encrypted(credential),
-            "headerName": .encrypted(headerName)
+            "headerName": .encrypted(headerName),
         ])
         let manualRequest = HTTPRequestConfiguration(
             url: redirectURL,
@@ -138,7 +146,8 @@ final class HTTPIntegrationTests: XCTestCase {
         XCTAssertEqual(manualPrepared.requestHeaderSources, ["x-private": .request])
 
         let identity = RequestIdentity(collectionID: UUID(), requestID: manualRequest.id)
-        let stopped = try completedResponse(in: await collect(try await manager.start(identity: identity, prepared: manualPrepared)))
+        let stopped = try completedResponse(
+            in: await collect(try await manager.start(identity: identity, prepared: manualPrepared)))
         XCTAssertEqual(stopped.sensitiveRequestHeaderNames, sensitiveHeaders)
         XCTAssertEqual(stopped.secretRequestHeaderNames, secretHeaders)
         assertHeaderSources(
@@ -155,9 +164,10 @@ final class HTTPIntegrationTests: XCTestCase {
             configuredSources: ["x-private": .request]
         )
 
-        let followed = try completedResponse(in: await collect(
-            try await manager.followRedirect(identity: identity, response: stopped)
-        ))
+        let followed = try completedResponse(
+            in: await collect(
+                try await manager.followRedirect(identity: identity, response: stopped)
+            ))
         XCTAssertEqual(followed.sensitiveRequestHeaderNames, sensitiveHeaders)
         XCTAssertEqual(followed.secretRequestHeaderNames, secretHeaders)
         assertHeaderSources(
@@ -185,14 +195,16 @@ final class HTTPIntegrationTests: XCTestCase {
             automaticRequest,
             context: VariableContext(request: [
                 "credential": .encrypted(credential),
-                "headerName": .encrypted(headerName)
+                "headerName": .encrypted(headerName),
             ]),
             decryptor: decryptor
         )
-        let automatic = try completedResponse(in: await collect(try await manager.start(
-            identity: RequestIdentity(collectionID: UUID(), requestID: automaticRequest.id),
-            prepared: automaticPrepared
-        )))
+        let automatic = try completedResponse(
+            in: await collect(
+                try await manager.start(
+                    identity: RequestIdentity(collectionID: UUID(), requestID: automaticRequest.id),
+                    prepared: automaticPrepared
+                )))
         XCTAssertEqual(automatic.sensitiveRequestHeaderNames, sensitiveHeaders)
         XCTAssertEqual(automatic.secretRequestHeaderNames, secretHeaders)
         assertHeaderSources(
@@ -216,16 +228,19 @@ final class HTTPIntegrationTests: XCTestCase {
         let root = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
         let manager = try HTTPExecutionManager(bodyDirectory: root.appendingPathComponent("bodies", isDirectory: true))
-        let redirectURL = try fixture.url(path: "/redirect", query: [
-            URLQueryItem(name: "to", value: "/echo"),
-            URLQueryItem(name: "status", value: "302")
-        ])
+        let redirectURL = try fixture.url(
+            path: "/redirect",
+            query: [
+                URLQueryItem(name: "to", value: "/echo"),
+                URLQueryItem(name: "status", value: "302"),
+            ])
 
         let stoppedRequest = HTTPRequestConfiguration(url: redirectURL)
-        let stoppedEvents = await collect(try await manager.start(
-            identity: RequestIdentity(collectionID: UUID(), requestID: stoppedRequest.id),
-            configuration: stoppedRequest
-        ))
+        let stoppedEvents = await collect(
+            try await manager.start(
+                identity: RequestIdentity(collectionID: UUID(), requestID: stoppedRequest.id),
+                configuration: stoppedRequest
+            ))
         let stopped = try completedResponse(in: stoppedEvents)
         XCTAssertEqual(stopped.statusCode, 302)
         XCTAssertEqual(stopped.effectiveMethod, "GET")
@@ -238,16 +253,19 @@ final class HTTPIntegrationTests: XCTestCase {
         XCTAssertEqual(stopped.redirects.count, 1)
         XCTAssertEqual(stopped.redirects[0].statusCode, 302)
         XCTAssertEqual(stopped.redirects[0].nextURL.path, "/echo")
-        XCTAssertTrue(stopped.redirects[0].responseHeaders.contains { $0.name.caseInsensitiveCompare("Location") == .orderedSame })
+        XCTAssertTrue(
+            stopped.redirects[0].responseHeaders.contains { $0.name.caseInsensitiveCompare("Location") == .orderedSame }
+        )
         try await manager.discardBody(at: stopped.bodyFileURL)
 
         var followOptions = HTTPOptions()
         followOptions.followRedirects = true
         let followedRequest = HTTPRequestConfiguration(url: redirectURL, options: followOptions)
-        let followedEvents = await collect(try await manager.start(
-            identity: RequestIdentity(collectionID: UUID(), requestID: followedRequest.id),
-            configuration: followedRequest
-        ))
+        let followedEvents = await collect(
+            try await manager.start(
+                identity: RequestIdentity(collectionID: UUID(), requestID: followedRequest.id),
+                configuration: followedRequest
+            ))
         let followed = try completedResponse(in: followedEvents)
         XCTAssertEqual(followed.statusCode, 200)
         XCTAssertEqual(followed.finalURL.path, "/echo")
@@ -256,18 +274,22 @@ final class HTTPIntegrationTests: XCTestCase {
 
         let post302 = HTTPRequestConfiguration(
             method: "POST",
-            url: try fixture.url(path: "/redirect", query: [
-                URLQueryItem(name: "to", value: "/echo"),
-                URLQueryItem(name: "status", value: "302")
-            ]),
+            url: try fixture.url(
+                path: "/redirect",
+                query: [
+                    URLQueryItem(name: "to", value: "/echo"),
+                    URLQueryItem(name: "status", value: "302"),
+                ]),
             body: "redirect payload",
             bodyEnabled: true,
             options: followOptions
         )
-        let post302Response = try completedResponse(in: await collect(try await manager.start(
-            identity: RequestIdentity(collectionID: UUID(), requestID: post302.id),
-            configuration: post302
-        )))
+        let post302Response = try completedResponse(
+            in: await collect(
+                try await manager.start(
+                    identity: RequestIdentity(collectionID: UUID(), requestID: post302.id),
+                    configuration: post302
+                )))
         let post302Payload = try responseJSON(post302Response)
         XCTAssertEqual(post302Response.redirects.first?.method, "POST")
         XCTAssertEqual(post302Response.redirects.first?.nextMethod, "GET")
@@ -277,18 +299,22 @@ final class HTTPIntegrationTests: XCTestCase {
 
         let post307 = HTTPRequestConfiguration(
             method: "POST",
-            url: try fixture.url(path: "/redirect", query: [
-                URLQueryItem(name: "to", value: "/echo"),
-                URLQueryItem(name: "status", value: "307")
-            ]),
+            url: try fixture.url(
+                path: "/redirect",
+                query: [
+                    URLQueryItem(name: "to", value: "/echo"),
+                    URLQueryItem(name: "status", value: "307"),
+                ]),
             body: "redirect payload",
             bodyEnabled: true,
             options: followOptions
         )
-        let post307Response = try completedResponse(in: await collect(try await manager.start(
-            identity: RequestIdentity(collectionID: UUID(), requestID: post307.id),
-            configuration: post307
-        )))
+        let post307Response = try completedResponse(
+            in: await collect(
+                try await manager.start(
+                    identity: RequestIdentity(collectionID: UUID(), requestID: post307.id),
+                    configuration: post307
+                )))
         let post307Payload = try responseJSON(post307Response)
         XCTAssertEqual(post307Response.redirects.first?.method, "POST")
         XCTAssertEqual(post307Response.redirects.first?.nextMethod, "POST")
@@ -306,42 +332,51 @@ final class HTTPIntegrationTests: XCTestCase {
 
         let post302 = HTTPRequestConfiguration(
             method: "POST",
-            url: try fixture.url(path: "/redirect", query: [
-                URLQueryItem(name: "to", value: "/echo"),
-                URLQueryItem(name: "status", value: "302")
-            ]),
+            url: try fixture.url(
+                path: "/redirect",
+                query: [
+                    URLQueryItem(name: "to", value: "/echo"),
+                    URLQueryItem(name: "status", value: "302"),
+                ]),
             body: "captured 302 body",
             bodyEnabled: true
         )
         let post302Identity = RequestIdentity(collectionID: UUID(), requestID: post302.id)
-        let post302Response = try completedResponse(in: await collect(try await manager.start(
-            identity: post302Identity,
-            configuration: post302
-        )))
+        let post302Response = try completedResponse(
+            in: await collect(
+                try await manager.start(
+                    identity: post302Identity,
+                    configuration: post302
+                )))
         XCTAssertEqual(post302Response.redirectRequest?.httpMethod, "GET")
         XCTAssertEqual(post302Response.pendingRedirect?.nextMethod, "GET")
         let post302Follow = try await manager.followRedirect(identity: post302Identity, response: post302Response)
         let post302Result = try completedResponse(in: await collect(post302Follow))
         XCTAssertEqual(post302Result.effectiveMethod, "GET")
         XCTAssertEqual(try responseJSON(post302Result)["method"] as? String, "GET")
-        XCTAssertEqual(post302Result.redirects.count, 1, "The pending first hop must not be duplicated by manual continuation.")
+        XCTAssertEqual(
+            post302Result.redirects.count, 1, "The pending first hop must not be duplicated by manual continuation.")
         try await manager.discardBody(at: post302Response.bodyFileURL)
         try await manager.discardBody(at: post302Result.bodyFileURL)
 
         let post307 = HTTPRequestConfiguration(
             method: "POST",
-            url: try fixture.url(path: "/redirect", query: [
-                URLQueryItem(name: "to", value: "/echo"),
-                URLQueryItem(name: "status", value: "307")
-            ]),
+            url: try fixture.url(
+                path: "/redirect",
+                query: [
+                    URLQueryItem(name: "to", value: "/echo"),
+                    URLQueryItem(name: "status", value: "307"),
+                ]),
             body: "captured 307 body",
             bodyEnabled: true
         )
         let post307Identity = RequestIdentity(collectionID: UUID(), requestID: post307.id)
-        let post307Response = try completedResponse(in: await collect(try await manager.start(
-            identity: post307Identity,
-            configuration: post307
-        )))
+        let post307Response = try completedResponse(
+            in: await collect(
+                try await manager.start(
+                    identity: post307Identity,
+                    configuration: post307
+                )))
         XCTAssertEqual(post307Response.redirectRequest?.httpMethod, "POST")
         XCTAssertEqual(post307Response.redirectRequest?.httpBody, Data("captured 307 body".utf8))
         let post307Follow = try await manager.followRedirect(identity: post307Identity, response: post307Response)
@@ -365,10 +400,12 @@ final class HTTPIntegrationTests: XCTestCase {
         let chainedRequest = HTTPRequestConfiguration(url: firstHop)
         let chainedIdentity = RequestIdentity(collectionID: UUID(), requestID: chainedRequest.id)
 
-        let firstResponse = try completedResponse(in: await collect(try await manager.start(
-            identity: chainedIdentity,
-            configuration: chainedRequest
-        )))
+        let firstResponse = try completedResponse(
+            in: await collect(
+                try await manager.start(
+                    identity: chainedIdentity,
+                    configuration: chainedRequest
+                )))
         let secondRun = try await manager.followRedirect(identity: chainedIdentity, response: firstResponse)
         try await manager.discardBody(at: firstResponse.bodyFileURL)
         let secondResponse = try completedResponse(in: await collect(secondRun))
@@ -385,10 +422,12 @@ final class HTTPIntegrationTests: XCTestCase {
 
         let loopRequest = HTTPRequestConfiguration(url: fixture.baseURL + "/loop")
         let loopIdentity = RequestIdentity(collectionID: UUID(), requestID: loopRequest.id)
-        var loopResponse = try completedResponse(in: await collect(try await manager.start(
-            identity: loopIdentity,
-            configuration: loopRequest
-        )))
+        var loopResponse = try completedResponse(
+            in: await collect(
+                try await manager.start(
+                    identity: loopIdentity,
+                    configuration: loopRequest
+                )))
         for _ in 0..<10 {
             let nextRun = try await manager.followRedirect(identity: loopIdentity, response: loopResponse)
             try await manager.discardBody(at: loopResponse.bodyFileURL)
@@ -419,11 +458,12 @@ final class HTTPIntegrationTests: XCTestCase {
                 HTTPField(name: "Authorization", value: "Bearer fixture-token"),
                 HTTPField(name: "Proxy-Authorization", value: "Basic fixture-token"),
                 HTTPField(name: "Cookie", value: "session=fixture"),
-                HTTPField(name: "Cookie2", value: "legacy=fixture")
+                HTTPField(name: "Cookie2", value: "legacy=fixture"),
             ]
         )
         let identity = RequestIdentity(collectionID: UUID(), requestID: request.id)
-        let response = try completedResponse(in: await collect(try await manager.start(identity: identity, configuration: request)))
+        let response = try completedResponse(
+            in: await collect(try await manager.start(identity: identity, configuration: request)))
         for header in ["Authorization", "Proxy-Authorization", "Cookie", "Cookie2"] {
             XCTAssertNil(response.redirectRequest?.value(forHTTPHeaderField: header))
         }
@@ -441,7 +481,8 @@ final class HTTPIntegrationTests: XCTestCase {
         unsupportedOptions.inactivityTimeout = 1
         unsupportedOptions.overallTimeout = 2
         let unsupportedRequest = HTTPRequestConfiguration(
-            url: try source.url(path: "/redirect", query: [URLQueryItem(name: "to", value: "file:///tmp/postie-redirect-target")]),
+            url: try source.url(
+                path: "/redirect", query: [URLQueryItem(name: "to", value: "file:///tmp/postie-redirect-target")]),
             options: unsupportedOptions
         )
         let unsupportedIdentity = RequestIdentity(collectionID: UUID(), requestID: unsupportedRequest.id)
@@ -449,12 +490,14 @@ final class HTTPIntegrationTests: XCTestCase {
             identity: unsupportedIdentity,
             configuration: unsupportedRequest
         )
-        guard let unsupportedEvents = await collect(
-            unsupportedRun,
-            within: 4,
-            manager: manager,
-            identity: unsupportedIdentity
-        ) else {
+        guard
+            let unsupportedEvents = await collect(
+                unsupportedRun,
+                within: 4,
+                manager: manager,
+                identity: unsupportedIdentity
+            )
+        else {
             XCTFail("The unsupported redirect request did not settle within four seconds; it was cancelled.")
             return
         }
@@ -481,15 +524,21 @@ final class HTTPIntegrationTests: XCTestCase {
             }
             try await manager.discardBody(at: unsupportedResponse.bodyFileURL)
         } else {
-            XCTAssertTrue(unsupportedRedirects.isEmpty, "A refused unsupported destination must not emit a followable redirect.")
-            XCTAssertFalse(unsupportedEvents.contains { if case .cancelled = $0 { return true }; return false })
+            XCTAssertTrue(
+                unsupportedRedirects.isEmpty, "A refused unsupported destination must not emit a followable redirect.")
+            XCTAssertFalse(
+                unsupportedEvents.contains {
+                    if case .cancelled = $0 { return true }; return false
+                })
             let safeTerminalFailures = [
                 "The request could not be completed. Check the URL and try again.",
-                "The request timed out."
+                "The request timed out.",
             ]
             let failures = failureMessages(in: unsupportedEvents)
             XCTAssertEqual(failures.count, 1)
-            XCTAssertTrue(safeTerminalFailures.contains(failures.first ?? ""), "Unsupported redirects must end with a known safe failure.")
+            XCTAssertTrue(
+                safeTerminalFailures.contains(failures.first ?? ""),
+                "Unsupported redirects must end with a known safe failure.")
         }
     }
 
@@ -502,14 +551,17 @@ final class HTTPIntegrationTests: XCTestCase {
         options.followRedirects = true
         let request = HTTPRequestConfiguration(url: fixture.baseURL + "/loop", options: options)
 
-        let response = try completedResponse(in: await collect(try await manager.start(
-            identity: RequestIdentity(collectionID: UUID(), requestID: request.id),
-            configuration: request
-        )))
+        let response = try completedResponse(
+            in: await collect(
+                try await manager.start(
+                    identity: RequestIdentity(collectionID: UUID(), requestID: request.id),
+                    configuration: request
+                )))
 
         XCTAssertEqual(response.statusCode, 302)
         XCTAssertTrue(response.redirectLimitReached)
-        XCTAssertEqual(response.redirects.count, 11, "The refused eleventh response remains observable after ten followed hops.")
+        XCTAssertEqual(
+            response.redirects.count, 11, "The refused eleventh response remains observable after ten followed hops.")
         XCTAssertTrue(FileManager.default.fileExists(atPath: response.bodyFileURL.path))
         try await manager.discardBody(at: response.bodyFileURL)
     }
@@ -530,15 +582,17 @@ final class HTTPIntegrationTests: XCTestCase {
                 HTTPField(name: "Authorization", value: "Bearer fixture-token"),
                 HTTPField(name: "Proxy-Authorization", value: "Basic fixture-token"),
                 HTTPField(name: "Cookie", value: "session=fixture"),
-                HTTPField(name: "Cookie2", value: "legacy=fixture")
+                HTTPField(name: "Cookie2", value: "legacy=fixture"),
             ],
             options: options
         )
 
-        let response = try completedResponse(in: await collect(try await manager.start(
-            identity: RequestIdentity(collectionID: UUID(), requestID: request.id),
-            configuration: request
-        )))
+        let response = try completedResponse(
+            in: await collect(
+                try await manager.start(
+                    identity: RequestIdentity(collectionID: UUID(), requestID: request.id),
+                    configuration: request
+                )))
 
         XCTAssertEqual(response.statusCode, 200)
         XCTAssertEqual(response.redirects.count, 1)
@@ -576,10 +630,12 @@ final class HTTPIntegrationTests: XCTestCase {
         XCTAssertFalse(sameOriginPrepared.secretRequestHeaderNames.contains("x-api-key"))
         XCTAssertEqual(sameOriginPrepared.requestHeaderSources, ["x-api-key": .requestAuth])
 
-        let sameOrigin = try completedResponse(in: await collect(try await manager.start(
-            identity: RequestIdentity(collectionID: UUID(), requestID: sameOriginConfiguration.id),
-            prepared: sameOriginPrepared
-        )))
+        let sameOrigin = try completedResponse(
+            in: await collect(
+                try await manager.start(
+                    identity: RequestIdentity(collectionID: UUID(), requestID: sameOriginConfiguration.id),
+                    prepared: sameOriginPrepared
+                )))
         XCTAssertEqual(sameOrigin.redirects.count, 1)
         XCTAssertEqual(sameOrigin.requestHeaderSources["x-api-key"], .requestAuth)
         XCTAssertEqual(sameOrigin.redirects.first?.requestHeaderSources["x-api-key"], .requestAuth)
@@ -598,12 +654,16 @@ final class HTTPIntegrationTests: XCTestCase {
             decryptor: decryptor
         )
         let manualIdentity = RequestIdentity(collectionID: UUID(), requestID: manualConfiguration.id)
-        let manualStopped = try completedResponse(in: await collect(try await manager.start(
-            identity: manualIdentity,
-            prepared: manualPrepared
-        )))
+        let manualStopped = try completedResponse(
+            in: await collect(
+                try await manager.start(
+                    identity: manualIdentity,
+                    prepared: manualPrepared
+                )))
         XCTAssertEqual(
-            manualStopped.redirects.first?.requestHeaders.first { $0.name.caseInsensitiveCompare("X-API-Key") == .orderedSame }?.value,
+            manualStopped.redirects.first?.requestHeaders.first {
+                $0.name.caseInsensitiveCompare("X-API-Key") == .orderedSame
+            }?.value,
             apiKey
         )
         XCTAssertNil(manualStopped.redirectRequest?.value(forHTTPHeaderField: "X-API-Key"))
@@ -627,13 +687,17 @@ final class HTTPIntegrationTests: XCTestCase {
             context: VariableContext(),
             decryptor: decryptor
         )
-        let automatic = try completedResponse(in: await collect(try await manager.start(
-            identity: RequestIdentity(collectionID: UUID(), requestID: automaticConfiguration.id),
-            prepared: automaticPrepared
-        )))
+        let automatic = try completedResponse(
+            in: await collect(
+                try await manager.start(
+                    identity: RequestIdentity(collectionID: UUID(), requestID: automaticConfiguration.id),
+                    prepared: automaticPrepared
+                )))
         XCTAssertEqual(automatic.redirects.count, 1)
         XCTAssertEqual(
-            automatic.redirects.first?.requestHeaders.first { $0.name.caseInsensitiveCompare("X-API-Key") == .orderedSame }?.value,
+            automatic.redirects.first?.requestHeaders.first {
+                $0.name.caseInsensitiveCompare("X-API-Key") == .orderedSame
+            }?.value,
             apiKey
         )
         let automaticPayload = try responseJSON(automatic)
@@ -648,17 +712,20 @@ final class HTTPIntegrationTests: XCTestCase {
         let root = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
         let manager = try HTTPExecutionManager(bodyDirectory: root.appendingPathComponent("bodies", isDirectory: true))
-        let redirectURL = try fixture.url(path: "/redirect", query: [
-            URLQueryItem(name: "to", value: "/echo"),
-            URLQueryItem(name: "status", value: "302")
-        ])
+        let redirectURL = try fixture.url(
+            path: "/redirect",
+            query: [
+                URLQueryItem(name: "to", value: "/echo"),
+                URLQueryItem(name: "status", value: "302"),
+            ])
         let configuration = HTTPRequestConfiguration(
             url: redirectURL,
             headers: [HTTPField(name: "X-Request", value: "captured")]
         )
         let prepared = try await RequestPreparer.prepare(configuration, context: VariableContext(), decryptor: nil)
         let identity = RequestIdentity(collectionID: UUID(), requestID: configuration.id)
-        let stopped = try completedResponse(in: await collect(try await manager.start(identity: identity, prepared: prepared)))
+        let stopped = try completedResponse(
+            in: await collect(try await manager.start(identity: identity, prepared: prepared)))
         var redirectRequest = try XCTUnwrap(stopped.redirectRequest)
         redirectRequest.setValue("added after capture", forHTTPHeaderField: "X-Runtime")
         let responseWithRuntimeHeader = HTTPResponseRecord(
@@ -681,9 +748,10 @@ final class HTTPIntegrationTests: XCTestCase {
             requestHeaderSources: stopped.requestHeaderSources
         )
 
-        let followed = try completedResponse(in: await collect(
-            try await manager.followRedirect(identity: identity, response: responseWithRuntimeHeader)
-        ))
+        let followed = try completedResponse(
+            in: await collect(
+                try await manager.followRedirect(identity: identity, response: responseWithRuntimeHeader)
+            ))
         let payload = try responseJSON(followed)
 
         XCTAssertEqual(followed.requestHeaderSources["x-request"], .request)
@@ -699,7 +767,8 @@ final class HTTPIntegrationTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: root) }
         let manager = try HTTPExecutionManager(bodyDirectory: root.appendingPathComponent("bodies", isDirectory: true))
         let collectionID = UUID()
-        let first = HTTPRequestConfiguration(url: try fixture.url(path: "/delay", query: [URLQueryItem(name: "seconds", value: "0.8")]))
+        let first = HTTPRequestConfiguration(
+            url: try fixture.url(path: "/delay", query: [URLQueryItem(name: "seconds", value: "0.8")]))
         let firstIdentity = RequestIdentity(collectionID: collectionID, requestID: first.id)
         let firstRun = try await manager.start(identity: firstIdentity, configuration: first)
         let firstFinished = CompletionLatch()
@@ -720,7 +789,8 @@ final class HTTPIntegrationTests: XCTestCase {
         }
 
         try await Task.sleep(nanoseconds: 100_000_000)
-        let second = HTTPRequestConfiguration(url: try fixture.url(path: "/delay", query: [URLQueryItem(name: "seconds", value: "0.1")]))
+        let second = HTTPRequestConfiguration(
+            url: try fixture.url(path: "/delay", query: [URLQueryItem(name: "seconds", value: "0.1")]))
         let secondRun = try await manager.start(
             identity: RequestIdentity(collectionID: collectionID, requestID: second.id),
             configuration: second
@@ -728,7 +798,9 @@ final class HTTPIntegrationTests: XCTestCase {
         let secondEvents = await collect(secondRun)
         let secondResponse = try completedResponse(in: secondEvents)
         let didFirstFinishBeforeSecond = await firstFinished.isFinished
-        XCTAssertFalse(didFirstFinishBeforeSecond, "The shorter independent run must finish while the first identity is still active.")
+        XCTAssertFalse(
+            didFirstFinishBeforeSecond,
+            "The shorter independent run must finish while the first identity is still active.")
         XCTAssertTrue(firstRun.id != secondRun.id)
 
         let firstEvents = await firstObserver.value
@@ -745,10 +817,13 @@ final class HTTPIntegrationTests: XCTestCase {
         let bodyDirectory = root.appendingPathComponent("bodies", isDirectory: true)
         let manager = try HTTPExecutionManager(bodyDirectory: bodyDirectory)
         let identity = RequestIdentity(collectionID: UUID(), requestID: UUID())
-        let slow = HTTPRequestConfiguration(url: try fixture.url(path: "/stream", query: [
-            URLQueryItem(name: "bytes", value: "8388608"),
-            URLQueryItem(name: "chunk_delay", value: "0.02")
-        ]))
+        let slow = HTTPRequestConfiguration(
+            url: try fixture.url(
+                path: "/stream",
+                query: [
+                    URLQueryItem(name: "bytes", value: "8388608"),
+                    URLQueryItem(name: "chunk_delay", value: "0.02"),
+                ]))
         let cancelledRun = try await manager.start(identity: identity, configuration: slow)
 
         var iterator = cancelledRun.events.makeAsyncIterator()
@@ -759,15 +834,24 @@ final class HTTPIntegrationTests: XCTestCase {
             }
         }
         let cancelledEvents = await collectRemaining(iterator)
-        XCTAssertEqual(cancelledEvents.filter { if case .cancelled = $0 { return true }; return false }.count, 1)
-        XCTAssertEqual(cancelledEvents.filter { if case .completed = $0 { return true }; return false }.count, 0)
+        XCTAssertEqual(
+            cancelledEvents.filter {
+                if case .cancelled = $0 { return true }; return false
+            }.count, 1)
+        XCTAssertEqual(
+            cancelledEvents.filter {
+                if case .completed = $0 { return true }; return false
+            }.count, 0)
 
         let rerun = HTTPRequestConfiguration(url: fixture.baseURL + "/echo")
         let rerunRun = try await manager.start(identity: identity, configuration: rerun)
         let rerunEvents = await collect(rerunRun)
         let response = try completedResponse(in: rerunEvents)
         XCTAssertEqual(response.runID, rerunRun.id)
-        XCTAssertEqual(rerunEvents.filter { if case .completed = $0 { return true }; return false }.count, 1)
+        XCTAssertEqual(
+            rerunEvents.filter {
+                if case .completed = $0 { return true }; return false
+            }.count, 1)
         let bodies = try responseBodyFiles(under: bodyDirectory)
         XCTAssertEqual(
             bodies.map { $0.standardizedFileURL.resolvingSymlinksInPath() },
@@ -789,10 +873,12 @@ final class HTTPIntegrationTests: XCTestCase {
             url: try fixture.url(path: "/large", query: [URLQueryItem(name: "bytes", value: "1024")]),
             options: exactOptions
         )
-        let exactResponse = try completedResponse(in: await collect(try await manager.start(
-            identity: RequestIdentity(collectionID: UUID(), requestID: exact.id),
-            configuration: exact
-        )))
+        let exactResponse = try completedResponse(
+            in: await collect(
+                try await manager.start(
+                    identity: RequestIdentity(collectionID: UUID(), requestID: exact.id),
+                    configuration: exact
+                )))
         XCTAssertEqual(exactResponse.bodyByteCount, 1024)
         try await manager.discardBody(at: exactResponse.bodyFileURL)
 
@@ -802,10 +888,11 @@ final class HTTPIntegrationTests: XCTestCase {
             url: try fixture.url(path: "/large", query: [URLQueryItem(name: "bytes", value: "1024")]),
             options: cappedOptions
         )
-        let cappedEvents = await collect(try await manager.start(
-            identity: RequestIdentity(collectionID: UUID(), requestID: capped.id),
-            configuration: capped
-        ))
+        let cappedEvents = await collect(
+            try await manager.start(
+                identity: RequestIdentity(collectionID: UUID(), requestID: capped.id),
+                configuration: capped
+            ))
         XCTAssertEqual(failureMessages(in: cappedEvents), ["The response exceeded the configured byte limit."])
         XCTAssertTrue(try responseBodyFiles(under: bodyDirectory).isEmpty)
     }
@@ -825,10 +912,11 @@ final class HTTPIntegrationTests: XCTestCase {
             url: try fixture.url(path: "/delay", query: [URLQueryItem(name: "seconds", value: "0.8")]),
             options: idleOptions
         )
-        let idleEvents = await collect(try await manager.start(
-            identity: RequestIdentity(collectionID: UUID(), requestID: idle.id),
-            configuration: idle
-        ))
+        let idleEvents = await collect(
+            try await manager.start(
+                identity: RequestIdentity(collectionID: UUID(), requestID: idle.id),
+                configuration: idle
+            ))
         XCTAssertEqual(failureMessages(in: idleEvents), ["The request timed out."])
 
         var overallOptions = HTTPOptions()
@@ -836,16 +924,19 @@ final class HTTPIntegrationTests: XCTestCase {
         overallOptions.overallTimeout = 0.35
         overallOptions.maximumResponseBytes = nil
         let overall = HTTPRequestConfiguration(
-            url: try fixture.url(path: "/stream", query: [
-                URLQueryItem(name: "bytes", value: "1048576"),
-                URLQueryItem(name: "chunk_delay", value: "0.05")
-            ]),
+            url: try fixture.url(
+                path: "/stream",
+                query: [
+                    URLQueryItem(name: "bytes", value: "1048576"),
+                    URLQueryItem(name: "chunk_delay", value: "0.05"),
+                ]),
             options: overallOptions
         )
-        let overallEvents = await collect(try await manager.start(
-            identity: RequestIdentity(collectionID: UUID(), requestID: overall.id),
-            configuration: overall
-        ))
+        let overallEvents = await collect(
+            try await manager.start(
+                identity: RequestIdentity(collectionID: UUID(), requestID: overall.id),
+                configuration: overall
+            ))
         XCTAssertEqual(failureMessages(in: overallEvents), ["The request timed out."])
         XCTAssertTrue(try responseBodyFiles(under: bodyDirectory).isEmpty)
     }
@@ -862,13 +953,16 @@ final class HTTPIntegrationTests: XCTestCase {
             url: try fixture.url(path: "/large", query: [URLQueryItem(name: "bytes", value: "2097152")]),
             options: largeOptions
         )
-        let largeEvents = await collect(try await manager.start(
-            identity: RequestIdentity(collectionID: UUID(), requestID: large.id),
-            configuration: large
-        ))
+        let largeEvents = await collect(
+            try await manager.start(
+                identity: RequestIdentity(collectionID: UUID(), requestID: large.id),
+                configuration: large
+            ))
         let largeResponse = try completedResponse(in: largeEvents)
         XCTAssertEqual(largeResponse.bodyByteCount, 2_097_152)
-        XCTAssertEqual((try FileManager.default.attributesOfItem(atPath: largeResponse.bodyFileURL.path)[.size] as? NSNumber)?.int64Value, 2_097_152)
+        XCTAssertEqual(
+            (try FileManager.default.attributesOfItem(atPath: largeResponse.bodyFileURL.path)[.size] as? NSNumber)?
+                .int64Value, 2_097_152)
         let largePreview = try ResponseBodyReader.preview(at: largeResponse.bodyFileURL, maximumBytes: 1_048_576)
         XCTAssertEqual(largePreview.text.utf8.count, 1_048_576)
         XCTAssertTrue(largePreview.isTruncated)
@@ -881,23 +975,27 @@ final class HTTPIntegrationTests: XCTestCase {
             url: try fixture.url(path: "/stream", query: [URLQueryItem(name: "bytes", value: "4096")]),
             options: chunkedOptions
         )
-        let chunkedEvents = await collect(try await manager.start(
-            identity: RequestIdentity(collectionID: UUID(), requestID: chunked.id),
-            configuration: chunked
-        ))
+        let chunkedEvents = await collect(
+            try await manager.start(
+                identity: RequestIdentity(collectionID: UUID(), requestID: chunked.id),
+                configuration: chunked
+            ))
         let chunkedResponse = try completedResponse(in: chunkedEvents)
         XCTAssertEqual(chunkedResponse.bodyByteCount, 4096)
-        XCTAssertTrue(chunkedEvents.contains { event in
-            guard case .progress(let progress) = event else { return false }
-            return progress.expectedBytes == nil
-        }, "Chunked responses must keep expected progress unknown when the platform reports no length.")
+        XCTAssertTrue(
+            chunkedEvents.contains { event in
+                guard case .progress(let progress) = event else { return false }
+                return progress.expectedBytes == nil
+            }, "Chunked responses must keep expected progress unknown when the platform reports no length.")
         try await manager.discardBody(at: chunkedResponse.bodyFileURL)
 
         let binary = HTTPRequestConfiguration(url: fixture.baseURL + "/binary")
-        let binaryResponse = try completedResponse(in: await collect(try await manager.start(
-            identity: RequestIdentity(collectionID: UUID(), requestID: binary.id),
-            configuration: binary
-        )))
+        let binaryResponse = try completedResponse(
+            in: await collect(
+                try await manager.start(
+                    identity: RequestIdentity(collectionID: UUID(), requestID: binary.id),
+                    configuration: binary
+                )))
         XCTAssertEqual(binaryResponse.bodyByteCount, 1024)
         let binaryPreview = try ResponseBodyReader.preview(at: binaryResponse.bodyFileURL, maximumBytes: 32)
         XCTAssertTrue(binaryPreview.isBinary)
@@ -924,10 +1022,12 @@ final class HTTPIntegrationTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: foreignURL.path))
 
         let request = HTTPRequestConfiguration(url: fixture.baseURL + "/echo")
-        let response = try completedResponse(in: await collect(try await manager.start(
-            identity: RequestIdentity(collectionID: UUID(), requestID: request.id),
-            configuration: request
-        )))
+        let response = try completedResponse(
+            in: await collect(
+                try await manager.start(
+                    identity: RequestIdentity(collectionID: UUID(), requestID: request.id),
+                    configuration: request
+                )))
         XCTAssertTrue(FileManager.default.fileExists(atPath: response.bodyFileURL.path))
         try await manager.discardBody(at: response.bodyFileURL)
         XCTAssertFalse(FileManager.default.fileExists(atPath: response.bodyFileURL.path))
@@ -952,26 +1052,34 @@ final class HTTPIntegrationTests: XCTestCase {
         try Data("preserve".utf8).write(to: unrelatedFile)
         let activeManager = try HTTPExecutionManager(bodyDirectory: bodyDirectory)
         let activeRequest = HTTPRequestConfiguration(url: fixture.baseURL + "/echo")
-        let activeResponse = try completedResponse(in: await collect(try await activeManager.start(
-            identity: RequestIdentity(collectionID: UUID(), requestID: activeRequest.id),
-            configuration: activeRequest
-        )))
+        let activeResponse = try completedResponse(
+            in: await collect(
+                try await activeManager.start(
+                    identity: RequestIdentity(collectionID: UUID(), requestID: activeRequest.id),
+                    configuration: activeRequest
+                )))
         let activeSession = activeResponse.bodyFileURL.deletingLastPathComponent()
 
         abandonedManager = nil
         let restartedManager = try HTTPExecutionManager(bodyDirectory: bodyDirectory)
 
-        XCTAssertFalse(FileManager.default.fileExists(atPath: abandonedBody.path), "A session with no live owner must be reclaimed on restart.")
-        XCTAssertTrue(FileManager.default.fileExists(atPath: activeResponse.bodyFileURL.path), "A live manager's body must survive another manager's startup sweep.")
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: abandonedBody.path),
+            "A session with no live owner must be reclaimed on restart.")
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: activeResponse.bodyFileURL.path),
+            "A live manager's body must survive another manager's startup sweep.")
         XCTAssertTrue(FileManager.default.fileExists(atPath: activeSession.path))
         XCTAssertEqual(try Data(contentsOf: unrelatedFile), Data("preserve".utf8))
         try await activeManager.discardBody(at: activeResponse.bodyFileURL)
 
         let restartedRequest = HTTPRequestConfiguration(url: fixture.baseURL + "/echo")
-        let restartedResponse = try completedResponse(in: await collect(try await restartedManager.start(
-            identity: RequestIdentity(collectionID: UUID(), requestID: restartedRequest.id),
-            configuration: restartedRequest
-        )))
+        let restartedResponse = try completedResponse(
+            in: await collect(
+                try await restartedManager.start(
+                    identity: RequestIdentity(collectionID: UUID(), requestID: restartedRequest.id),
+                    configuration: restartedRequest
+                )))
         try await restartedManager.discardBody(at: restartedResponse.bodyFileURL)
         await restartedManager.shutdown()
         await activeManager.shutdown()
@@ -987,7 +1095,8 @@ final class HTTPIntegrationTests: XCTestCase {
         let manager = try HTTPExecutionManager(bodyDirectory: bodyDirectory)
         let unrelatedFile = bodyDirectory.appendingPathComponent("keep.txt")
         try Data("keep".utf8).write(to: unrelatedFile)
-        let request = HTTPRequestConfiguration(url: try fixture.url(path: "/delay", query: [URLQueryItem(name: "seconds", value: "2")]))
+        let request = HTTPRequestConfiguration(
+            url: try fixture.url(path: "/delay", query: [URLQueryItem(name: "seconds", value: "2")]))
         let run = try await manager.start(
             identity: RequestIdentity(collectionID: UUID(), requestID: request.id),
             configuration: request
@@ -997,8 +1106,14 @@ final class HTTPIntegrationTests: XCTestCase {
         await manager.shutdown()
 
         let events = await collect(run)
-        XCTAssertEqual(events.filter { if case .cancelled = $0 { return true }; return false }.count, 1)
-        XCTAssertEqual(events.filter { if case .completed = $0 { return true }; return false }.count, 0)
+        XCTAssertEqual(
+            events.filter {
+                if case .cancelled = $0 { return true }; return false
+            }.count, 1)
+        XCTAssertEqual(
+            events.filter {
+                if case .completed = $0 { return true }; return false
+            }.count, 0)
         XCTAssertFalse(FileManager.default.fileExists(atPath: sessionDirectory.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: unrelatedFile.path))
     }
@@ -1041,7 +1156,9 @@ final class HTTPIntegrationTests: XCTestCase {
         }
     }
 
-    private func collectRemaining(_ iterator: AsyncStream<HTTPExecutionEvent>.AsyncIterator) async -> [HTTPExecutionEvent] {
+    private func collectRemaining(_ iterator: AsyncStream<HTTPExecutionEvent>.AsyncIterator) async
+        -> [HTTPExecutionEvent]
+    {
         var iterator = iterator
         var events: [HTTPExecutionEvent] = []
         while let event = await iterator.next() {
@@ -1051,10 +1168,11 @@ final class HTTPIntegrationTests: XCTestCase {
     }
 
     private func completedResponse(in events: [HTTPExecutionEvent]) throws -> HTTPResponseRecord {
-        try XCTUnwrap(events.compactMap { event -> HTTPResponseRecord? in
-            guard case .completed(let response) = event else { return nil }
-            return response
-        }.first)
+        try XCTUnwrap(
+            events.compactMap { event -> HTTPResponseRecord? in
+                guard case .completed(let response) = event else { return nil }
+                return response
+            }.first)
     }
 
     private func assertHeaderSources(
@@ -1173,10 +1291,12 @@ private final class LocalHTTPFixture {
         }
 
         guard termination.wait(timeout: .now() + .seconds(2)) == .timedOut,
-              process.isRunning else { return }
+            process.isRunning
+        else { return }
         _ = Darwin.kill(process.processIdentifier, SIGKILL)
         guard termination.wait(timeout: .now() + .seconds(2)) == .timedOut,
-              process.isRunning else { return }
+            process.isRunning
+        else { return }
         XCTFail("The HTTP fixture process did not terminate after SIGKILL.")
     }
 

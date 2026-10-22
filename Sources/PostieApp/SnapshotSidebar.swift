@@ -52,13 +52,18 @@ struct SnapshotSidebarRow: View {
             .font(.system(size: 12))
             .padding(.horizontal, 7)
             .padding(.vertical, 5)
-            .background(model.selectedSnapshotID == snapshot.id ? Color.accentColor.opacity(0.14) : .clear, in: RoundedRectangle(cornerRadius: 6))
+            .background(
+                model.selectedSnapshotID == snapshot.id ? Color.accentColor.opacity(0.14) : .clear,
+                in: RoundedRectangle(cornerRadius: 6)
+            )
             .contentShape(Rectangle())
             .opacity(isHistorical ? 0.68 : 1)
         }
         .buttonStyle(.plain)
         .padding(.leading, 25)
-        .help("\(snapshot.name) · \(snapshot.capturedAt.formatted(date: .numeric, time: .shortened)) · HTTP \(snapshot.statusCode)")
+        .help(
+            "\(snapshot.name) · \(snapshot.capturedAt.formatted(date: .numeric, time: .shortened)) · HTTP \(snapshot.statusCode)"
+        )
         .contextMenu {
             Button("Rename Snapshot…") { isRenameSheetPresented = true }
             Divider()
@@ -103,7 +108,8 @@ struct HistoricalSnapshotCollectionsSidebar: View {
         }
         .map { HistoricalCollectionGroup(id: $0.key, snapshots: $0.value) }
         .sorted {
-            let left = $0.latestSnapshot.source.collectionName.localizedCaseInsensitiveCompare($1.latestSnapshot.source.collectionName)
+            let left = $0.latestSnapshot.source.collectionName.localizedCaseInsensitiveCompare(
+                $1.latestSnapshot.source.collectionName)
             return left == .orderedSame ? $0.id.uuidString < $1.id.uuidString : left == .orderedAscending
         }
     }
@@ -130,7 +136,9 @@ private struct HistoricalSnapshotCollectionSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
-            Button { isExpanded.toggle() } label: {
+            Button {
+                isExpanded.toggle()
+            } label: {
                 HStack(spacing: 6) {
                     Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                         .font(.caption2.weight(.bold))
@@ -172,8 +180,10 @@ struct DeletedRequestSnapshotGroups: View {
         Dictionary(grouping: snapshots) { $0.source.identity }
             .map { HistoricalRequestGroup(identity: $0.key, snapshots: $0.value) }
             .sorted {
-                let left = $0.latestSnapshot.source.requestName.localizedCaseInsensitiveCompare($1.latestSnapshot.source.requestName)
-                return left == .orderedSame ? $0.identity.requestID.uuidString < $1.identity.requestID.uuidString : left == .orderedAscending
+                let left = $0.latestSnapshot.source.requestName.localizedCaseInsensitiveCompare(
+                    $1.latestSnapshot.source.requestName)
+                return left == .orderedSame
+                    ? $0.identity.requestID.uuidString < $1.identity.requestID.uuidString : left == .orderedAscending
             }
     }
 
@@ -216,7 +226,9 @@ struct DeletedRequestSnapshotGroups: View {
                     }
                     .buttonStyle(.plain)
                     .help("\(isExpanded ? "Hide" : "Show") \(snapshots.count) snapshots")
-                    .accessibilityLabel("\(isExpanded ? "Hide" : "Show") \(snapshots.count) snapshots for deleted request \(group.latestSnapshot.source.requestName)")
+                    .accessibilityLabel(
+                        "\(isExpanded ? "Hide" : "Show") \(snapshots.count) snapshots for deleted request \(group.latestSnapshot.source.requestName)"
+                    )
                     .accessibilityHint("Expands or collapses saved snapshots for this deleted request.")
                 }
                 .padding(.leading, 18)

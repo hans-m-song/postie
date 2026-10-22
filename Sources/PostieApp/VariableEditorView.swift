@@ -125,7 +125,8 @@ struct VariableEditorView: View {
 
     private func variableRow(_ row: VariableEditorRowState) -> some View {
         let nameError = nameError(for: row)
-        let canEditValue = row.isTrailing
+        let canEditValue =
+            row.isTrailing
             ? isEditable && !row.isBusy
             : isEditable && nameError == nil && row.nameDraft == row.name && !row.isBusy
 
@@ -263,8 +264,9 @@ struct VariableEditorView: View {
     @ViewBuilder
     private func valueCell(for row: VariableEditorRowState, canEditRow: Bool) -> some View {
         if !row.isTrailing,
-           let value = variables[row.name],
-           case .encrypted = value {
+            let value = variables[row.name],
+            case .encrypted = value
+        {
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 6) {
                     Label("Encrypted", systemImage: "lock.fill")
@@ -331,9 +333,10 @@ struct VariableEditorView: View {
 
     private func nameError(for row: VariableEditorRowState) -> String? {
         if row.isTrailing,
-           row.secretSaveInFlightName == row.nameDraft,
-           !row.nameDraft.isEmpty,
-           TemplateEngine.isValidVariableName(row.nameDraft) {
+            row.secretSaveInFlightName == row.nameDraft,
+            !row.nameDraft.isEmpty,
+            TemplateEngine.isValidVariableName(row.nameDraft)
+        {
             return nil
         }
         if row.isTrailing && row.nameDraft.isEmpty && row.valueDraft.isEmpty && !row.isSecretDraft {
@@ -427,8 +430,9 @@ struct VariableEditorView: View {
 
     private func updateName(_ name: String, id: UUID) {
         guard isEditable,
-              let row = rowState(for: id),
-              !row.isBusy else { return }
+            let row = rowState(for: id),
+            !row.isBusy
+        else { return }
 
         if row.isTrailing {
             if row.secretSaveTargetName != nil && row.secretSaveTargetName != name {
@@ -468,8 +472,9 @@ struct VariableEditorView: View {
 
     private func promoteTrailingPlainVariable(_ id: UUID) {
         guard trailingRow.id == id,
-              !trailingRow.isSecretDraft,
-              variableNameError(trailingRow.nameDraft) == nil else { return }
+            !trailingRow.isSecretDraft,
+            variableNameError(trailingRow.nameDraft) == nil
+        else { return }
 
         clearFailedSecretSaveTarget(for: id)
         let name = trailingRow.nameDraft
@@ -483,13 +488,14 @@ struct VariableEditorView: View {
 
     private func updatePlainValue(_ value: String, id: UUID) {
         guard isEditable,
-              let row = rowState(for: id),
-              !row.isTrailing,
-              variableNameError(row.nameDraft, excluding: row.name) == nil,
-              row.nameDraft == row.name,
-              !row.isBusy,
-              !row.isEditingSecret,
-              case .plain = variables[row.name] else { return }
+            let row = rowState(for: id),
+            !row.isTrailing,
+            variableNameError(row.nameDraft, excluding: row.name) == nil,
+            row.nameDraft == row.name,
+            !row.isBusy,
+            !row.isEditingSecret,
+            case .plain = variables[row.name]
+        else { return }
 
         do {
             try model.setPlainVariable(name: row.name, value: value, owner: activeOwner)
@@ -512,21 +518,26 @@ struct VariableEditorView: View {
         }
 
         guard variableNameError(row.nameDraft, excluding: row.name) == nil,
-              row.nameDraft == row.name,
-              !row.isEditingSecret,
-              let currentValue = variables[row.name],
-              currentValue.isEncrypted != isSecret else { return }
+            row.nameDraft == row.name,
+            !row.isEditingSecret,
+            let currentValue = variables[row.name],
+            currentValue.isEncrypted != isSecret
+        else { return }
 
         let targetOwner = activeOwner
         let session = activeSession
-        updateRow(id) { $0.isBusy = true; $0.errorMessage = nil }
+        updateRow(id) {
+            $0.isBusy = true; $0.errorMessage = nil
+        }
 
         Task { @MainActor in
             do {
                 try await model.setVariableSecret(isSecret, named: row.name, owner: targetOwner)
                 guard activeOwner == targetOwner, rowState(for: id) != nil else { return }
                 guard isVisible, activeSession == session else {
-                    updateRow(id) { $0.isBusy = false; $0.errorMessage = nil }
+                    updateRow(id) {
+                        $0.isBusy = false; $0.errorMessage = nil
+                    }
                     return
                 }
                 updateRow(id) {
@@ -541,7 +552,9 @@ struct VariableEditorView: View {
             } catch {
                 guard activeOwner == targetOwner, rowState(for: id) != nil else { return }
                 guard isVisible, activeSession == session else {
-                    updateRow(id) { $0.isBusy = false; $0.errorMessage = nil }
+                    updateRow(id) {
+                        $0.isBusy = false; $0.errorMessage = nil
+                    }
                     return
                 }
                 updateRow(id) {
@@ -556,7 +569,9 @@ struct VariableEditorView: View {
         guard isEditable, !row.isBusy, row.nameDraft == row.name else { return }
         let targetOwner = activeOwner
         let session = activeSession
-        updateRow(row.id) { $0.isBusy = true; $0.errorMessage = nil }
+        updateRow(row.id) {
+            $0.isBusy = true; $0.errorMessage = nil
+        }
 
         Task { @MainActor in
             do {
@@ -599,9 +614,10 @@ struct VariableEditorView: View {
 
     private func saveSecretEdit(for row: VariableEditorRowState) {
         guard isEditable,
-              row.isSecretDraft || row.isEditingSecret,
-              !row.isBusy,
-              let name = validSaveName(for: row) else { return }
+            row.isSecretDraft || row.isEditingSecret,
+            !row.isBusy,
+            let name = validSaveName(for: row)
+        else { return }
 
         let value = row.isTrailing ? row.valueDraft : row.secretDraft
         let targetOwner = activeOwner
@@ -648,9 +664,10 @@ struct VariableEditorView: View {
                 }
             } catch {
                 guard isVisible,
-                      activeSession == session,
-                      activeOwner == targetOwner,
-                      rowState(for: row.id) != nil else {
+                    activeSession == session,
+                    activeOwner == targetOwner,
+                    rowState(for: row.id) != nil
+                else {
                     model.discardVariableSecretEdit(
                         named: name,
                         owner: targetOwner,
@@ -756,8 +773,7 @@ struct VariableEditorView: View {
     private func resetTrailingRow(keepPromotedFocus: Bool = false) {
         discardFailedSecretSaveTarget(trailingRow)
         let previousID = trailingRow.id
-        if !keepPromotedFocus &&
-            (focusedField == .name(previousID) || focusedField == .value(previousID)) {
+        if !keepPromotedFocus && (focusedField == .name(previousID) || focusedField == .value(previousID)) {
             focusedField = nil
         }
         trailingRow = VariableEditorRowState(name: "", isTrailing: true)
@@ -871,7 +887,8 @@ struct VariableEditorView: View {
 
     private func discardFailedSecretSaveTarget(_ row: VariableEditorRowState) {
         guard let name = row.secretSaveTargetName,
-              let targetOwner = row.secretSaveTargetOwner else { return }
+            let targetOwner = row.secretSaveTargetOwner
+        else { return }
         model.discardVariableSecretEdit(
             named: name,
             owner: targetOwner,

@@ -4,16 +4,19 @@ import XCTest
 
 final class PreparationTests: XCTestCase {
     func testPrepareCanonicalQueryPreservesEncodedLiteralBracesWithoutResolvingThem() throws {
-        let state = QueryParameters.parse(displayURL: "https://example.test?%7B%7Bname%7D%7D=%7b%7bmissing%7d%7d&flag&empty=")
+        let state = QueryParameters.parse(
+            displayURL: "https://example.test?%7B%7Bname%7D%7D=%7b%7bmissing%7d%7d&flag&empty=")
         let configuration = HTTPRequestConfiguration(url: state.baseURL, query: state.fields)
 
         let request = try RequestPreparer.prepare(configuration)
 
-        XCTAssertEqual(request.url?.absoluteString, "https://example.test?%7B%7Bname%7D%7D=%7b%7bmissing%7d%7d&flag&empty=")
+        XCTAssertEqual(
+            request.url?.absoluteString, "https://example.test?%7B%7Bname%7D%7D=%7b%7bmissing%7d%7d&flag&empty=")
     }
 
     func testPrepareRealQueryTemplatesPreservesLiteralEncodedPartsAndEncodesValuesOnce() throws {
-        let state = QueryParameters.parse(displayURL: "https://example.test?{{name}}=%7B%7Bliteral%7D%7D%2f{{value}}+%2B&tag=a&tag=b#fragment")
+        let state = QueryParameters.parse(
+            displayURL: "https://example.test?{{name}}=%7B%7Bliteral%7D%7D%2f{{value}}+%2B&tag=a&tag=b#fragment")
         let configuration = HTTPRequestConfiguration(
             url: state.baseURL,
             query: state.fields,
@@ -22,18 +25,24 @@ final class PreparationTests: XCTestCase {
 
         let request = try RequestPreparer.prepare(configuration)
 
-        XCTAssertEqual(request.url?.absoluteString, "https://example.test?q%20name=%7B%7Bliteral%7D%7D%2fa%2Bb%2F%25%3F%26%23%3D%7B%7Bnested%7D%7D+%2B&tag=a&tag=b#fragment")
+        XCTAssertEqual(
+            request.url?.absoluteString,
+            "https://example.test?q%20name=%7B%7Bliteral%7D%7D%2fa%2Bb%2F%25%3F%26%23%3D%7B%7Bnested%7D%7D+%2B&tag=a&tag=b#fragment"
+        )
     }
 
     func testPrepareLegacyURLQueryAndRowsAppendsExactlyOnce() throws {
         let configuration = HTTPRequestConfiguration(
             url: "https://example.test?tag=url%2f&flag&empty=#fragment",
-            query: [HTTPField(name: "tag", value: "table/+"), HTTPField(name: "off", value: "ignored", isEnabled: false)]
+            query: [
+                HTTPField(name: "tag", value: "table/+"), HTTPField(name: "off", value: "ignored", isEnabled: false),
+            ]
         )
 
         let request = try RequestPreparer.prepare(configuration)
 
-        XCTAssertEqual(request.url?.absoluteString, "https://example.test?tag=url%2f&flag&empty=&tag=table%2F%2B#fragment")
+        XCTAssertEqual(
+            request.url?.absoluteString, "https://example.test?tag=url%2f&flag&empty=&tag=table%2F%2B#fragment")
     }
 
     func testPrepareLegacyAndCanonicalQueryProduceSameURL() throws {
@@ -45,7 +54,9 @@ final class PreparationTests: XCTestCase {
         let canonical = HTTPRequestConfiguration(url: normalized.baseURL, query: normalized.fields)
 
         XCTAssertEqual(try RequestPreparer.prepare(legacy).url, try RequestPreparer.prepare(canonical).url)
-        XCTAssertEqual(try RequestPreparer.prepare(canonical).url?.absoluteString, "https://example.test?tag=first%2f&tag=second&bare&tag=third#fragment")
+        XCTAssertEqual(
+            try RequestPreparer.prepare(canonical).url?.absoluteString,
+            "https://example.test?tag=first%2f&tag=second&bare&tag=third#fragment")
     }
 
     func testPreparePreservesEmptyQueryAndEmptyNameComponents() throws {
@@ -53,7 +64,8 @@ final class PreparationTests: XCTestCase {
             let state = QueryParameters.parse(displayURL: "https://example.test" + suffix)
             let configuration = HTTPRequestConfiguration(url: state.baseURL, query: state.fields + [HTTPField()])
 
-            XCTAssertEqual(try RequestPreparer.prepare(configuration).url?.absoluteString, "https://example.test" + suffix)
+            XCTAssertEqual(
+                try RequestPreparer.prepare(configuration).url?.absoluteString, "https://example.test" + suffix)
         }
     }
 
@@ -66,18 +78,23 @@ final class PreparationTests: XCTestCase {
             variables: ["replacement": .plain("a%2F+b")]
         )
 
-        XCTAssertEqual(try RequestPreparer.prepare(configuration).url?.absoluteString, "https://example.test?%71=a%252F%2Bb")
+        XCTAssertEqual(
+            try RequestPreparer.prepare(configuration).url?.absoluteString, "https://example.test?%71=a%252F%2Bb")
     }
 
     func testPrepareEscapedQueryTemplatesRemainLiteral() throws {
-        let state = QueryParameters.parse(displayURL: "https://example.test?raw=\\{{literal}}&encoded=%7B%7Bliteral%7D%7D")
+        let state = QueryParameters.parse(
+            displayURL: "https://example.test?raw=\\{{literal}}&encoded=%7B%7Bliteral%7D%7D")
         let configuration = HTTPRequestConfiguration(url: state.baseURL, query: state.fields)
 
-        XCTAssertEqual(try RequestPreparer.prepare(configuration).url?.absoluteString, "https://example.test?raw=%7B%7Bliteral%7D%7D&encoded=%7B%7Bliteral%7D%7D")
+        XCTAssertEqual(
+            try RequestPreparer.prepare(configuration).url?.absoluteString,
+            "https://example.test?raw=%7B%7Bliteral%7D%7D&encoded=%7B%7Bliteral%7D%7D")
     }
 
     func testPrepareScopedQueryIgnoresEncodedAndDisabledTemplates() async throws {
-        var state = QueryParameters.parse(displayURL: "https://example.test?literal=%7B%7Bmissing%7D%7D&actual={{value}}")
+        var state = QueryParameters.parse(
+            displayURL: "https://example.test?literal=%7B%7Bmissing%7D%7D&actual={{value}}")
         state.fields.append(HTTPField(name: "disabled", value: "{{alsoMissing}}", isEnabled: false))
         let configuration = HTTPRequestConfiguration(url: state.baseURL, query: state.fields)
 
@@ -87,7 +104,8 @@ final class PreparationTests: XCTestCase {
             decryptor: nil
         )
 
-        XCTAssertEqual(prepared.request.url?.absoluteString, "https://example.test?literal=%7B%7Bmissing%7D%7D&actual=a%26b")
+        XCTAssertEqual(
+            prepared.request.url?.absoluteString, "https://example.test?literal=%7B%7Bmissing%7D%7D&actual=a%26b")
         XCTAssertEqual(Set(prepared.referencedInputs.keys), ["value"])
     }
 
@@ -98,13 +116,13 @@ final class PreparationTests: XCTestCase {
             query: [
                 HTTPField(name: "tag", value: "first value"),
                 HTTPField(name: "disabled", value: "ignored", isEnabled: false),
-                HTTPField(name: "tag", value: "second")
+                HTTPField(name: "tag", value: "second"),
             ],
             headers: [
                 HTTPField(name: "X-Sequence", value: "first"),
                 HTTPField(name: "X-Sequence", value: "second"),
                 HTTPField(name: "Cookie", value: "first=one"),
-                HTTPField(name: "Cookie", value: "second=two")
+                HTTPField(name: "Cookie", value: "second=two"),
             ],
             body: "payload",
             bodyEnabled: true
@@ -126,7 +144,7 @@ final class PreparationTests: XCTestCase {
             url: "https://example.test/path?token=a%2Bb%2Fc",
             query: [
                 HTTPField(name: "x", value: "1"),
-                HTTPField(name: "search", value: "a+b/c")
+                HTTPField(name: "search", value: "a+b/c"),
             ]
         )
 
@@ -139,26 +157,31 @@ final class PreparationTests: XCTestCase {
 
     func testPrepareSubstitutesOnlyCompletePathSegmentsAndPreservesEncodedPathAndQuery() throws {
         let configuration = HTTPRequestConfiguration(
-            url: "https://example.test/root%2Fpart/:id/:id/prefix:id/:id-suffix/:9id/%3Aid?existing=a%2Bb%2Fc&param=:query#fragment-:id",
+            url:
+                "https://example.test/root%2Fpart/:id/:id/prefix:id/:id-suffix/:9id/%3Aid?existing=a%2Bb%2Fc&param=:query#fragment-:id",
             pathParameters: [
                 HTTPField(name: "id", value: "a/b%?#"),
                 HTTPField(name: "id", value: "disabled", isEnabled: false),
                 HTTPField(name: "unused", value: ""),
-                HTTPField(name: "unused", value: "duplicate")
+                HTTPField(name: "unused", value: "duplicate"),
             ]
         )
 
         let request = try RequestPreparer.prepare(configuration)
         let components = try XCTUnwrap(URLComponents(url: XCTUnwrap(request.url), resolvingAgainstBaseURL: false))
 
-        XCTAssertEqual(components.percentEncodedPath, "/root%2Fpart/a%2Fb%25%3F%23/a%2Fb%25%3F%23/prefix:id/:id-suffix/:9id/%3Aid")
+        XCTAssertEqual(
+            components.percentEncodedPath, "/root%2Fpart/a%2Fb%25%3F%23/a%2Fb%25%3F%23/prefix:id/:id-suffix/:9id/%3Aid")
         XCTAssertEqual(components.percentEncodedQuery, "existing=a%2Bb%2Fc&param=:query")
         XCTAssertEqual(components.percentEncodedFragment, "fragment-:id")
     }
 
     func testPathParameterNamesAreUniqueOrderedAndWorkWithTemplatedAuthority() {
         XCTAssertEqual(
-            RequestPreparer.pathParameterNames(in: "https://{{host}}/v1/:team/:user_2/:team/prefix:id/:9id/:bad-name/%3Aid?query=:ignored#fragment-:ignored"),
+            RequestPreparer.pathParameterNames(
+                in:
+                    "https://{{host}}/v1/:team/:user_2/:team/prefix:id/:9id/:bad-name/%3Aid?query=:ignored#fragment-:ignored"
+            ),
             ["team", "user_2"]
         )
     }
@@ -166,10 +189,16 @@ final class PreparationTests: XCTestCase {
     func testPrepareRequiresOneEnabledNonEmptyValueForEveryPathParameter() {
         let configurations = [
             HTTPRequestConfiguration(url: "https://example.test/users/:id"),
-            HTTPRequestConfiguration(url: "https://example.test/users/:id", pathParameters: [HTTPField(name: "id", value: "disabled", isEnabled: false)]),
-            HTTPRequestConfiguration(url: "https://example.test/users/:id", pathParameters: [HTTPField(name: "id", value: "")]),
-            HTTPRequestConfiguration(url: "https://example.test/users/:id", pathParameters: [HTTPField(name: "id", value: "first"), HTTPField(name: "id", value: "second")]),
-            HTTPRequestConfiguration(url: "https://example.test/users/:id", pathParameters: [HTTPField(name: "id", value: "{{unresolved}}")])
+            HTTPRequestConfiguration(
+                url: "https://example.test/users/:id",
+                pathParameters: [HTTPField(name: "id", value: "disabled", isEnabled: false)]),
+            HTTPRequestConfiguration(
+                url: "https://example.test/users/:id", pathParameters: [HTTPField(name: "id", value: "")]),
+            HTTPRequestConfiguration(
+                url: "https://example.test/users/:id",
+                pathParameters: [HTTPField(name: "id", value: "first"), HTTPField(name: "id", value: "second")]),
+            HTTPRequestConfiguration(
+                url: "https://example.test/users/:id", pathParameters: [HTTPField(name: "id", value: "{{unresolved}}")]),
         ]
 
         for configuration in configurations {
@@ -185,7 +214,7 @@ final class PreparationTests: XCTestCase {
                 HTTPField(name: "another", value: "expanded"),
                 HTTPField(name: "dot", value: "."),
                 HTTPField(name: "dots", value: ".."),
-                HTTPField(name: "space", value: " ")
+                HTTPField(name: "space", value: " "),
             ]
         )
 
@@ -196,17 +225,25 @@ final class PreparationTests: XCTestCase {
 
     func testPrepareRejectsUnsupportedURLsMethodsAndHeaderInjection() {
         XCTAssertThrowsError(try RequestPreparer.prepare(HTTPRequestConfiguration(url: "file:///tmp/body")))
-        XCTAssertThrowsError(try RequestPreparer.prepare(HTTPRequestConfiguration(method: "GET\nX: y", url: "https://example.test")))
-        XCTAssertThrowsError(try RequestPreparer.prepare(HTTPRequestConfiguration(url: "https://example.test", headers: [HTTPField(name: "Bad Name", value: "x")])))
-        XCTAssertThrowsError(try RequestPreparer.prepare(HTTPRequestConfiguration(url: "https://example.test", headers: [HTTPField(name: "X-Test", value: "safe\r\nInjected: yes")])))
+        XCTAssertThrowsError(
+            try RequestPreparer.prepare(HTTPRequestConfiguration(method: "GET\nX: y", url: "https://example.test")))
+        XCTAssertThrowsError(
+            try RequestPreparer.prepare(
+                HTTPRequestConfiguration(
+                    url: "https://example.test", headers: [HTTPField(name: "Bad Name", value: "x")])))
+        XCTAssertThrowsError(
+            try RequestPreparer.prepare(
+                HTTPRequestConfiguration(
+                    url: "https://example.test", headers: [HTTPField(name: "X-Test", value: "safe\r\nInjected: yes")])))
     }
 
     func testPrepareRejectsUnexpandedTemplatesInSentFields() {
         let configurations = [
             HTTPRequestConfiguration(url: "https://example.test/{{path}}"),
             HTTPRequestConfiguration(url: "https://example.test", query: [HTTPField(name: "key", value: "{{value}}")]),
-            HTTPRequestConfiguration(url: "https://example.test", headers: [HTTPField(name: "Authorization", value: "Bearer {{token}}")]),
-            HTTPRequestConfiguration(url: "https://example.test", body: "{{body}}", bodyEnabled: true)
+            HTTPRequestConfiguration(
+                url: "https://example.test", headers: [HTTPField(name: "Authorization", value: "Bearer {{token}}")]),
+            HTTPRequestConfiguration(url: "https://example.test", body: "{{body}}", bodyEnabled: true),
         ]
 
         for configuration in configurations {
@@ -249,13 +286,13 @@ final class PreparationTests: XCTestCase {
             url: "https://{{host}}.test/",
             headers: [
                 HTTPField(name: "X-Values", value: "{{winner}}|{{collectionOnly}}|{{globalOnly}}|{{nested}}"),
-                HTTPField(name: "X-Literal", value: "\\{{winner}}|json}}")
+                HTTPField(name: "X-Literal", value: "\\{{winner}}|json}}"),
             ],
             body: "{{nested}}",
             bodyEnabled: true,
             variables: [
                 "winner": .plain("request"),
-                "nested": .plain("{{globalOnly}}")
+                "nested": .plain("{{globalOnly}}"),
             ]
         )
         let context = VariableContext(
@@ -263,11 +300,11 @@ final class PreparationTests: XCTestCase {
                 "host": .plain("api"),
                 "winner": .plain("global"),
                 "collectionOnly": .plain("global collection"),
-                "globalOnly": .plain("global")
+                "globalOnly": .plain("global"),
             ],
             collection: [
                 "winner": .plain("collection"),
-                "collectionOnly": .plain("collection")
+                "collectionOnly": .plain("collection"),
             ]
         )
 
@@ -318,11 +355,12 @@ final class PreparationTests: XCTestCase {
         let context = VariableContext(request: [
             "segment": .plain("a/b%?#"),
             "queryName": .plain("q name"),
-            "queryValue": .plain("a+b/c%?#")
+            "queryValue": .plain("a+b/c%?#"),
         ])
 
         let prepared = try await RequestPreparer.prepare(configuration, context: context, decryptor: nil)
-        let components = try XCTUnwrap(URLComponents(url: XCTUnwrap(prepared.request.url), resolvingAgainstBaseURL: false))
+        let components = try XCTUnwrap(
+            URLComponents(url: XCTUnwrap(prepared.request.url), resolvingAgainstBaseURL: false))
 
         XCTAssertEqual(components.percentEncodedPath, "/a%2Fb%25%3F%23")
         XCTAssertEqual(components.percentEncodedQuery, "existing=a%2Fb&q%20name=a%2Bb%2Fc%25%3F%23")
@@ -333,19 +371,20 @@ final class PreparationTests: XCTestCase {
         let password = SecretEnvelope(combined: "basic-password")
         let decryptor = FakeDecryptor(values: [
             selectedSecret.combined: "used secret",
-            password.combined: "pässword"
+            password.combined: "pässword",
         ])
         let configuration = HTTPRequestConfiguration(
             url: "https://example.test",
             headers: [HTTPField(name: "X-Secret", value: "{{secret}}")],
             variables: ["shadowed": .encrypted(SecretEnvelope(combined: "request-shadow"))],
-            authentication: RequestAuthentication(kind: .basic, username: "usér", password: password,
-                                                  token: SecretEnvelope(combined: "unused-inactive-token"))
+            authentication: RequestAuthentication(
+                kind: .basic, username: "usér", password: password,
+                token: SecretEnvelope(combined: "unused-inactive-token"))
         )
         let context = VariableContext(
             global: [
                 "secret": .encrypted(SecretEnvelope(combined: "global-shadow")),
-                "unused": .encrypted(SecretEnvelope(combined: "unused-global"))
+                "unused": .encrypted(SecretEnvelope(combined: "unused-global")),
             ],
             collection: ["secret": .plain("collection shadow")],
             request: ["secret": .encrypted(selectedSecret)]
@@ -370,14 +409,14 @@ final class PreparationTests: XCTestCase {
             privateName.combined: "X-Name-Secret",
             privateValue.combined: "value secret",
             inheritedValue.combined: "inherited secret",
-            disabledValue.combined: "disabled secret"
+            disabledValue.combined: "disabled secret",
         ])
         let configuration = HTTPRequestConfiguration(
             url: "https://example.test",
             headers: [
                 HTTPField(name: "{{privateName}}", value: "name value"),
                 HTTPField(name: "X-Private-Value", value: "Bearer {{privateValue}}"),
-                HTTPField(name: "X-Disabled", value: "{{disabledValue}}", isEnabled: false)
+                HTTPField(name: "X-Disabled", value: "{{disabledValue}}", isEnabled: false),
             ]
         )
         let context = VariableContext(
@@ -385,7 +424,7 @@ final class PreparationTests: XCTestCase {
             request: [
                 "privateName": .encrypted(privateName),
                 "privateValue": .encrypted(privateValue),
-                "disabledValue": .encrypted(disabledValue)
+                "disabledValue": .encrypted(disabledValue),
             ]
         )
         let collection = CollectionRequestDefaults(headers: [
@@ -402,19 +441,25 @@ final class PreparationTests: XCTestCase {
 
         XCTAssertEqual(
             prepared.sensitiveRequestHeaderNames,
-            ["authorization", "proxy-authorization", "cookie", "set-cookie", "x-name-secret", "x-private-value", "x-inherited-private"]
+            [
+                "authorization", "proxy-authorization", "cookie", "set-cookie", "x-name-secret", "x-private-value",
+                "x-inherited-private",
+            ]
         )
         XCTAssertEqual(prepared.secretRequestHeaderNames, ["x-name-secret"])
-        XCTAssertEqual(prepared.requestHeaderSources, [
-            "x-name-secret": .request,
-            "x-private-value": .request,
-            "x-inherited-private": .collection
-        ])
+        XCTAssertEqual(
+            prepared.requestHeaderSources,
+            [
+                "x-name-secret": .request,
+                "x-private-value": .request,
+                "x-inherited-private": .collection,
+            ])
         XCTAssertEqual(headerValue("X-Name-Secret", in: prepared.request), "name value")
         XCTAssertEqual(headerValue("X-Private-Value", in: prepared.request), "Bearer value secret")
         XCTAssertEqual(headerValue("X-Inherited-Private", in: prepared.request), "inherited secret")
         XCTAssertNil(prepared.referencedInputs["disabledValue"])
-        XCTAssertEqual(Set(decryptedEnvelopes), Set([privateName.combined, privateValue.combined, inheritedValue.combined]))
+        XCTAssertEqual(
+            Set(decryptedEnvelopes), Set([privateName.combined, privateValue.combined, inheritedValue.combined]))
     }
 
     func testHeaderMetadataInitializersNormalizeNamesAndDefaultToEmpty() throws {
@@ -432,7 +477,8 @@ final class PreparationTests: XCTestCase {
             secretRequestHeaderNames: secretNames,
             requestHeaderSources: headerSources
         )
-        let preparedWithoutNames = PreparedHTTPRequest(configuration: configuration, request: request, referencedInputs: [:])
+        let preparedWithoutNames = PreparedHTTPRequest(
+            configuration: configuration, request: request, referencedInputs: [:])
         let redirect = HTTPRedirect(
             statusCode: 302,
             url: url,
@@ -519,7 +565,7 @@ final class PreparationTests: XCTestCase {
         )
         let decryptor = FakeDecryptor(values: [
             requestKey.combined: "unused request key",
-            collectionKey.combined: "raw/{{suffix}}+ /="
+            collectionKey.combined: "raw/{{suffix}}+ /=",
         ])
 
         let prepared = try await RequestPreparer.prepare(
@@ -534,7 +580,9 @@ final class PreparationTests: XCTestCase {
         XCTAssertEqual(Set(decryptedEnvelopes), [collectionKey.combined])
         XCTAssertEqual(prepared.referencedInputs["suffix"]?.value, "request value")
         XCTAssertNil(prepared.referencedInputs["missingCollectionValue"])
-        XCTAssertEqual(prepared.sensitiveRequestHeaderNames, ["authorization", "proxy-authorization", "cookie", "set-cookie", "x-service-key"])
+        XCTAssertEqual(
+            prepared.sensitiveRequestHeaderNames,
+            ["authorization", "proxy-authorization", "cookie", "set-cookie", "x-service-key"])
         XCTAssertEqual(prepared.secretRequestHeaderNames, [])
         XCTAssertEqual(prepared.requestHeaderSources, ["x-service-key": .collectionAuth])
     }
@@ -555,7 +603,9 @@ final class PreparationTests: XCTestCase {
         XCTAssertEqual(headerValue("X-Service-Key", in: prepared.request), "manual value")
         XCTAssertTrue(decryptedEnvelopes.isEmpty)
         XCTAssertNil(prepared.referencedInputs["missingApiKeyVariable"])
-        XCTAssertEqual(prepared.sensitiveRequestHeaderNames, ["authorization", "proxy-authorization", "cookie", "set-cookie", "x-service-key"])
+        XCTAssertEqual(
+            prepared.sensitiveRequestHeaderNames,
+            ["authorization", "proxy-authorization", "cookie", "set-cookie", "x-service-key"])
         XCTAssertEqual(prepared.secretRequestHeaderNames, [])
         XCTAssertEqual(prepared.requestHeaderSources, ["x-service-key": .request])
     }
@@ -570,7 +620,8 @@ final class PreparationTests: XCTestCase {
             authentication: RequestAuthentication(kind: .apiKey, apiKeyHeaderName: "x-service-key")
         )
 
-        let prepared = try await RequestPreparer.prepare(configuration, context: VariableContext(), decryptor: nil, collection: collection)
+        let prepared = try await RequestPreparer.prepare(
+            configuration, context: VariableContext(), decryptor: nil, collection: collection)
 
         XCTAssertEqual(headerValue("X-Service-Key", in: prepared.request), "manual value")
     }
@@ -587,7 +638,8 @@ final class PreparationTests: XCTestCase {
             )
 
             do {
-                _ = try await RequestPreparer.prepare(configuration, context: VariableContext(), decryptor: FakeDecryptor(values: ["valid-key": "key"]))
+                _ = try await RequestPreparer.prepare(
+                    configuration, context: VariableContext(), decryptor: FakeDecryptor(values: ["valid-key": "key"]))
                 XCTFail("Expected invalid API key header name '\(headerName)' to fail.")
             } catch {
                 XCTAssertTrue(error.localizedDescription.contains("header name"))
@@ -605,7 +657,8 @@ final class PreparationTests: XCTestCase {
             )
 
             do {
-                _ = try await RequestPreparer.prepare(configuration, context: VariableContext(), decryptor: FakeDecryptor(values: [combined: value]))
+                _ = try await RequestPreparer.prepare(
+                    configuration, context: VariableContext(), decryptor: FakeDecryptor(values: [combined: value]))
                 XCTFail("Expected invalid API key value to fail.")
             } catch {
                 XCTAssertTrue(error.localizedDescription.contains("API key"))
@@ -622,7 +675,8 @@ final class PreparationTests: XCTestCase {
         )
         let decryptor = FakeDecryptor(values: [apiKey.combined: "selected API key value"])
 
-        let prepared = try await RequestPreparer.prepare(configuration, context: VariableContext(), decryptor: decryptor)
+        let prepared = try await RequestPreparer.prepare(
+            configuration, context: VariableContext(), decryptor: decryptor)
         let decryptedEnvelopes = await decryptor.requestedEnvelopes()
 
         XCTAssertEqual(headerValue("X-Service-Key", in: prepared.request), "selected API key value")
@@ -638,7 +692,8 @@ final class PreparationTests: XCTestCase {
         )
         let decryptor = FakeDecryptor(values: [:])
 
-        let prepared = try await RequestPreparer.prepare(configuration, context: VariableContext(), decryptor: decryptor)
+        let prepared = try await RequestPreparer.prepare(
+            configuration, context: VariableContext(), decryptor: decryptor)
         let decryptedEnvelopes = await decryptor.requestedEnvelopes()
 
         XCTAssertEqual(headerValue("Authorization", in: prepared.request), "manual authorization")
@@ -648,12 +703,14 @@ final class PreparationTests: XCTestCase {
 
     func testExplicitNoneDoesNotInheritCollectionAPIKey() async throws {
         let collectionKey = SecretEnvelope(combined: "collection-api-key")
-        let collection = CollectionRequestDefaults(authentication: RequestAuthentication(
-            kind: .apiKey,
-            apiKeyHeaderName: "X-Service-Key",
-            apiKey: collectionKey
-        ))
-        let inheritedConfiguration = HTTPRequestConfiguration(url: "https://example.test", inheritsCollectionAuthentication: true)
+        let collection = CollectionRequestDefaults(
+            authentication: RequestAuthentication(
+                kind: .apiKey,
+                apiKeyHeaderName: "X-Service-Key",
+                apiKey: collectionKey
+            ))
+        let inheritedConfiguration = HTTPRequestConfiguration(
+            url: "https://example.test", inheritsCollectionAuthentication: true)
         let inheritedDecryptor = FakeDecryptor(values: [collectionKey.combined: "collection api key"])
 
         let inherited = try await RequestPreparer.prepare(
@@ -693,13 +750,13 @@ final class PreparationTests: XCTestCase {
             headers: [
                 HTTPField(name: "X-Override", value: "first"),
                 HTTPField(name: "x-override", value: "second"),
-                HTTPField(name: "x-disabled", value: "unused", isEnabled: false)
+                HTTPField(name: "x-disabled", value: "unused", isEnabled: false),
             ]
         )
         let collection = CollectionRequestDefaults(headers: [
             HTTPField(name: "X-Override", value: "inherited"),
             HTTPField(name: "X-Collection", value: "{{winner}}"),
-            HTTPField(name: "X-Disabled", value: "must be suppressed")
+            HTTPField(name: "X-Disabled", value: "must be suppressed"),
         ])
         let context = VariableContext(
             global: ["winner": .plain("global")],
@@ -707,7 +764,8 @@ final class PreparationTests: XCTestCase {
             request: ["winner": .plain("request")]
         )
 
-        let prepared = try await RequestPreparer.prepare(configuration, context: context, decryptor: nil, collection: collection)
+        let prepared = try await RequestPreparer.prepare(
+            configuration, context: context, decryptor: nil, collection: collection)
 
         XCTAssertEqual(headerValue("X-Override", in: prepared.request), "first,second")
         XCTAssertEqual(headerValue("X-Collection", in: prepared.request), "request")
@@ -728,7 +786,8 @@ final class PreparationTests: XCTestCase {
         )
         let decryptor = FakeDecryptor(values: [:])
 
-        let prepared = try await RequestPreparer.prepare(configuration, context: context, decryptor: decryptor, collection: collection)
+        let prepared = try await RequestPreparer.prepare(
+            configuration, context: context, decryptor: decryptor, collection: collection)
         let decryptedEnvelopes = await decryptor.requestedEnvelopes()
 
         XCTAssertNil(headerValue("X-Private", in: prepared.request))
@@ -754,7 +813,8 @@ final class PreparationTests: XCTestCase {
         )
         let collectionDecryptor = FakeDecryptor(values: [collectionToken.combined: "collection-secret"])
 
-        let inherited = try await RequestPreparer.prepare(configuration, context: VariableContext(), decryptor: collectionDecryptor, collection: defaults)
+        let inherited = try await RequestPreparer.prepare(
+            configuration, context: VariableContext(), decryptor: collectionDecryptor, collection: defaults)
         let inheritedEnvelopes = await collectionDecryptor.requestedEnvelopes()
 
         XCTAssertEqual(headerValue("Authorization", in: inherited.request), "Bearer collection-secret")
@@ -766,7 +826,8 @@ final class PreparationTests: XCTestCase {
         var explicitConfiguration = configuration
         explicitConfiguration.inheritsCollectionAuthentication = false
         let requestDecryptor = FakeDecryptor(values: [requestToken.combined: "request-secret"])
-        let explicit = try await RequestPreparer.prepare(explicitConfiguration, context: VariableContext(), decryptor: requestDecryptor, collection: defaults)
+        let explicit = try await RequestPreparer.prepare(
+            explicitConfiguration, context: VariableContext(), decryptor: requestDecryptor, collection: defaults)
         let explicitEnvelopes = await requestDecryptor.requestedEnvelopes()
 
         XCTAssertEqual(headerValue("Authorization", in: explicit.request), "Bearer request-secret")

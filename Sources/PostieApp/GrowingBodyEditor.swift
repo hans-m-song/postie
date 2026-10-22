@@ -107,8 +107,9 @@ struct GrowingBodyEditor: NSViewRepresentable {
         let textView = hostView.textView
         let width = proposal.width ?? textView.bounds.width
         guard width > 0,
-              let textContainer = textView.textContainer,
-              let layoutManager = textView.layoutManager else {
+            let textContainer = textView.textContainer,
+            let layoutManager = textView.layoutManager
+        else {
             return CGSize(width: max(0, width), height: Self.minimumHeight(for: textView))
         }
 
@@ -129,7 +130,8 @@ struct GrowingBodyEditor: NSViewRepresentable {
 
     private static func minimumHeight(for textView: NSTextView) -> CGFloat {
         let font = textView.font ?? NSFont.monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
-        let lineHeight = textView.layoutManager?.defaultLineHeight(for: font)
+        let lineHeight =
+            textView.layoutManager?.defaultLineHeight(for: font)
             ?? ceil(font.ascender - font.descender + font.leading)
         return ceil(lineHeight + textView.textContainerInset.height * 2)
     }
@@ -186,9 +188,8 @@ struct GrowingBodyEditor: NSViewRepresentable {
             completionVariables: [VariableCompletion]
         ) {
             let completionVariablesChanged = self.completionVariables != completionVariables
-            guard self.syntax != syntax ||
-                  self.availableVariables != availableVariables ||
-                  completionVariablesChanged else {
+            guard self.syntax != syntax || self.availableVariables != availableVariables || completionVariablesChanged
+            else {
                 return
             }
             self.syntax = syntax
@@ -245,8 +246,9 @@ struct GrowingBodyEditor: NSViewRepresentable {
 
         func textDidChange(_ notification: Notification) {
             guard !isUpdatingFromBinding,
-                  let textView = notification.object as? NSTextView,
-                  text.wrappedValue != textView.string else { return }
+                let textView = notification.object as? NSTextView,
+                text.wrappedValue != textView.string
+            else { return }
             needsCaretReveal = true
             text.wrappedValue = textView.string
             refreshCompletion(in: textView)
@@ -289,18 +291,19 @@ struct GrowingBodyEditor: NSViewRepresentable {
             }
 
             guard commandSelector == #selector(NSResponder.insertNewline(_:)),
-                  NSApp.currentEvent?.modifierFlags.contains(.command) != true,
-                  syntax == .json,
-                  isActive,
-                  textView.isEditable,
-                  !textView.hasMarkedText(),
-                  case let .replace(range, replacement, selection) = JSONBodyEditing.edit(
+                NSApp.currentEvent?.modifierFlags.contains(.command) != true,
+                syntax == .json,
+                isActive,
+                textView.isEditable,
+                !textView.hasMarkedText(),
+                case let .replace(range, replacement, selection) = JSONBodyEditing.edit(
                     in: textView.string,
                     range: textView.selectedRange(),
                     replacement: "\n",
                     inputKind: .newline,
                     stringStateCache: &jsonStringStateCache
-                  ) else {
+                )
+            else {
                 return false
             }
 
@@ -318,22 +321,24 @@ struct GrowingBodyEditor: NSViewRepresentable {
         ) -> Bool {
             jsonStringStateCache.invalidate(from: affectedCharRange.location)
             guard !isApplyingPairEdit,
-                  syntax == .json,
-                  isActive,
-                  !textView.hasMarkedText(),
-                  let replacementString else {
+                syntax == .json,
+                isActive,
+                !textView.hasMarkedText(),
+                let replacementString
+            else {
                 return true
             }
 
             let inputKind = pairingInputKind(for: replacementString)
             guard inputKind != .other,
-                  let edit = JSONBodyEditing.edit(
+                let edit = JSONBodyEditing.edit(
                     in: textView.string,
                     range: affectedCharRange,
                     replacement: replacementString,
                     inputKind: inputKind,
                     stringStateCache: &jsonStringStateCache
-                  ) else {
+                )
+            else {
                 return true
             }
 
@@ -355,14 +360,15 @@ struct GrowingBodyEditor: NSViewRepresentable {
 
         func refreshCompletion(in textView: NSTextView) {
             guard isActive,
-                  textView.isEditable,
-                  textView.window?.firstResponder === textView,
-                  !textView.hasMarkedText(),
-                  !completionVariables.isEmpty,
-                  let context = VariableCompletionMatcher.bodyContext(
+                textView.isEditable,
+                textView.window?.firstResponder === textView,
+                !textView.hasMarkedText(),
+                !completionVariables.isEmpty,
+                let context = VariableCompletionMatcher.bodyContext(
                     in: textView.string,
                     selection: textView.selectedRange()
-                  ) else {
+                )
+            else {
                 dismissCompletion()
                 return
             }
@@ -412,7 +418,8 @@ struct GrowingBodyEditor: NSViewRepresentable {
             let origin = textView.textContainerOrigin
             let lineHeight = textView.font?.pointSize ?? NSFont.systemFontSize
             guard let layoutManager = textView.layoutManager,
-                  let textContainer = textView.textContainer else {
+                let textContainer = textView.textContainer
+            else {
                 return NSRect(x: origin.x, y: origin.y, width: 1, height: lineHeight)
             }
 
@@ -471,7 +478,8 @@ struct GrowingBodyEditor: NSViewRepresentable {
             }
 
             guard !replacement.isEmpty,
-                  event.characters == replacement else {
+                event.characters == replacement
+            else {
                 return .other
             }
             return .typing
@@ -483,16 +491,17 @@ struct GrowingBodyEditor: NSViewRepresentable {
 
         private func acceptCompletion(at index: Int) {
             guard completionSuggestions.indices.contains(index),
-                  let context = completionContext,
-                  let textView = hostView?.textView,
-                  isActive,
-                  textView.isEditable,
-                  textView.window?.firstResponder === textView,
-                  !textView.hasMarkedText(),
-                  VariableCompletionMatcher.bodyContext(
+                let context = completionContext,
+                let textView = hostView?.textView,
+                isActive,
+                textView.isEditable,
+                textView.window?.firstResponder === textView,
+                !textView.hasMarkedText(),
+                VariableCompletionMatcher.bodyContext(
                     in: textView.string,
                     selection: textView.selectedRange()
-                  ) == context else {
+                ) == context
+            else {
                 dismissCompletion()
                 return
             }
@@ -574,10 +583,11 @@ struct GrowingBodyEditor: NSViewRepresentable {
             presentationTask = Task { @MainActor [weak self, weak hostView] in
                 let result = await task.value
                 guard let self,
-                      let hostView,
-                      !result.isCancelled,
-                      generation == self.highlightGeneration,
-                      hostView.textView.string == request.text else {
+                    let hostView,
+                    !result.isCancelled,
+                    generation == self.highlightGeneration,
+                    hostView.textView.string == request.text
+                else {
                     return
                 }
                 guard !hostView.textView.hasMarkedText() else {

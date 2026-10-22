@@ -76,8 +76,11 @@ struct AuthenticationEditor: View {
             }
 
             if inherits {
-                Label("Uses collection authentication, resolved with this request’s variables.", systemImage: "arrow.turn.down.right")
-                    .font(.callout).foregroundStyle(.secondary)
+                Label(
+                    "Uses collection authentication, resolved with this request’s variables.",
+                    systemImage: "arrow.turn.down.right"
+                )
+                .font(.callout).foregroundStyle(.secondary)
                 if let requestIdentity {
                     Button("Edit collection authentication") {
                         model.showCollection(requestIdentity.collectionID, section: .authentication)
@@ -99,16 +102,12 @@ struct AuthenticationEditor: View {
     private var isAuthenticationSectionActive: Bool {
         switch owner {
         case let .request(identity):
-            return model.selectedIdentity == identity &&
-                model.selectedCollectionID == nil &&
-                !model.showsGlobalVariables && !model.showsGlobalSettings &&
-                !model.showsOngoingRequests &&
-                model.requestEditorSection(for: identity) == .authentication
+            return model.selectedIdentity == identity && model.selectedCollectionID == nil
+                && !model.showsGlobalVariables && !model.showsGlobalSettings && !model.showsOngoingRequests
+                && model.requestEditorSection(for: identity) == .authentication
         case let .collection(id):
-            return model.selectedCollectionID == id &&
-                model.collectionEditorSection == .authentication &&
-                !model.showsGlobalVariables && !model.showsGlobalSettings &&
-                !model.showsOngoingRequests
+            return model.selectedCollectionID == id && model.collectionEditorSection == .authentication
+                && !model.showsGlobalVariables && !model.showsGlobalSettings && !model.showsOngoingRequests
         case .global:
             return false
         }
@@ -129,10 +128,11 @@ struct AuthenticationEditor: View {
         case .basic:
             basicFields
         case .bearer:
-            AuthenticationSecretEditor(owner: owner, field: .token, title: "Bearer token",
-                                       availableVariables: availableVariables,
-                                       isSectionActive: isAuthenticationSectionActive,
-                                       isEditing: $isEditingToken, isBusy: $isTokenBusy)
+            AuthenticationSecretEditor(
+                owner: owner, field: .token, title: "Bearer token",
+                availableVariables: availableVariables,
+                isSectionActive: isAuthenticationSectionActive,
+                isEditing: $isEditingToken, isBusy: $isTokenBusy)
         case .apiKey:
             apiKeyFields
         }

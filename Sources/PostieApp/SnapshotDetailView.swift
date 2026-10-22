@@ -41,10 +41,13 @@ struct SnapshotDetailView: View {
         } message: {
             Text("This removes the saved request and response snapshot.")
         }
-        .alert("Could not copy snapshot JSON", isPresented: Binding(
-            get: { copyJSONError != nil },
-            set: { if !$0 { copyJSONError = nil } }
-        )) {
+        .alert(
+            "Could not copy snapshot JSON",
+            isPresented: Binding(
+                get: { copyJSONError != nil },
+                set: { if !$0 { copyJSONError = nil } }
+            )
+        ) {
             Button("OK") { copyJSONError = nil }
         } message: {
             Text(copyJSONError ?? "The snapshot could not be copied.")
@@ -59,11 +62,13 @@ struct SnapshotDetailView: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
                 if let summary {
-                    Text("\(summary.source.collectionName) / \(summary.source.requestName) · \(summary.capturedAt.formatted(date: .long, time: .shortened))")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                        .truncationMode(.middle)
+                    Text(
+                        "\(summary.source.collectionName) / \(summary.source.requestName) · \(summary.capturedAt.formatted(date: .long, time: .shortened))"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .truncationMode(.middle)
                 }
             }
             Spacer(minLength: 0)
@@ -77,7 +82,9 @@ struct SnapshotDetailView: View {
             .disabled(model.openedSnapshots[snapshotID] == nil || isCopyingJSON || model.isTerminating)
             Button("Rename…") { isRenameSheetPresented = true }
                 .disabled(summary == nil || model.isTerminating)
-            Button(role: .destructive) { isDeleteConfirmationPresented = true } label: {
+            Button(role: .destructive) {
+                isDeleteConfirmationPresented = true
+            } label: {
                 Image(systemName: "trash")
             }
             .help("Delete snapshot")
@@ -231,7 +238,7 @@ private struct SnapshotRequestPane: View {
     }
 
     private static let standardSensitiveHeaderNames: Set<String> = [
-        "authorization", "proxy-authorization", "cookie", "set-cookie"
+        "authorization", "proxy-authorization", "cookie", "set-cookie",
     ]
 
     var body: some View {
@@ -261,12 +268,14 @@ private struct SnapshotRequestPane: View {
                             secretNames: requestTemplateSecretNames
                         )
                         if opened.template.bodyEnabled {
-                            SnapshotValueLine(label: "Body syntax", value: opened.template.bodySyntax.rawValue.uppercased())
+                            SnapshotValueLine(
+                                label: "Body syntax", value: opened.template.bodySyntax.rawValue.uppercased())
                             SnapshotLongValue(label: "Body template", value: opened.template.body)
                         } else {
                             SnapshotValueLine(label: "Body", value: "Disabled")
                         }
-                        SnapshotValueLine(label: "Follow redirects", value: opened.template.options.followRedirects ? "On" : "Off")
+                        SnapshotValueLine(
+                            label: "Follow redirects", value: opened.template.options.followRedirects ? "On" : "Off")
                     }
 
                     if let submitted {
@@ -371,12 +380,15 @@ private struct SnapshotResponsePane: View {
                     .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
 
                     if response.redirectLimitReached {
-                        Label("Stopped after 10 redirects. The final redirect response is shown below.", systemImage: "arrow.triangle.2.circlepath")
-                            .font(.callout)
-                            .foregroundStyle(.orange)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(11)
-                            .background(.orange.opacity(0.09), in: RoundedRectangle(cornerRadius: 8))
+                        Label(
+                            "Stopped after 10 redirects. The final redirect response is shown below.",
+                            systemImage: "arrow.triangle.2.circlepath"
+                        )
+                        .font(.callout)
+                        .foregroundStyle(.orange)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(11)
+                        .background(.orange.opacity(0.09), in: RoundedRectangle(cornerRadius: 8))
                     }
 
                     ForEach(response.redirects) { redirect in
@@ -386,8 +398,11 @@ private struct SnapshotResponsePane: View {
                             isExpanded: Binding(
                                 get: { expandedRedirectIDs.contains(redirect.id) },
                                 set: { expanded in
-                                    if expanded { expandedRedirectIDs.insert(redirect.id) }
-                                    else { expandedRedirectIDs.remove(redirect.id) }
+                                    if expanded {
+                                        expandedRedirectIDs.insert(redirect.id)
+                                    } else {
+                                        expandedRedirectIDs.remove(redirect.id)
+                                    }
                                 }
                             )
                         )
@@ -398,10 +413,11 @@ private struct SnapshotResponsePane: View {
                             SnapshotValueLine(label: "Method", value: response.effectiveMethod.uppercased())
                             SnapshotValueLine(label: "URL", value: response.finalURL.absoluteString)
                         }
-                        SnapshotHeaderList(title: "Request headers", fields: response.requestHeaders,
-                                           sensitiveNames: response.sensitiveRequestHeaderNames,
-                                           secretNames: response.secretRequestHeaderNames,
-                                           sources: response.requestHeaderSources)
+                        SnapshotHeaderList(
+                            title: "Request headers", fields: response.requestHeaders,
+                            sensitiveNames: response.sensitiveRequestHeaderNames,
+                            secretNames: response.secretRequestHeaderNames,
+                            sources: response.requestHeaderSources)
                         SnapshotHeaderList(title: "Response headers", fields: response.responseHeaders)
                         SnapshotResponseBodyPreview(response: response)
                     }
@@ -506,7 +522,9 @@ private struct SnapshotFieldList: View {
                     HStack(alignment: .top, spacing: 8) {
                         Text(field.name.isEmpty ? "(empty name)" : field.name)
                             .frame(width: 112, alignment: .leading)
-                        if sensitiveNames.contains(field.name.lowercased()) || secretNames.contains(field.name.lowercased()) {
+                        if sensitiveNames.contains(field.name.lowercased())
+                            || secretNames.contains(field.name.lowercased())
+                        {
                             SnapshotSensitiveValue(value: field.value)
                                 .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
                         } else {
@@ -674,10 +692,11 @@ private struct SnapshotRedirectDisclosure: View {
         DisclosureGroup(isExpanded: $isExpanded) {
             VStack(alignment: .leading, spacing: 12) {
                 if showsResolvedRequest {
-                    SnapshotHeaderList(title: "Request headers", fields: redirect.requestHeaders,
-                                       sensitiveNames: redirect.sensitiveRequestHeaderNames,
-                                       secretNames: redirect.secretRequestHeaderNames,
-                                       sources: redirect.requestHeaderSources)
+                    SnapshotHeaderList(
+                        title: "Request headers", fields: redirect.requestHeaders,
+                        sensitiveNames: redirect.sensitiveRequestHeaderNames,
+                        secretNames: redirect.secretRequestHeaderNames,
+                        sources: redirect.requestHeaderSources)
                 }
                 SnapshotHeaderList(title: "Response headers", fields: redirect.responseHeaders)
             }
@@ -687,12 +706,14 @@ private struct SnapshotRedirectDisclosure: View {
                 Text("\(redirect.statusCode) \(snapshotStatusReason(redirect.statusCode))")
                     .fontWeight(.medium)
                 if showsResolvedRequest {
-                    Text("· \(redirect.method) \(redirect.url.absoluteString) → \(redirect.nextMethod) \(redirect.nextURL.absoluteString)")
-                        .lineLimit(2)
-                        .truncationMode(.middle)
-                        .foregroundStyle(.secondary)
-                        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-                        .fixedSize(horizontal: false, vertical: true)
+                    Text(
+                        "· \(redirect.method) \(redirect.url.absoluteString) → \(redirect.nextMethod) \(redirect.nextURL.absoluteString)"
+                    )
+                    .lineLimit(2)
+                    .truncationMode(.middle)
+                    .foregroundStyle(.secondary)
+                    .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
                 } else {
                     Text("· \(redirect.method) → \(redirect.nextMethod)")
                         .foregroundStyle(.secondary)
@@ -780,23 +801,31 @@ private struct SnapshotResponseBodyPreview: View {
                     Group {
                         if shouldFormatJSON, let formatted {
                             ScrollView(.horizontal) {
-                                HighlightedResponseText(text: displayedText(preview, formatted: formatted), syntax: syntax, wrapsToWidth: false)
-                                    .fixedSize(horizontal: true, vertical: true)
-                                    .padding(10)
+                                HighlightedResponseText(
+                                    text: displayedText(preview, formatted: formatted), syntax: syntax,
+                                    wrapsToWidth: false
+                                )
+                                .fixedSize(horizontal: true, vertical: true)
+                                .padding(10)
                             }
                         } else {
-                            HighlightedResponseText(text: displayedText(preview, formatted: nil), syntax: syntax, wrapsToWidth: true)
-                                .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-                                .padding(10)
+                            HighlightedResponseText(
+                                text: displayedText(preview, formatted: nil), syntax: syntax, wrapsToWidth: true
+                            )
+                            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+                            .padding(10)
                         }
                     }
                     .frame(minWidth: 0, maxWidth: .infinity)
                     .background(.background, in: RoundedRectangle(cornerRadius: 7))
                     .overlay { RoundedRectangle(cornerRadius: 7).stroke(.quaternary, lineWidth: 1) }
                     if preview.isTruncated && formatted == nil {
-                        Label("Preview limited to the first 1 MiB. The saved response body is complete.", systemImage: "info.circle")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                        Label(
+                            "Preview limited to the first 1 MiB. The saved response body is complete.",
+                            systemImage: "info.circle"
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     }
                 }
             }
@@ -842,7 +871,8 @@ private struct SnapshotResponseBodyPreview: View {
 
     private static func syntax(for headers: [HTTPField]) -> BodySyntax {
         let contentType = headers.first { $0.name.caseInsensitiveCompare("Content-Type") == .orderedSame }?.value
-        let mediaType = contentType?
+        let mediaType =
+            contentType?
             .split(separator: ";", maxSplits: 1, omittingEmptySubsequences: false)
             .first?
             .trimmingCharacters(in: .whitespacesAndNewlines)

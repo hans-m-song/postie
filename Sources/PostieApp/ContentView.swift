@@ -4,7 +4,8 @@ import PostieCore
 
 struct ContentView: View {
     @EnvironmentObject private var model: AppModel
-    @AppStorage(RequestResponseLayout.preferenceKey) private var requestResponseLayout = RequestResponseLayout.sideBySide
+    @AppStorage(RequestResponseLayout.preferenceKey) private var requestResponseLayout = RequestResponseLayout
+        .sideBySide
     @State private var namePrompt: NamePrompt?
     @State private var deletionTarget: DeletionTarget?
     @State private var searchResponder: NSResponder?
@@ -33,14 +34,18 @@ struct ContentView: View {
                 .accessibilityLabel("Request and response layout")
             }
             ToolbarItemGroup(placement: .navigation) {
-                Button { model.navigateBack() } label: {
+                Button {
+                    model.navigateBack()
+                } label: {
                     Image(systemName: "chevron.backward")
                 }
                 .help("Back")
                 .accessibilityLabel("Back")
                 .disabled(!model.canNavigateBack)
 
-                Button { model.navigateForward() } label: {
+                Button {
+                    model.navigateForward()
+                } label: {
                     Image(systemName: "chevron.forward")
                 }
                 .help("Forward")
@@ -59,13 +64,16 @@ struct ContentView: View {
                 searchOpenedRequest = false
             }
         }
-        .sheet(isPresented: $model.showsRequestSearch, onDismiss: {
-            if !searchOpenedRequest, let searchResponder {
-                searchWindow?.makeFirstResponder(searchResponder)
+        .sheet(
+            isPresented: $model.showsRequestSearch,
+            onDismiss: {
+                if !searchOpenedRequest, let searchResponder {
+                    searchWindow?.makeFirstResponder(searchResponder)
+                }
+                searchResponder = nil
+                searchWindow = nil
             }
-            searchResponder = nil
-            searchWindow = nil
-        }) {
+        ) {
             RequestSearchPalette { searchOpenedRequest = true }
         }
         .confirmationDialog(
@@ -90,10 +98,13 @@ struct ContentView: View {
         } message: {
             Text("This removes the saved configuration from this workspace.")
         }
-        .alert("Postie", isPresented: Binding(
-            get: { model.operationError != nil },
-            set: { if !$0 { model.operationError = nil } }
-        )) {
+        .alert(
+            "Postie",
+            isPresented: Binding(
+                get: { model.operationError != nil },
+                set: { if !$0 { model.operationError = nil } }
+            )
+        ) {
             Button("OK", role: .cancel) { model.operationError = nil }
         } message: {
             Text(model.operationError ?? "An unexpected error occurred.")
@@ -165,7 +176,9 @@ private struct SidebarView: View {
             .padding(.top, 18)
             .padding(.bottom, 12)
 
-            Button { model.showRequestSearch() } label: {
+            Button {
+                model.showRequestSearch()
+            } label: {
                 HStack {
                     Label("Search Requests", systemImage: "magnifyingglass")
                     Spacer()
@@ -199,9 +212,13 @@ private struct SidebarView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .background(model.showsOngoingRequests ? Color.accentColor.opacity(0.13) : .clear, in: RoundedRectangle(cornerRadius: 7))
+            .background(
+                model.showsOngoingRequests ? Color.accentColor.opacity(0.13) : .clear,
+                in: RoundedRectangle(cornerRadius: 7))
 
-            Button { model.showGlobalVariables() } label: {
+            Button {
+                model.showGlobalVariables()
+            } label: {
                 Label("Global Variables", systemImage: "curlybraces")
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 12)
@@ -209,9 +226,13 @@ private struct SidebarView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .background(model.showsGlobalVariables ? Color.accentColor.opacity(0.13) : .clear, in: RoundedRectangle(cornerRadius: 7))
+            .background(
+                model.showsGlobalVariables ? Color.accentColor.opacity(0.13) : .clear,
+                in: RoundedRectangle(cornerRadius: 7))
 
-            Button { model.showGlobalSettings() } label: {
+            Button {
+                model.showGlobalSettings()
+            } label: {
                 Label("Settings", systemImage: "gearshape")
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 12)
@@ -219,7 +240,9 @@ private struct SidebarView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .background(model.showsGlobalSettings ? Color.accentColor.opacity(0.13) : .clear, in: RoundedRectangle(cornerRadius: 7))
+            .background(
+                model.showsGlobalSettings ? Color.accentColor.opacity(0.13) : .clear,
+                in: RoundedRectangle(cornerRadius: 7))
 
             Divider()
                 .padding(.vertical, 12)
@@ -292,7 +315,8 @@ private struct SidebarView: View {
 
     private var sidebarIcon: NSImage {
         guard let iconURL = Bundle.main.url(forResource: "Postie", withExtension: "icns"),
-              let image = NSImage(contentsOf: iconURL) else {
+            let image = NSImage(contentsOf: iconURL)
+        else {
             return NSImage(named: NSImage.applicationIconName) ?? NSImage(size: NSSize(width: 28, height: 28))
         }
 
@@ -335,7 +359,9 @@ private struct CollectionSidebarSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 6) {
-                Button { isExpanded.toggle() } label: {
+                Button {
+                    isExpanded.toggle()
+                } label: {
                     Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                         .font(.caption2.weight(.bold))
                         .frame(width: 14, height: 24)
@@ -343,7 +369,9 @@ private struct CollectionSidebarSection: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(isExpanded ? "Collapse collection" : "Expand collection")
-                Button { model.showCollection(collection.id) } label: {
+                Button {
+                    model.showCollection(collection.id)
+                } label: {
                     HStack(spacing: 6) {
                         Image(systemName: "folder").foregroundStyle(.secondary)
                         Text(collection.name)
@@ -358,7 +386,10 @@ private struct CollectionSidebarSection: View {
                 .buttonStyle(.plain)
             }
             .padding(.horizontal, 6)
-            .background(model.selectedCollectionID == collection.id ? Color.accentColor.opacity(0.14) : .clear, in: RoundedRectangle(cornerRadius: 6))
+            .background(
+                model.selectedCollectionID == collection.id ? Color.accentColor.opacity(0.14) : .clear,
+                in: RoundedRectangle(cornerRadius: 6)
+            )
             .contextMenu { collectionActions }
 
             if isExpanded {
@@ -369,15 +400,16 @@ private struct CollectionSidebarSection: View {
                 }
                 ForEach(Array(collection.requests.enumerated()), id: \.element.id) { index, request in
                     let identity = RequestIdentity(collectionID: collection.id, requestID: request.id)
-                    RequestSidebarRow(request: request, identity: identity,
-                                      canMoveUp: index > 0, canMoveDown: index + 1 < collection.requests.count,
-                                      canEdit: model.canEdit(identity), namePrompt: $namePrompt,
-                                      deletionTarget: $deletionTarget)
+                    RequestSidebarRow(
+                        request: request, identity: identity,
+                        canMoveUp: index > 0, canMoveDown: index + 1 < collection.requests.count,
+                        canEdit: model.canEdit(identity), namePrompt: $namePrompt,
+                        deletionTarget: $deletionTarget)
                 }
                 let liveRequestIDs = Set(collection.requests.map(\.id))
                 let deletedRequestSnapshots = model.snapshots.filter {
-                    $0.source.identity.collectionID == collection.id &&
-                        !liveRequestIDs.contains($0.source.identity.requestID)
+                    $0.source.identity.collectionID == collection.id
+                        && !liveRequestIDs.contains($0.source.identity.requestID)
                 }
                 DeletedRequestSnapshotGroups(snapshots: deletedRequestSnapshots)
             }
@@ -389,15 +421,19 @@ private struct CollectionSidebarSection: View {
     private var collectionActions: some View {
         Button("Collection settings") { model.showCollection(collection.id) }
         Button("New request") {
-            namePrompt = NamePrompt(title: "New Request", initialValue: "New request",
-                                    placeholder: "Request name", submitTitle: "Create") { name in
+            namePrompt = NamePrompt(
+                title: "New Request", initialValue: "New request",
+                placeholder: "Request name", submitTitle: "Create"
+            ) { name in
                 Task { await model.createRequest(in: collection.id, name: name) }
             }
         }
         .disabled(collection.isReadOnly)
         Button("Rename collection") {
-            namePrompt = NamePrompt(title: "Rename Collection", initialValue: collection.name,
-                                    placeholder: "Collection name", submitTitle: "Save") { name in
+            namePrompt = NamePrompt(
+                title: "Rename Collection", initialValue: collection.name,
+                placeholder: "Collection name", submitTitle: "Save"
+            ) { name in
                 Task { await model.renameCollection(id: collection.id, name: name) }
             }
         }
@@ -423,8 +459,8 @@ private struct RequestSidebarRow: View {
     }
 
     private var isSelected: Bool {
-        model.selectedIdentity == identity && model.selectedCollectionID == nil && model.selectedSnapshotID == nil &&
-            !model.showsOngoingRequests && !model.showsGlobalVariables && !model.showsGlobalSettings
+        model.selectedIdentity == identity && model.selectedCollectionID == nil && model.selectedSnapshotID == nil
+            && !model.showsOngoingRequests && !model.showsGlobalVariables && !model.showsGlobalSettings
     }
 
     var body: some View {
@@ -474,7 +510,6 @@ private struct RequestSidebarRow: View {
             }
             .buttonStyle(.plain)
             .accessibilityAddTraits(isSelected ? .isSelected : [])
-
 
             if snapshotCount > 0 {
                 snapshotDisclosureButton(count: snapshotCount, isExpanded: snapshotsExpanded)

@@ -78,7 +78,8 @@ struct HighlightedResponseText: NSViewRepresentable {
     ) -> CGSize? {
         let textView = hostView.textView
         guard let textContainer = textView.textContainer,
-              let layoutManager = textView.layoutManager else {
+            let layoutManager = textView.layoutManager
+        else {
             return nil
         }
 
@@ -185,10 +186,11 @@ struct HighlightedResponseText: NSViewRepresentable {
             presentationTask = Task { @MainActor [weak self, weak hostView] in
                 let result = await task.value
                 guard let self,
-                      let hostView,
-                      !result.isCancelled,
-                      generation == self.highlightGeneration,
-                      hostView.textView.string == request.text else {
+                    let hostView,
+                    !result.isCancelled,
+                    generation == self.highlightGeneration,
+                    hostView.textView.string == request.text
+                else {
                     return
                 }
 

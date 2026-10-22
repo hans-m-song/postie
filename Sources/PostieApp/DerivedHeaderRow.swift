@@ -31,15 +31,17 @@ struct DerivedHeaderRow: View {
                 )
                 .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
                 .environment(\.isEnabled, true)
-                Text(HeaderPresentation.sourceStatusLabel(
-                    source: HeaderPresentation.sourceLabel(for: presentation.source),
-                    status: presentation.status
-                ))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                Text(
+                    HeaderPresentation.sourceStatusLabel(
+                        source: HeaderPresentation.sourceLabel(for: presentation.source),
+                        status: presentation.status
+                    )
+                )
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .font(.system(.body, design: .monospaced))
 

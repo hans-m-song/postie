@@ -48,7 +48,8 @@ final class HTTPSettingsTests: XCTestCase {
         XCTAssertEqual(fallback.globalOptions, HTTPOptions())
         XCTAssertFalse(fallback.globalOptionsAreReadOnly)
 
-        let saved = HTTPOptions(followRedirects: true, inactivityTimeout: 45.5, overallTimeout: nil, maximumResponseBytes: 0)
+        let saved = HTTPOptions(
+            followRedirects: true, inactivityTimeout: 45.5, overallTimeout: nil, maximumResponseBytes: 0)
         try await store.saveGlobalOptions(saved)
 
         let loaded = try await store.load()
@@ -79,7 +80,7 @@ final class HTTPSettingsTests: XCTestCase {
             "followRedirects": true,
             "inactivityTimeout": 0,
             "overallTimeout": NSNull(),
-            "maximumResponseBytes": 40
+            "maximumResponseBytes": 40,
         ]
         var globals = try readObject(at: globalsURL)
         globals["httpOptions"] = malformedOptions
@@ -115,7 +116,7 @@ final class HTTPSettingsTests: XCTestCase {
             HTTPOptions(inactivityTimeout: 0),
             HTTPOptions(inactivityTimeout: .infinity),
             HTTPOptions(overallTimeout: .nan),
-            HTTPOptions(maximumResponseBytes: -1)
+            HTTPOptions(maximumResponseBytes: -1),
         ]
         for options in invalidOptions {
             do {
@@ -131,7 +132,8 @@ final class HTTPSettingsTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: root) }
         let store = try CollectionStore(rootURL: root)
         let collection = try await store.createCollection(name: "Settings")
-        let explicitOptions = HTTPOptions(followRedirects: true, inactivityTimeout: 44, overallTimeout: nil, maximumResponseBytes: 77)
+        let explicitOptions = HTTPOptions(
+            followRedirects: true, inactivityTimeout: 44, overallTimeout: nil, maximumResponseBytes: 77)
         let overrides = HTTPOptionsOverrides(
             followRedirects: false,
             overallTimeout: 12,
@@ -172,7 +174,8 @@ final class HTTPSettingsTests: XCTestCase {
     }
 
     private func makeRoot() throws -> URL {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("PostieHTTPSettingsTests-\(UUID().uuidString)", isDirectory: true)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "PostieHTTPSettingsTests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
         return root
     }

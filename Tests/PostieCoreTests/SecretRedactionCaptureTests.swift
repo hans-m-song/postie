@@ -32,17 +32,21 @@ final class SecretRedactionCaptureTests: XCTestCase {
     func testCaptureUsesEffectiveSecretWinnersAndReusesReferencedDecryption() async throws {
         let decryptor = RedactionCaptureDecryptor(values: [
             "global": "global-value", "collection": "collection-value", "request": "request-value",
-            "fallback": "fallback-value", "referenced": "referenced-value"
+            "fallback": "fallback-value", "referenced": "referenced-value",
         ])
         let configuration = HTTPRequestConfiguration(
             url: "https://example.invalid/?q={{referenced}}",
             variables: ["fallback": secret("fallback"), "requestWins": secret("ignored-configuration")]
         )
         let context = VariableContext(
-            global: ["globalOnly": secret("global"), "collectionWins": secret("ignored-global"),
-                     "plainWinner": secret("ignored-secret")],
-            collection: ["collectionWins": secret("collection"), "requestWins": secret("ignored-collection"),
-                         "plainWinner": .plain("plain-value")],
+            global: [
+                "globalOnly": secret("global"), "collectionWins": secret("ignored-global"),
+                "plainWinner": secret("ignored-secret"),
+            ],
+            collection: [
+                "collectionWins": secret("collection"), "requestWins": secret("ignored-collection"),
+                "plainWinner": .plain("plain-value"),
+            ],
             request: ["requestWins": secret("request"), "referenced": secret("referenced")]
         )
 
@@ -53,10 +57,15 @@ final class SecretRedactionCaptureTests: XCTestCase {
         let calls = await decryptor.calls
 
         XCTAssertTrue(inputs.isComplete)
-        XCTAssertEqual(Set(inputs.inputs.keys), ["globalOnly", "collectionWins", "requestWins", "fallback", "referenced"])
-        XCTAssertEqual(inputs.inputs["globalOnly"], SnapshotInput(value: "global-value", scope: .global, isSecret: true))
-        XCTAssertEqual(inputs.inputs["collectionWins"], SnapshotInput(value: "collection-value", scope: .collection, isSecret: true))
-        XCTAssertEqual(inputs.inputs["requestWins"], SnapshotInput(value: "request-value", scope: .request, isSecret: true))
+        XCTAssertEqual(
+            Set(inputs.inputs.keys), ["globalOnly", "collectionWins", "requestWins", "fallback", "referenced"])
+        XCTAssertEqual(
+            inputs.inputs["globalOnly"], SnapshotInput(value: "global-value", scope: .global, isSecret: true))
+        XCTAssertEqual(
+            inputs.inputs["collectionWins"],
+            SnapshotInput(value: "collection-value", scope: .collection, isSecret: true))
+        XCTAssertEqual(
+            inputs.inputs["requestWins"], SnapshotInput(value: "request-value", scope: .request, isSecret: true))
         XCTAssertEqual(inputs.inputs["fallback"]?.scope, .request)
         XCTAssertEqual(Set(prepared.referencedInputs.keys), ["referenced"])
         XCTAssertEqual(Set(try XCTUnwrap(prepared.snapshotCapture).referencedInputs.keys), ["referenced"])
@@ -66,7 +75,8 @@ final class SecretRedactionCaptureTests: XCTestCase {
 
     func testUnavailableUnusedSecretMarksIncompleteWithoutFailingPreparation() async throws {
         let configuration = HTTPRequestConfiguration(
-            url: "https://example.invalid/", variables: ["available": secret("unused-secret"), "unavailable": secret("missing")]
+            url: "https://example.invalid/",
+            variables: ["available": secret("unused-secret"), "unavailable": secret("missing")]
         )
         let prepared = try await RequestPreparer.prepare(
             configuration, context: .init(), decryptor: RedactionCaptureDecryptor(), captureRedactionInputs: true
@@ -79,15 +89,19 @@ final class SecretRedactionCaptureTests: XCTestCase {
         XCTAssertTrue(prepared.referencedInputs.isEmpty)
         XCTAssertEqual(prepared.request.url?.absoluteString, configuration.url)
 
-        let locked = try await RequestPreparer.prepare(configuration, context: .init(), decryptor: nil, captureRedactionInputs: true)
-        XCTAssertEqual(locked.snapshotCapture?.redactionInputs, SnapshotRedactionCapture(inputs: [:], isComplete: false))
+        let locked = try await RequestPreparer.prepare(
+            configuration, context: .init(), decryptor: nil, captureRedactionInputs: true)
+        XCTAssertEqual(
+            locked.snapshotCapture?.redactionInputs, SnapshotRedactionCapture(inputs: [:], isComplete: false))
     }
 
     func testUnusedSecretCancellationPropagates() async throws {
-        let configuration = HTTPRequestConfiguration(url: "https://example.invalid/", variables: ["test": secret("unused-secret")])
+        let configuration = HTTPRequestConfiguration(
+            url: "https://example.invalid/", variables: ["test": secret("unused-secret")])
         do {
             _ = try await RequestPreparer.prepare(
-                configuration, context: .init(), decryptor: RedactionCaptureDecryptor(cancels: true), captureRedactionInputs: true
+                configuration, context: .init(), decryptor: RedactionCaptureDecryptor(cancels: true),
+                captureRedactionInputs: true
             )
             XCTFail("Cancellation during unused secret decryption must cancel preparation")
         } catch is CancellationError {
@@ -96,7 +110,8 @@ final class SecretRedactionCaptureTests: XCTestCase {
 
     func testDisablingCaptureAvoidsUnusedSecretDecryption() async throws {
         let decryptor = RedactionCaptureDecryptor(cancels: true)
-        let configuration = HTTPRequestConfiguration(url: "https://example.invalid/", variables: ["test": secret("unused-secret")])
+        let configuration = HTTPRequestConfiguration(
+            url: "https://example.invalid/", variables: ["test": secret("unused-secret")])
 
         let prepared = try await RequestPreparer.prepare(
             configuration, context: .init(), decryptor: decryptor, captureRedactionInputs: false
@@ -111,7 +126,8 @@ final class SecretRedactionCaptureTests: XCTestCase {
         for count in [128, 130] {
             let names = (0..<count).map { String(format: "secret-%03d", $0) }
             let variables = Dictionary(uniqueKeysWithValues: names.map { ($0, secret($0)) })
-            let decryptor = RedactionCaptureDecryptor(values: Dictionary(uniqueKeysWithValues: names.map { ($0, "value") }))
+            let decryptor = RedactionCaptureDecryptor(
+                values: Dictionary(uniqueKeysWithValues: names.map { ($0, "value") }))
             let prepared = try await RequestPreparer.prepare(
                 HTTPRequestConfiguration(url: "https://example.invalid/", variables: variables),
                 context: .init(), decryptor: decryptor, captureRedactionInputs: true
@@ -126,9 +142,12 @@ final class SecretRedactionCaptureTests: XCTestCase {
     }
 
     func testUTF8ByteLimitStopsAfterOversizedSecret() async throws {
-        let decryptor = RedactionCaptureDecryptor(values: ["large": String(repeating: "é", count: 524_288), "later": "later"])
+        let decryptor = RedactionCaptureDecryptor(values: [
+            "large": String(repeating: "é", count: 524_288), "later": "later",
+        ])
         let prepared = try await RequestPreparer.prepare(
-            HTTPRequestConfiguration(url: "https://example.invalid/", variables: ["a": secret("large"), "b": secret("later")]),
+            HTTPRequestConfiguration(
+                url: "https://example.invalid/", variables: ["a": secret("large"), "b": secret("later")]),
             context: .init(), decryptor: decryptor, captureRedactionInputs: true
         )
         let capture = try XCTUnwrap(prepared.snapshotCapture?.redactionInputs)
@@ -147,17 +166,20 @@ final class SecretRedactionCaptureTests: XCTestCase {
         let (saved, metadata) = try await saveSnapshot(root: root, vault: vault)
         let raw = try String(contentsOf: metadata, encoding: .utf8)
         let json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: Any])
-        let envelope = try JSONDecoder().decode(SecretEnvelope.self, from: JSONSerialization.data(withJSONObject: XCTUnwrap(json["encryptedContext"])))
+        let envelope = try JSONDecoder().decode(
+            SecretEnvelope.self, from: JSONSerialization.data(withJSONObject: XCTUnwrap(json["encryptedContext"])))
         let plaintext = try await vault.decrypt(envelope)
         let encryptedJSON = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(plaintext.utf8)) as? [String: Any])
 
         XCTAssertFalse(raw.contains("frozen-unused-secret"))
         XCTAssertNil(json["redactionInputs"])
         XCTAssertNotNil(encryptedJSON["redactionInputs"])
-        let restarted = SnapshotStore(rootURL: root.appendingPathComponent("snapshots"), vault: SecretVault(keyStore: keyStore))
+        let restarted = SnapshotStore(
+            rootURL: root.appendingPathComponent("snapshots"), vault: SecretVault(keyStore: keyStore))
         let opened = try await restarted.open(id: saved.id)
         let expected = SnapshotRedactionCapture(
-            inputs: ["test": SnapshotInput(value: "frozen-unused-secret", scope: .request, isSecret: true)], isComplete: true
+            inputs: ["test": SnapshotInput(value: "frozen-unused-secret", scope: .request, isSecret: true)],
+            isComplete: true
         )
         XCTAssertNil(opened.contextError)
         XCTAssertEqual(opened.context?.preparation.redactionInputs, expected)
@@ -171,11 +193,13 @@ final class SecretRedactionCaptureTests: XCTestCase {
         let vault = SecretVault(keyStore: RedactionCaptureKeyStore(), allowsKeyCreation: true)
         let (saved, metadata) = try await saveSnapshot(root: root, vault: vault)
         var json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: metadata)) as? [String: Any])
-        let envelope = try JSONDecoder().decode(SecretEnvelope.self, from: JSONSerialization.data(withJSONObject: XCTUnwrap(json["encryptedContext"])))
+        let envelope = try JSONDecoder().decode(
+            SecretEnvelope.self, from: JSONSerialization.data(withJSONObject: XCTUnwrap(json["encryptedContext"])))
         let plaintext = try await vault.decrypt(envelope)
         var encryptedJSON = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(plaintext.utf8)) as? [String: Any])
         encryptedJSON.removeValue(forKey: "redactionInputs")
-        let legacyEnvelope = try await vault.encrypt(String(decoding: JSONSerialization.data(withJSONObject: encryptedJSON), as: UTF8.self))
+        let legacyEnvelope = try await vault.encrypt(
+            String(decoding: JSONSerialization.data(withJSONObject: encryptedJSON), as: UTF8.self))
         json["encryptedContext"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(legacyEnvelope))
         try JSONSerialization.data(withJSONObject: json).write(to: metadata)
 
@@ -189,15 +213,18 @@ final class SecretRedactionCaptureTests: XCTestCase {
     }
 
     private func temporaryRoot() throws -> URL {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("postie-redaction-capture-" + UUID().uuidString)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "postie-redaction-capture-" + UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         return root
     }
 
     private func saveSnapshot(root: URL, vault: SecretVault) async throws -> (SavedSnapshot, URL) {
         let encrypted = try await vault.encrypt("frozen-unused-secret")
-        let configuration = HTTPRequestConfiguration(url: "https://example.invalid/", variables: ["test": .encrypted(encrypted)])
-        let prepared = try await RequestPreparer.prepare(configuration, context: .init(), decryptor: vault, captureRedactionInputs: true)
+        let configuration = HTTPRequestConfiguration(
+            url: "https://example.invalid/", variables: ["test": .encrypted(encrypted)])
+        let prepared = try await RequestPreparer.prepare(
+            configuration, context: .init(), decryptor: vault, captureRedactionInputs: true)
         let capture = try XCTUnwrap(prepared.snapshotCapture)
         let bodyURL = root.appendingPathComponent("live.body").standardizedFileURL
         try Data("response".utf8).write(to: bodyURL)

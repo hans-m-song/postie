@@ -21,7 +21,8 @@ struct JSONBodyStringStateCache {
 
     mutating func state(in source: NSString, before location: Int) -> State? {
         guard location >= 0, location <= source.length,
-              let checkpoint = checkpoints.last(where: { $0.location <= location }) else {
+            let checkpoint = checkpoints.last(where: { $0.location <= location })
+        else {
             return nil
         }
 
@@ -31,7 +32,8 @@ struct JSONBodyStringStateCache {
             consume(source.character(at: cursor), into: &state)
             cursor += 1
             guard cursor.isMultiple(of: checkpointInterval),
-                  checkpoints.last?.location != cursor else {
+                checkpoints.last?.location != cursor
+            else {
                 continue
             }
             checkpoints.append(Checkpoint(location: cursor, state: state))
@@ -80,9 +82,10 @@ enum JSONBodyEditing {
     ) -> Edit? {
         let source = value as NSString
         guard range.location >= 0,
-              range.location <= source.length,
-              range.length >= 0,
-              range.length <= source.length - range.location else {
+            range.location <= source.length,
+            range.length >= 0,
+            range.length <= source.length - range.location
+        else {
             return nil
         }
 
@@ -92,15 +95,16 @@ enum JSONBodyEditing {
         }
 
         if inputKind == .backspace,
-           replacement.isEmpty,
-           range.length == 1,
-           range.location + 1 < source.length,
-           isOpeningDelimiter(source.character(at: range.location)),
-           isMatchingClosingDelimiter(
-               source.character(at: range.location),
-               source.character(at: range.location + 1)
-           ),
-           canManagePairs(state: state) {
+            replacement.isEmpty,
+            range.length == 1,
+            range.location + 1 < source.length,
+            isOpeningDelimiter(source.character(at: range.location)),
+            isMatchingClosingDelimiter(
+                source.character(at: range.location),
+                source.character(at: range.location + 1)
+            ),
+            canManagePairs(state: state)
+        {
             return .replace(
                 range: NSRange(location: range.location, length: 2),
                 with: "",
@@ -110,7 +114,8 @@ enum JSONBodyEditing {
 
         if inputKind == .newline {
             guard range.length == 0,
-                  canManagePairs(state: state) else {
+                canManagePairs(state: state)
+            else {
                 return nil
             }
 
@@ -119,13 +124,13 @@ enum JSONBodyEditing {
             let isAfterOpener = opening == 0x7B || opening == 0x5B
             let innerIndent = isAfterOpener ? baseIndent + "  " : baseIndent
             let closing = range.location < source.length ? source.character(at: range.location) : 0
-            let isEmptyContainerPair = (opening == 0x7B && closing == 0x7D) ||
-                (opening == 0x5B && closing == 0x5D)
+            let isEmptyContainerPair = (opening == 0x7B && closing == 0x7D) || (opening == 0x5B && closing == 0x5D)
             guard isAfterOpener || !baseIndent.isEmpty else {
                 return nil
             }
 
-            let insertedText = isEmptyContainerPair
+            let insertedText =
+                isEmptyContainerPair
                 ? "\n\(innerIndent)\n\(baseIndent)"
                 : "\n\(innerIndent)"
             return .replace(
@@ -136,21 +141,24 @@ enum JSONBodyEditing {
         }
 
         guard inputKind == .typing,
-              replacement.utf16.count == 1,
-              let character = replacement.utf16.first else {
+            replacement.utf16.count == 1,
+            let character = replacement.utf16.first
+        else {
             return nil
         }
 
         if range.length == 0,
-           isClosingDelimiter(character),
-           range.location < source.length,
-           source.character(at: range.location) == character,
-           shouldSkip(character, state: state) {
+            isClosingDelimiter(character),
+            range.location < source.length,
+            source.character(at: range.location) == character,
+            shouldSkip(character, state: state)
+        {
             return .moveCaret(to: range.location + 1)
         }
 
         guard shouldPair(character, state: state),
-              let closing = closingDelimiter(for: character) else {
+            let closing = closingDelimiter(for: character)
+        else {
             return nil
         }
 
@@ -216,9 +224,8 @@ enum JSONBodyEditing {
     }
 
     private static func isMatchingClosingDelimiter(_ opening: unichar, _ closing: unichar) -> Bool {
-        (opening == 0x7B && closing == 0x7D) ||
-            (opening == 0x5B && closing == 0x5D) ||
-            (opening == 0x22 && closing == 0x22)
+        (opening == 0x7B && closing == 0x7D) || (opening == 0x5B && closing == 0x5D)
+            || (opening == 0x22 && closing == 0x22)
     }
 
     private static func closingDelimiter(for opening: unichar) -> Character? {

@@ -133,13 +133,14 @@ final class JSONBodyEditingTests: XCTestCase {
         let selection = NSRange(location: 0, length: 5)
         var stateCache = JSONBodyStringStateCache()
 
-        XCTAssertNil(JSONBodyEditing.edit(
-            in: value,
-            range: selection,
-            replacement: "}",
-            inputKind: .typing,
-            stringStateCache: &stateCache
-        ))
+        XCTAssertNil(
+            JSONBodyEditing.edit(
+                in: value,
+                range: selection,
+                replacement: "}",
+                inputKind: .typing,
+                stringStateCache: &stateCache
+            ))
     }
 
     func testNewlineDoesNotExpandPairsInsideStringsOrAcrossNonEmptyText() {
@@ -147,13 +148,14 @@ final class JSONBodyEditingTests: XCTestCase {
 
         for (value, location) in examples {
             var stateCache = JSONBodyStringStateCache()
-            XCTAssertNil(JSONBodyEditing.edit(
-                in: value,
-                range: NSRange(location: location, length: 0),
-                replacement: "\n",
-                inputKind: .newline,
-                stringStateCache: &stateCache
-            ))
+            XCTAssertNil(
+                JSONBodyEditing.edit(
+                    in: value,
+                    range: NSRange(location: location, length: 0),
+                    replacement: "\n",
+                    inputKind: .newline,
+                    stringStateCache: &stateCache
+                ))
         }
     }
 
@@ -201,46 +203,50 @@ final class JSONBodyEditingTests: XCTestCase {
         let value = "\"[]\""
         var stateCache = JSONBodyStringStateCache()
 
-        XCTAssertNil(JSONBodyEditing.edit(
-            in: value,
-            range: NSRange(location: 1, length: 1),
-            replacement: "",
-            inputKind: .backspace,
-            stringStateCache: &stateCache
-        ))
+        XCTAssertNil(
+            JSONBodyEditing.edit(
+                in: value,
+                range: NSRange(location: 1, length: 1),
+                replacement: "",
+                inputKind: .backspace,
+                stringStateCache: &stateCache
+            ))
     }
 
     func testPairingRespectsStringAndEscapeState() {
         let insideString = "\"value\""
         var insideStringCache = JSONBodyStringStateCache()
-        XCTAssertNil(JSONBodyEditing.edit(
-            in: insideString,
-            range: NSRange(location: 3, length: 0),
-            replacement: "{",
-            inputKind: .typing,
-            stringStateCache: &insideStringCache
-        ))
+        XCTAssertNil(
+            JSONBodyEditing.edit(
+                in: insideString,
+                range: NSRange(location: 3, length: 0),
+                replacement: "{",
+                inputKind: .typing,
+                stringStateCache: &insideStringCache
+            ))
 
         let escapedQuote = "\"value\\"
         var escapedQuoteCache = JSONBodyStringStateCache()
-        XCTAssertNil(JSONBodyEditing.edit(
-            in: escapedQuote,
-            range: NSRange(location: (escapedQuote as NSString).length, length: 0),
-            replacement: "\"",
-            inputKind: .typing,
-            stringStateCache: &escapedQuoteCache
-        ))
+        XCTAssertNil(
+            JSONBodyEditing.edit(
+                in: escapedQuote,
+                range: NSRange(location: (escapedQuote as NSString).length, length: 0),
+                replacement: "\"",
+                inputKind: .typing,
+                stringStateCache: &escapedQuoteCache
+            ))
     }
 
     func testNonKeyboardInsertionIsLeftUnchanged() {
         var stateCache = JSONBodyStringStateCache()
 
-        XCTAssertNil(JSONBodyEditing.edit(
-            in: "",
-            range: NSRange(location: 0, length: 0),
-            replacement: "{",
-            inputKind: .other,
-            stringStateCache: &stateCache
-        ))
+        XCTAssertNil(
+            JSONBodyEditing.edit(
+                in: "",
+                range: NSRange(location: 0, length: 0),
+                replacement: "{",
+                inputKind: .other,
+                stringStateCache: &stateCache
+            ))
     }
 }

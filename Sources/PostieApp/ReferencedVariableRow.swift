@@ -78,8 +78,7 @@ struct ReferencedVariableRow: View {
                     }
                     HStack(spacing: 8) {
                         actionButton(title: details.value.isEncrypted ? "Reveal" : "View") {
-                            if details.value.isEncrypted { reveal(details) }
-                            else { showPlainValue(details) }
+                            if details.value.isEncrypted { reveal(details) } else { showPlainValue(details) }
                         }
                         actionButton(title: didCopy ? "Copied" : "Copy") { copy(details) }
                     }
@@ -145,7 +144,8 @@ struct ReferencedVariableRow: View {
 
     private var popoverValue: String? {
         guard let details,
-              isCurrent(details, identity: identity, name: name) else { return nil }
+            isCurrent(details, identity: identity, name: name)
+        else { return nil }
         switch details.value {
         case let .plain(value): return value
         case .encrypted: return revealedValue
@@ -187,17 +187,20 @@ struct ReferencedVariableRow: View {
         isBusy = true
         operationTask = Task { @MainActor in
             do {
-                guard self.isCurrent(target, identity: capturedIdentity, name: capturedName, operationID: actionID) else { return }
+                guard self.isCurrent(target, identity: capturedIdentity, name: capturedName, operationID: actionID)
+                else { return }
                 let value = try await self.model.revealVariable(named: capturedName, owner: target.owner)
                 guard !Task.isCancelled,
-                      self.isCurrent(target, identity: capturedIdentity, name: capturedName, operationID: actionID) else { return }
+                    self.isCurrent(target, identity: capturedIdentity, name: capturedName, operationID: actionID)
+                else { return }
                 self.revealedValue = value
                 self.isBusy = false
                 self.operationTask = nil
                 self.isPopoverPresented = true
             } catch {
                 guard !Task.isCancelled,
-                      self.isCurrent(target, identity: capturedIdentity, name: capturedName, operationID: actionID) else { return }
+                    self.isCurrent(target, identity: capturedIdentity, name: capturedName, operationID: actionID)
+                else { return }
                 self.errorMessage = error.localizedDescription
                 self.isBusy = false
                 self.operationTask = nil
@@ -223,17 +226,20 @@ struct ReferencedVariableRow: View {
             isBusy = true
             operationTask = Task { @MainActor in
                 do {
-                    guard self.isCurrent(target, identity: capturedIdentity, name: capturedName, operationID: actionID) else { return }
+                    guard self.isCurrent(target, identity: capturedIdentity, name: capturedName, operationID: actionID)
+                    else { return }
                     let value = try await self.model.revealVariable(named: capturedName, owner: target.owner)
                     guard !Task.isCancelled,
-                          self.isCurrent(target, identity: capturedIdentity, name: capturedName, operationID: actionID) else { return }
+                        self.isCurrent(target, identity: capturedIdentity, name: capturedName, operationID: actionID)
+                    else { return }
                     self.didCopy = self.writeToPasteboard(value)
                     if !self.didCopy { self.errorMessage = "Unable to copy the variable." }
                     self.isBusy = false
                     self.operationTask = nil
                 } catch {
                     guard !Task.isCancelled,
-                          self.isCurrent(target, identity: capturedIdentity, name: capturedName, operationID: actionID) else { return }
+                        self.isCurrent(target, identity: capturedIdentity, name: capturedName, operationID: actionID)
+                    else { return }
                     self.errorMessage = error.localizedDescription
                     self.isBusy = false
                     self.operationTask = nil
@@ -254,15 +260,16 @@ struct ReferencedVariableRow: View {
         operationID expectedOperationID: UUID? = nil
     ) -> Bool {
         guard isActive,
-              identity == expectedIdentity,
-              name == expectedName,
-              model.selectedIdentity == expectedIdentity,
-              model.selectedCollectionID == nil,
-              !model.showsGlobalVariables,
-              !model.showsOngoingRequests,
-              !model.isTerminating,
-              model.request(for: expectedIdentity) != nil,
-              expectedOperationID.map({ $0 == operationID }) ?? true else { return false }
+            identity == expectedIdentity,
+            name == expectedName,
+            model.selectedIdentity == expectedIdentity,
+            model.selectedCollectionID == nil,
+            !model.showsGlobalVariables,
+            !model.showsOngoingRequests,
+            !model.isTerminating,
+            model.request(for: expectedIdentity) != nil,
+            expectedOperationID.map({ $0 == operationID }) ?? true
+        else { return false }
         let current = ReferencedVariableDetails.resolve(
             name: expectedName,
             identity: expectedIdentity,

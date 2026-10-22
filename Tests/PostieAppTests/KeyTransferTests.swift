@@ -161,11 +161,12 @@ final class KeyTransferTests: XCTestCase {
     }
 
     private func makeModel(root: URL, keyStore: TransferTestKeyStore) -> AppModel {
-        AppModel(arguments: [
-            "PostieKeyTransferTests",
-            "--data-directory", root.appendingPathComponent("data", isDirectory: true).path,
-            "--body-directory", root.appendingPathComponent("bodies", isDirectory: true).path
-        ], secretVault: SecretVault(keyStore: keyStore))
+        AppModel(
+            arguments: [
+                "PostieKeyTransferTests",
+                "--data-directory", root.appendingPathComponent("data", isDirectory: true).path,
+                "--body-directory", root.appendingPathComponent("bodies", isDirectory: true).path,
+            ], secretVault: SecretVault(keyStore: keyStore))
     }
 
     private func temporaryRoot() throws -> URL {

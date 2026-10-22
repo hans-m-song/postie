@@ -46,3 +46,17 @@ test:
 
 fixture:
 	@cd "$(ROOT_DIR)" && "$(SWIFT)" run $(SWIFTPM_OPTIONS) PostieHTTPFixture --port 0
+
+SWIFTC ?= /usr/bin/swiftc
+
+.PHONY: lint format syntax
+
+lint:
+	"$(SWIFT)" format lint --strict --recursive Sources Tests Package.swift
+	git diff --check
+
+format:
+	"$(SWIFT)" format format --in-place --recursive Sources Tests Package.swift
+
+syntax:
+	bash tools/check-swift-syntax.sh "$(SWIFTC)"

@@ -18,10 +18,13 @@ struct CollectionEditorView: View {
                     Text(collection.name).font(.title2.weight(.semibold))
                     Text("Shared variables, headers and authentication for this collection.")
                         .font(.callout).foregroundStyle(.secondary)
-                    Picker("Collection section", selection: Binding(
-                        get: { model.collectionEditorSection },
-                        set: { model.setCollectionEditorSection($0) }
-                    )) {
+                    Picker(
+                        "Collection section",
+                        selection: Binding(
+                            get: { model.collectionEditorSection },
+                            set: { model.setCollectionEditorSection($0) }
+                        )
+                    ) {
                         Text("Variables").tag(CollectionEditorSection.variables)
                         Text("Headers").tag(CollectionEditorSection.headers)
                         Text("Auth").tag(CollectionEditorSection.authentication)
@@ -37,13 +40,21 @@ struct CollectionEditorView: View {
                                 .font(.caption).foregroundStyle(.orange)
                         }
                         ZStack(alignment: .topLeading) {
-                            retained(VariableEditorView(owner: owner, isActive: section == .variables), active: section == .variables)
-                            retained(FieldTable(title: "Collection headers", fields: Binding(
-                                get: { model.collection(id: collectionID)?.headers ?? [] },
-                                set: { model.updateCollectionHeaders($0, in: collectionID) }
-                            ), keyPlaceholder: "Header", valuePlaceholder: "Value", availableVariables: availableVariables,
-                            completionVariables: model.variableCompletions(for: owner), parameterWrapping: true), active: section == .headers)
-                            retained(AuthenticationEditor(collectionID: collectionID), active: section == .authentication)
+                            retained(
+                                VariableEditorView(owner: owner, isActive: section == .variables),
+                                active: section == .variables)
+                            retained(
+                                FieldTable(
+                                    title: "Collection headers",
+                                    fields: Binding(
+                                        get: { model.collection(id: collectionID)?.headers ?? [] },
+                                        set: { model.updateCollectionHeaders($0, in: collectionID) }
+                                    ), keyPlaceholder: "Header", valuePlaceholder: "Value",
+                                    availableVariables: availableVariables,
+                                    completionVariables: model.variableCompletions(for: owner), parameterWrapping: true),
+                                active: section == .headers)
+                            retained(
+                                AuthenticationEditor(collectionID: collectionID), active: section == .authentication)
                         }
                     }
                     .padding(18)

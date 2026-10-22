@@ -29,7 +29,8 @@ public struct HTTPOptionsOverrides: Codable, Equatable, Sendable {
             followRedirects: followRedirects ?? defaults.followRedirects,
             inactivityTimeout: inactivityTimeout ?? defaults.inactivityTimeout,
             overallTimeout: overallTimeoutIsUnlimited ? nil : (overallTimeout ?? defaults.overallTimeout),
-            maximumResponseBytes: responseSizeIsUnlimited ? nil : (maximumResponseBytes ?? defaults.maximumResponseBytes)
+            maximumResponseBytes: responseSizeIsUnlimited
+                ? nil : (maximumResponseBytes ?? defaults.maximumResponseBytes)
         )
     }
 
@@ -59,7 +60,8 @@ public struct HTTPOptionsOverrides: Codable, Equatable, Sendable {
         inactivityTimeout = try container.decodeIfPresent(Double.self, forKey: .inactivityTimeout)
         overallTimeout = try container.decodeIfPresent(Double.self, forKey: .overallTimeout)
         maximumResponseBytes = try container.decodeIfPresent(Int64.self, forKey: .maximumResponseBytes)
-        overallTimeoutIsUnlimited = try container.decodeIfPresent(Bool.self, forKey: .overallTimeoutIsUnlimited) ?? false
+        overallTimeoutIsUnlimited =
+            try container.decodeIfPresent(Bool.self, forKey: .overallTimeoutIsUnlimited) ?? false
         responseSizeIsUnlimited = try container.decodeIfPresent(Bool.self, forKey: .responseSizeIsUnlimited) ?? false
     }
 }

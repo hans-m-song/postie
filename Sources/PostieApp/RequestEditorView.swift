@@ -15,27 +15,28 @@ enum InheritedHeaderStatus {
         }
         let collectionNameIsTemplated = hasTemplateSyntax(in: field.name)
         let literalMatches = namedRequestHeaders.filter {
-            !collectionNameIsTemplated &&
-                !hasTemplateSyntax(in: $0.name) &&
-                $0.name.lowercased() == field.name.lowercased()
+            !collectionNameIsTemplated && !hasTemplateSyntax(in: $0.name)
+                && $0.name.lowercased() == field.name.lowercased()
         }
 
         if literalMatches.contains(where: \.isEnabled) {
             return "Overridden"
         }
         if let selectedAuthenticationHeaderName,
-           !selectedAuthenticationHeaderName.isEmpty,
-           !hasTemplateSyntax(in: selectedAuthenticationHeaderName),
-           !collectionNameIsTemplated,
-           selectedAuthenticationHeaderName.caseInsensitiveCompare(field.name) == .orderedSame {
+            !selectedAuthenticationHeaderName.isEmpty,
+            !hasTemplateSyntax(in: selectedAuthenticationHeaderName),
+            !collectionNameIsTemplated,
+            selectedAuthenticationHeaderName.caseInsensitiveCompare(field.name) == .orderedSame
+        {
             return "Overridden"
         }
         let requestNameIsTemplated = namedRequestHeaders.contains {
             hasTemplateSyntax(in: $0.name)
         }
-        let authenticationNameIsTemplated = selectedAuthenticationHeaderName.map {
-            hasTemplateSyntax(in: $0)
-        } ?? false
+        let authenticationNameIsTemplated =
+            selectedAuthenticationHeaderName.map {
+                hasTemplateSyntax(in: $0)
+            } ?? false
         if collectionNameIsTemplated || requestNameIsTemplated || authenticationNameIsTemplated {
             return "Variable dependent"
         }
@@ -64,10 +65,11 @@ struct RequestToolbar: View {
     private var validPathParameters: Set<String> {
         guard let request = model.request(for: identity) else { return [] }
         let displayURL = model.displayURL(for: identity)
-        return Set(RequestPreparer.pathParameterNames(in: displayURL).filter { name in
-            let matching = request.pathParameters.filter { $0.name == name && $0.isEnabled }
-            return matching.count == 1 && matching[0].value.isEmpty == false
-        })
+        return Set(
+            RequestPreparer.pathParameterNames(in: displayURL).filter { name in
+                let matching = request.pathParameters.filter { $0.name == name && $0.isEnabled }
+                return matching.count == 1 && matching[0].value.isEmpty == false
+            })
     }
 
     var body: some View {
@@ -105,12 +107,12 @@ struct RequestToolbar: View {
                     rounded: true,
                     completionVariables: model.variableCompletions(for: identity)
                 )
-                    .id(identity)
-                    .font(.system(.body, design: .monospaced))
-                    .accessibilityLabel("Request URL")
-                    .disabled(!model.canEdit(identity))
-                    .frame(minWidth: 0, maxWidth: .infinity)
-                    .layoutPriority(1)
+                .id(identity)
+                .font(.system(.body, design: .monospaced))
+                .accessibilityLabel("Request URL")
+                .disabled(!model.canEdit(identity))
+                .frame(minWidth: 0, maxWidth: .infinity)
+                .layoutPriority(1)
                 Button {
                     model.startRequest(identity)
                 } label: {
@@ -323,7 +325,9 @@ struct RequestEditorView: View {
 
     private func requestTabContent(using proxy: ScrollViewProxy) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            accordion(.query, title: "Query", summary: rowCount(model.request(for: identity)?.query.count ?? 0), using: proxy) {
+            accordion(
+                .query, title: "Query", summary: rowCount(model.request(for: identity)?.query.count ?? 0), using: proxy
+            ) {
                 FieldTable(
                     title: "Query parameters",
                     showsTitle: false,
@@ -434,14 +438,16 @@ struct RequestEditorView: View {
 
     private func selectVariablesForDefinitionRequest(using proxy: ScrollViewProxy) {
         guard let definitionRequest = model.variableDefinitionRequest,
-              definitionRequest.owner == .request(identity) else { return }
+            definitionRequest.owner == .request(identity)
+        else { return }
         consumeVariableDefinitionRequest()
         scrollToTab(.variables, using: proxy, animated: true)
     }
 
     private func consumeVariableDefinitionRequest() {
         guard let definitionRequest = model.variableDefinitionRequest,
-              definitionRequest.owner == .request(identity) else { return }
+            definitionRequest.owner == .request(identity)
+        else { return }
         model.consumeVariableDefinitionRequest(definitionRequest.id)
     }
 
@@ -461,11 +467,12 @@ struct RequestEditorView: View {
         let targetIdentity = identity
         DispatchQueue.main.async {
             guard model.selectedIdentity == targetIdentity,
-                  model.selectedCollectionID == nil,
-                  !model.showsGlobalVariables,
-                  !model.showsGlobalSettings,
-                  !model.showsOngoingRequests,
-                  model.requestEditorSection(for: targetIdentity) == section else { return }
+                model.selectedCollectionID == nil,
+                !model.showsGlobalVariables,
+                !model.showsGlobalSettings,
+                !model.showsOngoingRequests,
+                model.requestEditorSection(for: targetIdentity) == section
+            else { return }
             if animated {
                 withAnimation { proxy.scrollTo(section, anchor: .top) }
             } else {
@@ -483,13 +490,17 @@ struct RequestEditorView: View {
         let targetIdentity = identity
         DispatchQueue.main.async {
             guard model.selectedIdentity == targetIdentity,
-                  model.selectedCollectionID == nil,
-                  !model.showsGlobalVariables,
-                  !model.showsGlobalSettings,
-                  !model.showsOngoingRequests,
-                  model.requestEditorSection(for: targetIdentity) == .request else { return }
+                model.selectedCollectionID == nil,
+                !model.showsGlobalVariables,
+                !model.showsGlobalSettings,
+                !model.showsOngoingRequests,
+                model.requestEditorSection(for: targetIdentity) == .request
+            else { return }
             if requireExpanded,
-               !model.requestEditorExpansionState(for: targetIdentity).isExpanded(section) { return }
+                !model.requestEditorExpansionState(for: targetIdentity).isExpanded(section)
+            {
+                return
+            }
             if animated {
                 withAnimation { proxy.scrollTo(section, anchor: .top) }
             } else {
@@ -520,7 +531,9 @@ struct RequestEditorView: View {
     ) -> some View {
         let isExpanded = expansionState.isExpanded(section)
         VStack(spacing: 0) {
-            Button { toggleAccordion(section, using: proxy) } label: {
+            Button {
+                toggleAccordion(section, using: proxy)
+            } label: {
                 HStack(spacing: 9) {
                     Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                         .font(.caption.weight(.semibold))
@@ -561,7 +574,7 @@ struct RequestEditorView: View {
         let parts = [
             ownCount > 0 ? "\(ownCount) own" : nil,
             inheritedCount > 0 ? "\(inheritedCount) inherited" : nil,
-            !derivedAuthenticationHeaders.isEmpty ? "auth" : nil
+            !derivedAuthenticationHeaders.isEmpty ? "auth" : nil,
         ].compactMap { $0 }
         return parts.isEmpty ? "No headers" : parts.joined(separator: " · ")
     }
@@ -585,7 +598,8 @@ struct RequestEditorView: View {
     private func inheritedHeaderStatus(for field: HTTPField) -> String {
         let request = model.request(for: identity)
         let collection = model.collection(for: identity)
-        let authentication = request?.inheritsCollectionAuthentication == true
+        let authentication =
+            request?.inheritsCollectionAuthentication == true
             ? collection?.authentication
             : request?.authentication
         return InheritedHeaderStatus.label(
@@ -597,10 +611,12 @@ struct RequestEditorView: View {
 
     private var derivedAuthenticationHeaders: [DerivedHeaderRowPresentation] {
         guard let request = model.request(for: identity),
-              let collection = model.collection(for: identity) else { return [] }
+            let collection = model.collection(for: identity)
+        else { return [] }
 
         let source: HTTPHeaderSource = request.inheritsCollectionAuthentication ? .collectionAuth : .requestAuth
-        let authentication = request.inheritsCollectionAuthentication ? collection.authentication : request.authentication
+        let authentication =
+            request.inheritsCollectionAuthentication ? collection.authentication : request.authentication
         let openSource: () -> Void = {
             switch source {
             case .requestAuth:
@@ -612,14 +628,16 @@ struct RequestEditorView: View {
             }
         }
 
-        guard let row = HeaderPresentation.authenticationRow(
-            authentication: authentication,
-            source: source,
-            requestHeaders: request.headers,
-            availableVariables: availableVariableNames,
-            onReveal: { try await model.previewAuthenticationHeader(for: identity, source: source) },
-            onOpenSource: openSource
-        ) else { return [] }
+        guard
+            let row = HeaderPresentation.authenticationRow(
+                authentication: authentication,
+                source: source,
+                requestHeaders: request.headers,
+                availableVariables: availableVariableNames,
+                onReveal: { try await model.previewAuthenticationHeader(for: identity, source: source) },
+                onOpenSource: openSource
+            )
+        else { return [] }
 
         return [row]
     }
@@ -640,8 +658,10 @@ struct RequestEditorView: View {
         if !referencedVariableNames.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Referenced variables").font(.headline)
-                Text("Up to 128 names from the first 1 MiB of input templates. Secret auth inputs resolve when sending.")
-                    .font(.caption).foregroundStyle(.secondary)
+                Text(
+                    "Up to 128 names from the first 1 MiB of input templates. Secret auth inputs resolve when sending."
+                )
+                .font(.caption).foregroundStyle(.secondary)
                 VStack(spacing: 0) {
                     HStack(spacing: 8) {
                         Text("Name").frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
@@ -685,7 +705,9 @@ struct RequestEditorView: View {
         sources += (request.query + request.headers).filter(\.isEnabled).flatMap { [$0.name, $0.value] }
         sources += request.pathParameters.filter { $0.isEnabled && pathNames.contains($0.name) }.map(\.value)
         if request.bodyEnabled { sources.append(request.body) }
-        if !request.inheritsCollectionAuthentication && request.authentication.kind == .basic { sources.append(request.authentication.username) }
+        if !request.inheritsCollectionAuthentication && request.authentication.kind == .basic {
+            sources.append(request.authentication.username)
+        }
         return sources
     }
 
@@ -738,14 +760,14 @@ struct RequestEditorView: View {
                 availableVariables: availableVariableNames,
                 completionVariables: model.variableCompletions(for: identity)
             )
-                .id(identity)
-                .padding(8)
-                .frame(maxWidth: .infinity)
-                .background(.background, in: RoundedRectangle(cornerRadius: 7))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 7)
-                        .stroke(.quaternary, lineWidth: 1)
-                }
+            .id(identity)
+            .padding(8)
+            .frame(maxWidth: .infinity)
+            .background(.background, in: RoundedRectangle(cornerRadius: 7))
+            .overlay {
+                RoundedRectangle(cornerRadius: 7)
+                    .stroke(.quaternary, lineWidth: 1)
+            }
         }
     }
 
@@ -764,8 +786,11 @@ struct RequestEditorView: View {
             HStack(spacing: 8) {
                 ProgressView()
                     .controlSize(.small)
-                Text(active.phase == .cancelling ? "Cancelling" : active.runID == nil ? "Preparing request" : "Request running")
-                    .lineLimit(1)
+                Text(
+                    active.phase == .cancelling
+                        ? "Cancelling" : active.runID == nil ? "Preparing request" : "Request running"
+                )
+                .lineLimit(1)
                 Text(formatDuration(model.elapsed(for: identity) ?? 0))
                     .monospacedDigit()
                 if let progress = active.progress {
@@ -810,7 +835,9 @@ struct RequestEditorView: View {
         )
     }
 
-    private func fieldsBinding(_ keyPath: WritableKeyPath<HTTPRequestConfiguration, [HTTPField]>) -> Binding<[HTTPField]> {
+    private func fieldsBinding(_ keyPath: WritableKeyPath<HTTPRequestConfiguration, [HTTPField]>) -> Binding<
+        [HTTPField]
+    > {
         Binding(
             get: { model.request(for: identity)?[keyPath: keyPath] ?? [] },
             set: { value in model.updateDraft(identity) { $0[keyPath: keyPath] = value } }
@@ -836,7 +863,6 @@ struct RequestEditorView: View {
         ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
     }
 }
-
 
 private struct PathParameterTable: View {
     let names: [String]
@@ -874,7 +900,7 @@ private struct PathParameterTable: View {
                             isReadOnly: true,
                             foregroundColor: SyntaxHighlighting.templateColor
                         )
-                            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+                        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
                         Divider().frame(height: 22)
                         ParameterTextField(
                             "Value",
@@ -882,8 +908,8 @@ private struct PathParameterTable: View {
                             availableVariables: availableVariables,
                             completionVariables: completionVariables
                         )
-                            .font(.system(.body, design: .monospaced))
-                            .frame(minWidth: 0, maxWidth: .infinity)
+                        .font(.system(.body, design: .monospaced))
+                        .frame(minWidth: 0, maxWidth: .infinity)
                         Color.clear.frame(width: 26, height: 22)
                     }
                     .padding(.horizontal, 8)
@@ -910,8 +936,10 @@ private struct PathParameterTable: View {
             },
             set: { value in
                 let matchingIndices = fields.indices.filter { fields[$0].name == name }
-                guard let preferredIndex = matchingIndices.first(where: { fields[$0].isEnabled })
-                        ?? matchingIndices.first else {
+                guard
+                    let preferredIndex = matchingIndices.first(where: { fields[$0].isEnabled })
+                        ?? matchingIndices.first
+                else {
                     fields.append(HTTPField(name: name, value: value))
                     return
                 }

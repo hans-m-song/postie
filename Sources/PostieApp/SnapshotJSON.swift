@@ -14,13 +14,15 @@ enum SnapshotJSONExporter {
 
         if let context {
             capturedContext["preparationVersion"] = context.preparation.preparationVersion
-            capturedContext["referencedInputs"] = context.preparation.referencedInputs.keys.sorted().reduce(into: [String: Any]()) {
+            capturedContext["referencedInputs"] = context.preparation.referencedInputs.keys.sorted().reduce(
+                into: [String: Any]()
+            ) {
                 result, name in
                 guard let input = context.preparation.referencedInputs[name] else { return }
                 result[name] = [
                     "value": input.value,
                     "scope": input.scope.rawValue,
-                    "isSecret": input.isSecret
+                    "isSecret": input.isSecret,
                 ]
             }
             capturedContext["authentication"] = authentication(context.preparation.authentication)
@@ -39,7 +41,7 @@ enum SnapshotJSONExporter {
             "redirectLimitReached": snapshot.response.redirectLimitReached,
             "headers": snapshot.response.responseHeaders.map { header($0) },
             "redirects": snapshot.response.redirects.map { redirect($0, requestDetailsAvailable: context != nil) },
-            "body": preview
+            "body": preview,
         ]
 
         if let context {
@@ -52,7 +54,7 @@ enum SnapshotJSONExporter {
             "capturedContext": capturedContext,
             "request": request,
             "observedRequest": observedRequest,
-            "response": response
+            "response": response,
         ]
 
         do {
@@ -80,15 +82,15 @@ enum SnapshotJSONExporter {
                 "collectionId": snapshot.source.identity.collectionID.uuidString,
                 "requestId": snapshot.source.identity.requestID.uuidString,
                 "collectionName": snapshot.source.collectionName,
-                "requestName": snapshot.source.requestName
-            ]
+                "requestName": snapshot.source.requestName,
+            ],
         ]
     }
 
     private static func authentication(_ authentication: SnapshotAuthenticationInput) -> [String: Any] {
         var value: [String: Any] = [
             "kind": authentication.kind.rawValue,
-            "username": authentication.username
+            "username": authentication.username,
         ]
         if let apiKeyHeaderName = authentication.apiKeyHeaderName {
             value["apiKeyHeaderName"] = apiKeyHeaderName
@@ -112,7 +114,7 @@ enum SnapshotJSONExporter {
                     isSecret: request.secretNames.contains($0.name.lowercased())
                 )
             },
-            "body": request.body as Any? ?? NSNull()
+            "body": request.body as Any? ?? NSNull(),
         ]
     }
 
@@ -136,7 +138,7 @@ enum SnapshotJSONExporter {
             "method": redirect.method,
             "nextMethod": redirect.nextMethod,
             "requestDetailsAvailable": requestDetailsAvailable,
-            "responseHeaders": redirect.responseHeaders.map { header($0) }
+            "responseHeaders": redirect.responseHeaders.map { header($0) },
         ]
 
         if requestDetailsAvailable {
@@ -171,7 +173,8 @@ enum SnapshotJSONExporter {
 
         let expectedPreviewBytes = min(response.bodyByteCount, Int64(maximumBodyPreviewBytes))
         guard Int64(sample.count) >= expectedPreviewBytes,
-              response.bodyByteCount > Int64(maximumBodyPreviewBytes) || Int64(sample.count) == response.bodyByteCount else {
+            response.bodyByteCount > Int64(maximumBodyPreviewBytes) || Int64(sample.count) == response.bodyByteCount
+        else {
             throw SnapshotJSONExportError.bodySizeMismatch
         }
 
@@ -180,7 +183,7 @@ enum SnapshotJSONExporter {
         let common: [String: Any] = [
             "byteCount": response.bodyByteCount,
             "previewByteCount": data.count,
-            "truncated": truncated
+            "truncated": truncated,
         ]
 
         if let text = decodeText(data, isTruncated: truncated), isTextual(text) {

@@ -143,8 +143,11 @@ public struct HTTPRequestConfiguration: Identifiable, Codable, Equatable, Sendab
         options = try container.decode(HTTPOptions.self, forKey: .options)
         optionOverrides = try container.decodeIfPresent(HTTPOptionsOverrides.self, forKey: .optionOverrides)
         variables = try container.decodeIfPresent(VariableValues.self, forKey: .variables) ?? [:]
-        authentication = try container.decodeIfPresent(RequestAuthentication.self, forKey: .authentication) ?? RequestAuthentication()
-        inheritsCollectionAuthentication = try container.decodeIfPresent(Bool.self, forKey: .inheritsCollectionAuthentication) ?? false
+        authentication =
+            try container.decodeIfPresent(RequestAuthentication.self, forKey: .authentication)
+            ?? RequestAuthentication()
+        inheritsCollectionAuthentication =
+            try container.decodeIfPresent(Bool.self, forKey: .inheritsCollectionAuthentication) ?? false
     }
 }
 
@@ -193,7 +196,9 @@ public struct StorageIssue: Identifiable, Equatable, Sendable {
     public var requestID: UUID?
     public var canRecover: Bool
 
-    public init(id: String, message: String, collectionID: UUID? = nil, requestID: UUID? = nil, canRecover: Bool = false) {
+    public init(
+        id: String, message: String, collectionID: UUID? = nil, requestID: UUID? = nil, canRecover: Bool = false
+    ) {
         self.id = id
         self.message = message
         self.collectionID = collectionID
@@ -210,7 +215,11 @@ public struct WorkspaceLoad: Sendable {
     public var globalOptions: HTTPOptions
     public var globalOptionsAreReadOnly: Bool
 
-    public init(collections: [RequestCollection], issues: [StorageIssue] = [], globalVariables: VariableValues = [:], globalVariablesAreReadOnly: Bool = false, globalOptions: HTTPOptions = HTTPOptions(), globalOptionsAreReadOnly: Bool = false) {
+    public init(
+        collections: [RequestCollection], issues: [StorageIssue] = [], globalVariables: VariableValues = [:],
+        globalVariablesAreReadOnly: Bool = false, globalOptions: HTTPOptions = HTTPOptions(),
+        globalOptionsAreReadOnly: Bool = false
+    ) {
         self.collections = collections
         self.issues = issues
         self.globalVariables = globalVariables

@@ -54,7 +54,8 @@ final class AppModelTests: XCTestCase {
         try model.setPlainVariable(name: "override", value: "global value", owner: .global)
         try model.setPlainVariable(name: "override", value: "collection value", owner: .collection(collectionID))
         try model.setPlainVariable(name: "override", value: "request value", owner: .request(requestIdentity))
-        try model.setPlainVariable(name: "collectionOnly", value: "collection fallback", owner: .collection(collectionID))
+        try model.setPlainVariable(
+            name: "collectionOnly", value: "collection fallback", owner: .collection(collectionID))
         try model.setPlainVariable(name: "globalOnly", value: "global fallback", owner: .global)
         try await model.setVariable(
             name: "credential",
@@ -63,7 +64,8 @@ final class AppModelTests: XCTestCase {
             owner: .request(requestIdentity)
         )
 
-        let completions = Dictionary(uniqueKeysWithValues: model.variableCompletions(for: requestIdentity).map { ($0.name, $0) })
+        let completions = Dictionary(
+            uniqueKeysWithValues: model.variableCompletions(for: requestIdentity).map { ($0.name, $0) })
 
         XCTAssertEqual(completions["override"]?.scope, .request)
         XCTAssertEqual(completions["override"]?.preview, "request value")
@@ -223,8 +225,10 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(reloaded.displayURL(for: bareIdentity), "https://example.test?key")
         XCTAssertEqual(reloaded.displayURL(for: escapedIdentity), editedURL)
         let reloadedEscapedRequest = try XCTUnwrap(reloaded.request(for: escapedIdentity))
-        let reloadedPrepared = try await RequestPreparer.prepare(reloadedEscapedRequest, context: context, decryptor: nil)
-        XCTAssertEqual(reloadedPrepared.request.url?.absoluteString, "https://example.test/edited?raw=%7B%7Bliteral%7D%7D")
+        let reloadedPrepared = try await RequestPreparer.prepare(
+            reloadedEscapedRequest, context: context, decryptor: nil)
+        XCTAssertEqual(
+            reloadedPrepared.request.url?.absoluteString, "https://example.test/edited?raw=%7B%7Bliteral%7D%7D")
         _ = await reloaded.prepareForTermination()
     }
 
@@ -247,7 +251,8 @@ final class AppModelTests: XCTestCase {
             maximumResponseBytes: 1_000,
             overallTimeoutIsUnlimited: true
         )
-        let legacyOptions = HTTPOptions(followRedirects: false, inactivityTimeout: 17, overallTimeout: nil, maximumResponseBytes: nil)
+        let legacyOptions = HTTPOptions(
+            followRedirects: false, inactivityTimeout: 17, overallTimeout: nil, maximumResponseBytes: nil)
         do {
             let model = try makeModel(root: root, secretVault: SecretVault(keyStore: keyStore))
             firstModel = model
@@ -261,7 +266,8 @@ final class AppModelTests: XCTestCase {
             model.updateRequestOptionOverrides(overrides, for: inheritedIdentity)
             XCTAssertEqual(
                 model.requestOptionOverrides(for: inheritedIdentity).resolve(against: defaults),
-                HTTPOptions(followRedirects: false, inactivityTimeout: 9, overallTimeout: nil, maximumResponseBytes: 1_000)
+                HTTPOptions(
+                    followRedirects: false, inactivityTimeout: 9, overallTimeout: nil, maximumResponseBytes: 1_000)
             )
 
             overrides.followRedirects = nil
@@ -270,7 +276,8 @@ final class AppModelTests: XCTestCase {
             XCTAssertEqual(model.requestOptionOverrides(for: inheritedIdentity), overrides)
             XCTAssertEqual(
                 model.requestOptionOverrides(for: inheritedIdentity).resolve(against: defaults),
-                HTTPOptions(followRedirects: true, inactivityTimeout: 30, overallTimeout: nil, maximumResponseBytes: 1_000)
+                HTTPOptions(
+                    followRedirects: true, inactivityTimeout: 30, overallTimeout: nil, maximumResponseBytes: 1_000)
             )
 
             await model.createRequest(in: collectionID, name: "Legacy explicit")
@@ -312,8 +319,10 @@ final class AppModelTests: XCTestCase {
         XCTAssertNil(HTTPSettingsInput.timeout(from: "0", decimalSeparator: "."))
         XCTAssertNil(HTTPSettingsInput.timeout(from: "2s", decimalSeparator: "."))
         XCTAssertNil(HTTPSettingsInput.responseBytes(from: "1.5 MB", multiplier: 1_000_000, decimalSeparator: "."))
-        XCTAssertEqual(HTTPSettingsInput.responseBytes(from: "1.5", multiplier: 1_000_000, decimalSeparator: "."), 1_500_000)
-        XCTAssertNil(HTTPSettingsInput.responseBytes(from: "9223372036855", multiplier: 1_000_000, decimalSeparator: "."))
+        XCTAssertEqual(
+            HTTPSettingsInput.responseBytes(from: "1.5", multiplier: 1_000_000, decimalSeparator: "."), 1_500_000)
+        XCTAssertNil(
+            HTTPSettingsInput.responseBytes(from: "9223372036855", multiplier: 1_000_000, decimalSeparator: "."))
     }
 
     func testNewRequestInheritsGlobalOptionsThroughSettingsNavigationAndExecution() async throws {
@@ -334,7 +343,8 @@ final class AppModelTests: XCTestCase {
         await model.createRequest(in: collectionID)
         let requestIdentity = try XCTUnwrap(model.selectedIdentity)
         XCTAssertEqual(model.requestOptionOverrides(for: requestIdentity), HTTPOptionsOverrides())
-        XCTAssertEqual(model.requestOptionOverrides(for: requestIdentity).resolve(against: model.globalOptions), defaults)
+        XCTAssertEqual(
+            model.requestOptionOverrides(for: requestIdentity).resolve(against: model.globalOptions), defaults)
         let redirectURL = try fixture.url(path: "/redirect", query: [URLQueryItem(name: "to", value: "/echo")])
         model.updateDraft(requestIdentity) {
             $0.url = redirectURL
@@ -559,7 +569,8 @@ final class AppModelTests: XCTestCase {
 
         XCTAssertNil(model.activeRuns[requestIdentity])
         XCTAssertNil(model.request(for: requestIdentity))
-        XCTAssertFalse(model.collections.first { $0.id == collectionID }?.requests.contains { $0.id == configuration.id } ?? false)
+        XCTAssertFalse(
+            model.collections.first { $0.id == collectionID }?.requests.contains { $0.id == configuration.id } ?? false)
     }
 
     func testPartialDeletionOrphanCannotBeEditedOrStartedFromStaleDraft() async throws {
@@ -580,7 +591,8 @@ final class AppModelTests: XCTestCase {
         defer { try? setImmutable(requestURL, enabled: false) }
         await model.deleteRequest(requestIdentity)
 
-        XCTAssertFalse(model.collections.first { $0.id == collectionID }?.requests.contains { $0.id == configuration.id } ?? false)
+        XCTAssertFalse(
+            model.collections.first { $0.id == collectionID }?.requests.contains { $0.id == configuration.id } ?? false)
         XCTAssertTrue(model.storageIssues.contains { $0.requestID == configuration.id && $0.canRecover })
         XCTAssertFalse(model.canEdit(requestIdentity))
 
@@ -617,12 +629,16 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.request(for: requestIdentity)?.name, "Unsaved edit retained")
         XCTAssertTrue(model.collections.first { $0.id == collectionID }?.isReadOnly == true)
         XCTAssertFalse(model.canEdit(requestIdentity))
-        XCTAssertTrue(model.storageIssues.contains {
-            $0.collectionID == collectionID && $0.requestID == nil && $0.id.hasPrefix("store:collection-metadata-malformed:")
-        })
+        XCTAssertTrue(
+            model.storageIssues.contains {
+                $0.collectionID == collectionID && $0.requestID == nil
+                    && $0.id.hasPrefix("store:collection-metadata-malformed:")
+            })
 
         model.startRequest(requestIdentity)
-        XCTAssertNil(model.activeRuns[requestIdentity], "Unknown collection membership must keep a retained draft from being sent.")
+        XCTAssertNil(
+            model.activeRuns[requestIdentity],
+            "Unknown collection membership must keep a retained draft from being sent.")
         if model.activeRuns[requestIdentity] != nil {
             await model.cancelAndWait(for: requestIdentity)
         }
@@ -654,9 +670,10 @@ final class AppModelTests: XCTestCase {
         }
 
         await model.deleteRequest(orphanIdentity)
-        let orphanIssue = try XCTUnwrap(model.storageIssues.first {
-            $0.requestID == orphanIdentity.requestID && $0.canRecover
-        })
+        let orphanIssue = try XCTUnwrap(
+            model.storageIssues.first {
+                $0.requestID == orphanIdentity.requestID && $0.canRecover
+            })
         await model.recover(orphanIssue)
         try await waitUntil { model.autosaveErrors[malformedIdentity] != nil }
         XCTAssertEqual(model.request(for: malformedIdentity)?.name, "Unsaved malformed draft")
@@ -683,10 +700,12 @@ final class AppModelTests: XCTestCase {
         await model.createRequest(in: collectionID, name: "Redirected request")
         let configuration = try XCTUnwrap(model.collections.first?.requests.first)
         let requestIdentity = identity(collectionID, configuration)
-        let redirectURL = try fixture.url(path: "/redirect", query: [
-            URLQueryItem(name: "to", value: "/echo"),
-            URLQueryItem(name: "status", value: "302")
-        ])
+        let redirectURL = try fixture.url(
+            path: "/redirect",
+            query: [
+                URLQueryItem(name: "to", value: "/echo"),
+                URLQueryItem(name: "status", value: "302"),
+            ])
         model.updateDraft(requestIdentity) {
             $0.method = "POST"
             $0.url = redirectURL
@@ -697,7 +716,8 @@ final class AppModelTests: XCTestCase {
 
         model.startRequest(requestIdentity)
         try await waitUntil {
-            model.activeRuns[requestIdentity] == nil && model.latestResponses[requestIdentity]?.response.statusCode == 302
+            model.activeRuns[requestIdentity] == nil
+                && model.latestResponses[requestIdentity]?.response.statusCode == 302
         }
         XCTAssertTrue(model.canFollowRedirect(requestIdentity))
 
@@ -718,11 +738,13 @@ final class AppModelTests: XCTestCase {
         XCTAssertFalse(model.canFollowRedirect(requestIdentity))
 
         try await waitUntil {
-            model.activeRuns[requestIdentity] == nil && model.latestResponses[requestIdentity]?.response.statusCode == 200
+            model.activeRuns[requestIdentity] == nil
+                && model.latestResponses[requestIdentity]?.response.statusCode == 200
         }
         let finalResponse = try XCTUnwrap(model.latestResponses[requestIdentity]?.response)
         XCTAssertEqual(finalResponse.finalURL.path, "/echo")
-        let payload = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: finalResponse.bodyFileURL)) as? [String: Any])
+        let payload = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(contentsOf: finalResponse.bodyFileURL)) as? [String: Any])
         XCTAssertEqual(payload["method"] as? String, "GET")
         XCTAssertEqual(payload["path"] as? String, "/echo")
         XCTAssertEqual(payload["query"] as? String, "")
@@ -761,9 +783,13 @@ final class AppModelTests: XCTestCase {
             let requestIdentity = identity(collectionID, request)
             savedIdentity = requestIdentity
             try await model.setVariable(name: "host", value: "global.test", isSecret: false, owner: .global)
-            try await model.setVariable(name: "host", value: "collection.test", isSecret: false, owner: .collection(collectionID))
-            try await model.setVariable(name: "host", value: "request.test", isSecret: false, owner: .request(requestIdentity))
-            try await model.setVariable(name: "credential", value: "synthetic protected value", isSecret: true, owner: .request(requestIdentity))
+            try await model.setVariable(
+                name: "host", value: "collection.test", isSecret: false, owner: .collection(collectionID))
+            try await model.setVariable(
+                name: "host", value: "request.test", isSecret: false, owner: .request(requestIdentity))
+            try await model.setVariable(
+                name: "credential", value: "synthetic protected value", isSecret: true, owner: .request(requestIdentity)
+            )
             model.updateDraft(requestIdentity) { $0.url = "https://{{host}}/" }
             let prepared = try await RequestPreparer.prepare(
                 try XCTUnwrap(model.request(for: requestIdentity)),
@@ -774,7 +800,8 @@ final class AppModelTests: XCTestCase {
             XCTAssertEqual(prepared.referencedInputs["host"]?.scope, .request)
             let terminated = await model.prepareForTermination()
             XCTAssertTrue(terminated)
-            let serialized = try String(contentsOf: requestFileURL(root: root, identity: requestIdentity), encoding: .utf8)
+            let serialized = try String(
+                contentsOf: requestFileURL(root: root, identity: requestIdentity), encoding: .utf8)
             XCTAssertFalse(serialized.contains("synthetic protected value"))
         }
         try await waitUntil { firstModel == nil }
@@ -783,7 +810,8 @@ final class AppModelTests: XCTestCase {
         let requestIdentity = try XCTUnwrap(savedIdentity)
         try await waitUntil { reloaded.request(for: requestIdentity) != nil && reloaded.canEditVariables(.global) }
         XCTAssertEqual(reloaded.variables(for: .global)["host"], .plain("global.test"))
-        XCTAssertEqual(reloaded.variables(for: .collection(requestIdentity.collectionID))["host"], .plain("collection.test"))
+        XCTAssertEqual(
+            reloaded.variables(for: .collection(requestIdentity.collectionID))["host"], .plain("collection.test"))
         XCTAssertEqual(reloaded.variables(for: .request(requestIdentity))["host"], .plain("request.test"))
         let revealed = try await reloaded.revealVariable(named: "credential", owner: .request(requestIdentity))
         XCTAssertEqual(revealed, "synthetic protected value")
@@ -832,7 +860,8 @@ final class AppModelTests: XCTestCase {
         let model = try makeModel(root: root, secretVault: SecretVault(keyStore: keyStore))
         try await waitUntil { model.canEditVariables(.global) }
         let commit = Task { @MainActor in
-            try await model.setVariable(name: "removed", value: "synthetic delayed secret", isSecret: true, owner: .global)
+            try await model.setVariable(
+                name: "removed", value: "synthetic delayed secret", isSecret: true, owner: .global)
         }
         try await waitUntil { keyStore.loadStarted }
         model.removeVariable(named: "removed", owner: .global)
@@ -918,7 +947,8 @@ final class AppModelTests: XCTestCase {
 
         let deniedRoot = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: deniedRoot) }
-        let denied = try makeModel(root: deniedRoot, secretVault: SecretVault(keyStore: AppModelKeyStore(deniesAccess: true)))
+        let denied = try makeModel(
+            root: deniedRoot, secretVault: SecretVault(keyStore: AppModelKeyStore(deniesAccess: true)))
         try await waitUntil { denied.canEditVariables(.global) }
         try denied.setPlainVariable(name: "value", value: "unchanged", owner: .global)
         do {
@@ -942,13 +972,15 @@ final class AppModelTests: XCTestCase {
         XCTAssertTrue(try XCTUnwrap(model.request(for: requestIdentity)).inheritsCollectionAuthentication)
         try model.setPlainVariable(name: "scope", value: "collection", owner: .collection(collectionID))
         try model.setPlainVariable(name: "scope", value: "request", owner: .request(requestIdentity))
-        model.updateCollectionHeaders([
-            HTTPField(name: "X-Shared", value: "{{scope}}"),
-            HTTPField(name: "X-Suppressed", value: "{{unused}}")
-        ], in: collectionID)
+        model.updateCollectionHeaders(
+            [
+                HTTPField(name: "X-Shared", value: "{{scope}}"),
+                HTTPField(name: "X-Suppressed", value: "{{unused}}"),
+            ], in: collectionID)
         model.setAuthenticationKind(.basic, owner: .collection(collectionID))
         model.updateAuthenticationUsername("{{scope}}", owner: .collection(collectionID))
-        try await model.setAuthenticationSecret("synthetic-password", field: .password, owner: .collection(collectionID))
+        try await model.setAuthenticationSecret(
+            "synthetic-password", field: .password, owner: .collection(collectionID))
         model.updateDraft(requestIdentity) {
             $0.url = fixture.baseURL + "/echo"
             $0.headers = [HTTPField(name: "x-suppressed", value: "{{unused}}", isEnabled: false)]
@@ -963,12 +995,14 @@ final class AppModelTests: XCTestCase {
         let response = try XCTUnwrap(model.latestResponses[requestIdentity]?.response)
         XCTAssertEqual(response.requestHeaders.first { $0.name.lowercased() == "x-shared" }?.value, "request")
         XCTAssertNil(response.requestHeaders.first { $0.name.lowercased() == "x-suppressed" })
-        XCTAssertEqual(response.requestHeaders.first { $0.name.lowercased() == "authorization" }?.value,
-                       "Basic " + Data("request:synthetic-password".utf8).base64EncodedString())
+        XCTAssertEqual(
+            response.requestHeaders.first { $0.name.lowercased() == "authorization" }?.value,
+            "Basic " + Data("request:synthetic-password".utf8).base64EncodedString())
         XCTAssertEqual(response.request.authentication.kind, .none)
         XCTAssertTrue(response.request.inheritsCollectionAuthentication)
         try await model.flushPendingSaves()
-        let path = root.appendingPathComponent("data/collections/\(collectionID.uuidString.lowercased())/collection.json")
+        let path = root.appendingPathComponent(
+            "data/collections/\(collectionID.uuidString.lowercased())/collection.json")
         let saved = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: path)) as? [String: Any])
         XCTAssertEqual((saved["variables"] as? [String: String])?["scope"], "collection")
         XCTAssertEqual((saved["headers"] as? [[String: Any]])?.count, 2)
@@ -1013,11 +1047,12 @@ final class AppModelTests: XCTestCase {
             let store = try CollectionStore(rootURL: root.appendingPathComponent("data"))
             let collection = try await store.createCollection(name: "Missing API key key")
             try await store.saveCollectionConfiguration(
-                CollectionRequestDefaults(authentication: RequestAuthentication(
-                    kind: .apiKey,
-                    apiKeyHeaderName: "X-Service-Key",
-                    apiKey: apiKey
-                )),
+                CollectionRequestDefaults(
+                    authentication: RequestAuthentication(
+                        kind: .apiKey,
+                        apiKeyHeaderName: "X-Service-Key",
+                        apiKey: apiKey
+                    )),
                 variables: [:],
                 in: collection.id
             )
@@ -1101,8 +1136,10 @@ final class AppModelTests: XCTestCase {
             XCTAssertFalse(collectionJSON.contains("synthetic collection API key edited"))
             XCTAssertFalse(requestJSON.contains("synthetic request API key"))
             XCTAssertFalse(requestJSON.contains("synthetic request API key edited"))
-            XCTAssertEqual(model.authentication(for: .collection(collectionID)).apiKeyHeaderName, "X-Collection-Key-Edited")
-            XCTAssertEqual(model.authentication(for: .request(requestIdentity)).apiKeyHeaderName, "X-Request-Key-Edited")
+            XCTAssertEqual(
+                model.authentication(for: .collection(collectionID)).apiKeyHeaderName, "X-Collection-Key-Edited")
+            XCTAssertEqual(
+                model.authentication(for: .request(requestIdentity)).apiKeyHeaderName, "X-Request-Key-Edited")
 
             let terminated = await model.prepareForTermination()
             XCTAssertTrue(terminated)
@@ -1112,8 +1149,8 @@ final class AppModelTests: XCTestCase {
         let requestIdentity = try XCTUnwrap(savedIdentity)
         let reloaded = try makeModel(root: root, secretVault: SecretVault(keyStore: keyStore))
         try await waitUntil {
-            reloaded.request(for: requestIdentity) != nil &&
-                reloaded.canEditVariables(.collection(requestIdentity.collectionID))
+            reloaded.request(for: requestIdentity) != nil
+                && reloaded.canEditVariables(.collection(requestIdentity.collectionID))
         }
 
         let collectionAuthentication = reloaded.authentication(for: .collection(requestIdentity.collectionID))
@@ -1124,8 +1161,10 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(requestAuthentication.apiKeyHeaderName, "X-Request-Key-Edited")
         XCTAssertFalse(try XCTUnwrap(reloaded.request(for: requestIdentity)).inheritsCollectionAuthentication)
 
-        let collectionSecret = try await reloaded.revealAuthenticationSecret(field: .apiKey, owner: .collection(requestIdentity.collectionID))
-        let requestSecret = try await reloaded.revealAuthenticationSecret(field: .apiKey, owner: .request(requestIdentity))
+        let collectionSecret = try await reloaded.revealAuthenticationSecret(
+            field: .apiKey, owner: .collection(requestIdentity.collectionID))
+        let requestSecret = try await reloaded.revealAuthenticationSecret(
+            field: .apiKey, owner: .request(requestIdentity))
         XCTAssertEqual(collectionSecret, "synthetic collection API key edited")
         XCTAssertEqual(requestSecret, "synthetic request API key edited")
         let terminated = await reloaded.prepareForTermination()
@@ -1327,11 +1366,12 @@ final class AppModelTests: XCTestCase {
     private func makeModel(root: URL, secretVault: SecretVault? = nil) throws -> AppModel {
         let dataDirectory = root.appendingPathComponent("data", isDirectory: true)
         let bodyDirectory = root.appendingPathComponent("bodies", isDirectory: true)
-        return AppModel(arguments: [
-            "PostieTests",
-            "--data-directory", dataDirectory.path,
-            "--body-directory", bodyDirectory.path
-        ], secretVault: secretVault)
+        return AppModel(
+            arguments: [
+                "PostieTests",
+                "--data-directory", dataDirectory.path,
+                "--body-directory", bodyDirectory.path,
+            ], secretVault: secretVault)
     }
 
     private func makeTemporaryDirectory() throws -> URL {
@@ -1479,10 +1519,12 @@ private final class AppHTTPFixture {
         }
 
         guard termination.wait(timeout: .now() + .seconds(2)) == .timedOut,
-              process.isRunning else { return }
+            process.isRunning
+        else { return }
         _ = Darwin.kill(process.processIdentifier, SIGKILL)
         guard termination.wait(timeout: .now() + .seconds(2)) == .timedOut,
-              process.isRunning else { return }
+            process.isRunning
+        else { return }
         XCTFail("The HTTP fixture process did not terminate after SIGKILL.")
     }
 

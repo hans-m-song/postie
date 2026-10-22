@@ -112,27 +112,38 @@ private final class LoopbackHTTPServer {
             var bytes = [UInt8]()
             bytes.reserveCapacity(1_024)
             for _ in 0..<4 { bytes.append(contentsOf: 0...255) }
-            sendFixtureBytes(client, status: 200, body: Data(bytes), contentType: "application/octet-stream", headOnly: request.method == "HEAD")
+            sendFixtureBytes(
+                client, status: 200, body: Data(bytes), contentType: "application/octet-stream",
+                headOnly: request.method == "HEAD")
             return
         }
 
         if request.path == "/presentation" {
             let variant = query["kind"]?.first ?? "json"
             if variant == "binary" {
-                sendFixtureBytes(client, status: 200, body: Data([0, 1, 2, 3]), contentType: "application/json", headOnly: request.method == "HEAD")
+                sendFixtureBytes(
+                    client, status: 200, body: Data([0, 1, 2, 3]), contentType: "application/json",
+                    headOnly: request.method == "HEAD")
                 return
             }
             if variant == "oversized" {
                 let count = 6 * 1_048_576
-                guard sendHeaders(client, status: 200, headers: [("Content-Type", "application/json"), ("Content-Length", String(count))]), request.method != "HEAD" else { return }
+                guard
+                    sendHeaders(
+                        client, status: 200,
+                        headers: [("Content-Type", "application/json"), ("Content-Length", String(count))]),
+                    request.method != "HEAD"
+                else { return }
                 writeRepeatedByte(client, byte: 0x20, count: count, chunked: false, delay: 0)
                 return
             }
-            let body = variant == "invalid"
+            let body =
+                variant == "invalid"
                 ? "{invalid JSON: " + String(repeating: "fallback text ", count: 20)
                 : "{\"message\":\"" + String(repeating: "A long response value ", count: 20) + "\",\"items\":[1,2,3]}"
             let type = variant == "problem" ? "application/problem+json; charset=utf-8" : "application/json"
-            sendFixtureBytes(client, status: 200, body: Data(body.utf8), contentType: type, headOnly: request.method == "HEAD")
+            sendFixtureBytes(
+                client, status: 200, body: Data(body.utf8), contentType: type, headOnly: request.method == "HEAD")
             return
         }
 
@@ -141,11 +152,12 @@ private final class LoopbackHTTPServer {
             "path": request.path,
             "query": request.query,
             "headers": request.headers.map { [$0.0, $0.1] },
-            "body": String(decoding: request.body, as: UTF8.self)
+            "body": String(decoding: request.body, as: UTF8.self),
         ]
         guard let body = try? JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted]) else { return }
         let status = request.path == "/status" ? integer(query["status"]?.first, default: 200) : 200
-        sendFixtureBytes(client, status: status, body: body, contentType: "application/json", headOnly: request.method == "HEAD")
+        sendFixtureBytes(
+            client, status: status, body: body, contentType: "application/json", headOnly: request.method == "HEAD")
     }
 
     private static func readRequest(from socket: Int32) -> HTTPRequest? {
@@ -182,7 +194,8 @@ private final class LoopbackHTTPServer {
             headers.append((name, value))
         }
 
-        let contentLength = headers.first { $0.0.caseInsensitiveCompare("Content-Length") == .orderedSame }
+        let contentLength =
+            headers.first { $0.0.caseInsensitiveCompare("Content-Length") == .orderedSame }
             .flatMap { Int($0.1) } ?? 0
         let bodyCount = min(max(contentLength, 0), bodyLimit)
         let bodyStart = headerRange.upperBound
@@ -220,16 +233,19 @@ private final class LoopbackHTTPServer {
         min(max(integer(value, default: defaultValue), range.lowerBound), range.upperBound)
     }
 
-    private static func boundedDouble(_ value: String?, default defaultValue: Double, range: ClosedRange<Double>) -> Double {
+    private static func boundedDouble(_ value: String?, default defaultValue: Double, range: ClosedRange<Double>)
+        -> Double
+    {
         guard let value, let parsed = Double(value), parsed.isFinite else { return defaultValue }
         return min(max(parsed, range.lowerBound), range.upperBound)
     }
 
-    private static func sendFixtureBytes(_ socket: Int32, status: Int, body: Data, contentType: String, headOnly: Bool) {
+    private static func sendFixtureBytes(_ socket: Int32, status: Int, body: Data, contentType: String, headOnly: Bool)
+    {
         let headers = [
             ("Content-Type", contentType),
             ("Content-Length", String(body.count)),
-            ("X-Postie-Fixture", "synthetic")
+            ("X-Postie-Fixture", "synthetic"),
         ]
         guard sendHeaders(socket, status: status, headers: headers), !headOnly else { return }
         _ = sendAll(socket, data: body)
@@ -291,8 +307,9 @@ private enum FixtureArgumentError: Error, CustomStringConvertible {
     static func requestedPort(from arguments: [String]) throws -> UInt16 {
         guard !arguments.isEmpty else { return 0 }
         guard arguments.count == 2,
-              arguments[0] == "--port",
-              let port = UInt16(arguments[1]) else {
+            arguments[0] == "--port",
+            let port = UInt16(arguments[1])
+        else {
             throw FixtureArgumentError.invalidArguments
         }
         return port

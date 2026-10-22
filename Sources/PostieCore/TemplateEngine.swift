@@ -50,7 +50,8 @@ public enum TemplateEngine {
 
             var closingIndex = index + 2
             while closingIndex + 1 < text.length,
-                  !isClosingDelimiter(in: text, at: closingIndex) {
+                !isClosingDelimiter(in: text, at: closingIndex)
+            {
                 closingIndex += 1
             }
 
@@ -95,7 +96,8 @@ public enum TemplateEngine {
             }
 
             if referenceIndex < result.references.count,
-               result.references[referenceIndex].range.location == cursor {
+                result.references[referenceIndex].range.location == cursor
+            {
                 let reference = result.references[referenceIndex]
                 append(text, from: literalStart, to: cursor, into: &output)
                 guard let value = values[reference.name] else {
@@ -138,7 +140,8 @@ public enum TemplateEngine {
         while segmentStart <= pathRange.upperBound {
             var segmentEnd = segmentStart
             while segmentEnd < pathRange.upperBound,
-                  text.character(at: segmentEnd) != slash {
+                text.character(at: segmentEnd) != slash
+            {
                 segmentEnd += 1
             }
 
@@ -149,8 +152,9 @@ public enum TemplateEngine {
                 }
                 let segment = text.substring(with: segmentRange)
                 if !overlapsTemplate,
-                   segment.first == ":",
-                   isValidVariableName(String(segment.dropFirst())) {
+                    segment.first == ":",
+                    isValidVariableName(String(segment.dropFirst()))
+                {
                     references.append(TemplateReference(name: String(segment.dropFirst()), range: segmentRange))
                 }
             }
@@ -179,15 +183,17 @@ public enum TemplateEngine {
             }
             pathStart = slashIndex
         } else if text.length >= 2,
-                  pathEnd >= 2,
-                  text.character(at: 0) == slash,
-                  text.character(at: 1) == slash {
+            pathEnd >= 2,
+            text.character(at: 0) == slash,
+            text.character(at: 1) == slash
+        {
             guard let slashIndex = firstSlash(in: text, from: 2, before: pathEnd) else {
                 return nil
             }
             pathStart = slashIndex
         } else if let colon = firstColon(in: text, before: pathEnd),
-                  isScheme(String(text.substring(to: colon))) {
+            isScheme(String(text.substring(to: colon)))
+        {
             pathStart = colon + 1
         } else {
             pathStart = 0
@@ -216,7 +222,8 @@ public enum TemplateEngine {
 
         for index in 0...(end - 3) where text.character(at: index) == 0x3A {
             if text.character(at: index + 1) == slash,
-               text.character(at: index + 2) == slash {
+                text.character(at: index + 2) == slash
+            {
                 return index
             }
         }
@@ -246,31 +253,28 @@ public enum TemplateEngine {
     private static func isScheme(_ value: String) -> Bool {
         let bytes = value.utf8
         guard let first = bytes.first,
-              (0x41...0x5A).contains(first) || (0x61...0x7A).contains(first) else {
+            (0x41...0x5A).contains(first) || (0x61...0x7A).contains(first)
+        else {
             return false
         }
         return bytes.dropFirst().allSatisfy { byte in
-            (0x41...0x5A).contains(byte) || (0x61...0x7A).contains(byte) ||
-                (0x30...0x39).contains(byte) || byte == 0x2B || byte == 0x2D || byte == 0x2E
+            (0x41...0x5A).contains(byte) || (0x61...0x7A).contains(byte) || (0x30...0x39).contains(byte) || byte == 0x2B
+                || byte == 0x2D || byte == 0x2E
         }
     }
 
     private static func isEscapedOpener(in text: NSString, at index: Int) -> Bool {
-        index + 2 < text.length &&
-            text.character(at: index) == backslash &&
-            isOpeningDelimiter(in: text, at: index + 1)
+        index + 2 < text.length && text.character(at: index) == backslash && isOpeningDelimiter(in: text, at: index + 1)
     }
 
     private static func isOpeningDelimiter(in text: NSString, at index: Int) -> Bool {
-        index + 1 < text.length &&
-            text.character(at: index) == openingBrace &&
-            text.character(at: index + 1) == openingBrace
+        index + 1 < text.length && text.character(at: index) == openingBrace
+            && text.character(at: index + 1) == openingBrace
     }
 
     private static func isClosingDelimiter(in text: NSString, at index: Int) -> Bool {
-        index + 1 < text.length &&
-            text.character(at: index) == closingBrace &&
-            text.character(at: index + 1) == closingBrace
+        index + 1 < text.length && text.character(at: index) == closingBrace
+            && text.character(at: index + 1) == closingBrace
     }
 
     private static func isIdentifierStart(_ byte: UInt8) -> Bool {

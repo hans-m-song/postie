@@ -81,7 +81,8 @@ enum SyntaxHighlighting {
         var spans: [Span] = []
 
         if request.syntax == .json,
-           !appendJSONSpans(from: source, to: &spans) {
+            !appendJSONSpans(from: source, to: &spans)
+        {
             return .cancelled
         }
 
@@ -91,17 +92,19 @@ enum SyntaxHighlighting {
                 return .cancelled
             }
             for reference in pathReferences {
-                spans.append(Span(
-                    location: reference.range.location,
-                    length: reference.range.length,
-                    color: .pathParameter
-                ))
-                guard request.validPathParameters.contains(reference.name) else {
-                    spans.append(Span(
-                        location: reference.range.location + 1,
-                        length: reference.range.length - 1,
-                        color: .missing
+                spans.append(
+                    Span(
+                        location: reference.range.location,
+                        length: reference.range.length,
+                        color: .pathParameter
                     ))
+                guard request.validPathParameters.contains(reference.name) else {
+                    spans.append(
+                        Span(
+                            location: reference.range.location + 1,
+                            length: reference.range.length - 1,
+                            color: .missing
+                        ))
                     continue
                 }
             }
@@ -113,11 +116,12 @@ enum SyntaxHighlighting {
                 return .cancelled
             }
             for reference in templates.references {
-                spans.append(Span(
-                    location: reference.range.location,
-                    length: reference.range.length,
-                    color: request.availableVariables.contains(reference.name) ? .variable : .missing
-                ))
+                spans.append(
+                    Span(
+                        location: reference.range.location,
+                        length: reference.range.length,
+                        color: request.availableVariables.contains(reference.name) ? .variable : .missing
+                    ))
             }
             for range in templates.invalidRanges {
                 spans.append(Span(location: range.location, length: range.length, color: .invalid))
@@ -208,7 +212,8 @@ enum SyntaxHighlighting {
                 while lookahead < text.length, isWhitespace(text.character(at: lookahead)) {
                     lookahead += 1
                 }
-                let color: Color = lookahead < text.length && text.character(at: lookahead) == 0x3A
+                let color: Color =
+                    lookahead < text.length && text.character(at: lookahead) == 0x3A
                     ? .jsonKey
                     : .jsonString
                 spans.append(Span(location: start, length: index - start, color: color))
@@ -260,8 +265,8 @@ enum SyntaxHighlighting {
     }
 
     private static func isJSONDelimiter(_ character: unichar) -> Bool {
-        isWhitespace(character) || character == 0x2C || character == 0x3A ||
-            character == 0x5D || character == 0x7D || character == 0x5B || character == 0x7B
+        isWhitespace(character) || character == 0x2C || character == 0x3A || character == 0x5D || character == 0x7D
+            || character == 0x5B || character == 0x7B
     }
 
     private final class Cache: @unchecked Sendable {
@@ -279,8 +284,7 @@ enum SyntaxHighlighting {
         }
 
         func insert(_ result: Result, for request: Request, inputByteLength: Int) {
-            let entryCost = inputByteLength +
-                result.spans.count * MemoryLayout<Span>.stride
+            let entryCost = inputByteLength + result.spans.count * MemoryLayout<Span>.stride
             guard entryCost <= maximumCost else {
                 return
             }
@@ -303,8 +307,7 @@ enum SyntaxHighlighting {
                     continue
                 }
                 let removedInputByteLength = oldest.text.utf8.count
-                cost -= removedInputByteLength +
-                    removed.spans.count * MemoryLayout<Span>.stride
+                cost -= removedInputByteLength + removed.spans.count * MemoryLayout<Span>.stride
             }
         }
     }
@@ -345,9 +348,10 @@ final class NativeHighlightingHostView: NSView {
         super.layout()
         textView.frame = bounds
         pausedLabel.sizeToFit()
-        pausedLabel.setFrameOrigin(NSPoint(
-            x: max(4, bounds.maxX - pausedLabel.frame.width - 8),
-            y: max(4, bounds.maxY - pausedLabel.frame.height - 8)
-        ))
+        pausedLabel.setFrameOrigin(
+            NSPoint(
+                x: max(4, bounds.maxX - pausedLabel.frame.width - 8),
+                y: max(4, bounds.maxY - pausedLabel.frame.height - 8)
+            ))
     }
 }

@@ -11,14 +11,15 @@ final class HeaderPresentationTests: XCTestCase {
             apiKey: SecretEnvelope(combined: "encrypted-service-key")
         )
 
-        let row = try XCTUnwrap(HeaderPresentation.authenticationRow(
-            authentication: authentication,
-            source: .collectionAuth,
-            requestHeaders: [],
-            availableVariables: ["region"],
-            onReveal: { await revealProbe.reveal() },
-            onOpenSource: {}
-        ))
+        let row = try XCTUnwrap(
+            HeaderPresentation.authenticationRow(
+                authentication: authentication,
+                source: .collectionAuth,
+                requestHeaders: [],
+                availableVariables: ["region"],
+                onReveal: { await revealProbe.reveal() },
+                onOpenSource: {}
+            ))
 
         XCTAssertEqual(row.name, "X-Service-Key")
         XCTAssertEqual(row.maskedValue, "••••••••")
@@ -90,10 +91,11 @@ final class HeaderPresentationTests: XCTestCase {
 
     func testResetKeyChangesAfterAuthenticationEditsAndRequestNavigation() {
         let identity = RequestIdentity(collectionID: UUID(), requestID: UUID())
-        let request = HTTPRequestConfiguration(authentication: RequestAuthentication(
-            kind: .bearer,
-            token: SecretEnvelope(combined: "encrypted-token")
-        ))
+        let request = HTTPRequestConfiguration(
+            authentication: RequestAuthentication(
+                kind: .bearer,
+                token: SecretEnvelope(combined: "encrypted-token")
+            ))
         let resetKey = makeResetKey(identity: identity, request: request)
 
         var editedRequest = request
@@ -112,14 +114,15 @@ final class HeaderPresentationTests: XCTestCase {
         authentication: RequestAuthentication,
         requestHeaders: [HTTPField]
     ) throws -> DerivedHeaderRowPresentation {
-        try XCTUnwrap(HeaderPresentation.authenticationRow(
-            authentication: authentication,
-            source: .requestAuth,
-            requestHeaders: requestHeaders,
-            availableVariables: [],
-            onReveal: { "synthetic revealed value" },
-            onOpenSource: {}
-        ))
+        try XCTUnwrap(
+            HeaderPresentation.authenticationRow(
+                authentication: authentication,
+                source: .requestAuth,
+                requestHeaders: requestHeaders,
+                availableVariables: [],
+                onReveal: { "synthetic revealed value" },
+                onOpenSource: {}
+            ))
     }
 
     private func makeResetKey(

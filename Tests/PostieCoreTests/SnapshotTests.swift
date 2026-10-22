@@ -9,19 +9,26 @@ final class SnapshotTests: XCTestCase {
         let configuration = HTTPRequestConfiguration(
             url: "https://example.invalid/{{path}}?q={{query}}",
             query: [HTTPField(name: "q", value: "{{query}}"), HTTPField(name: "q", value: "")],
-            headers: [HTTPField(name: "X-Override", value: "request"),
-                      HTTPField(name: "{{disabled}}", value: "unused", isEnabled: false)],
+            headers: [
+                HTTPField(name: "X-Override", value: "request"),
+                HTTPField(name: "{{disabled}}", value: "unused", isEnabled: false),
+            ],
             variables: ["query": .plain("request-query")], inheritsCollectionAuthentication: true
         )
         let prepared = try await RequestPreparer.prepare(
             configuration,
-            context: VariableContext(global: ["query": .plain("global-query"), "unused": .plain("never capture")],
-                                     collection: ["path": .plain("frozen-path"), "token": .plain("frozen-token"),
-                                                  "inherited": .plain("frozen-header"), "disabled": .plain("X-Disabled")]),
+            context: VariableContext(
+                global: ["query": .plain("global-query"), "unused": .plain("never capture")],
+                collection: [
+                    "path": .plain("frozen-path"), "token": .plain("frozen-token"),
+                    "inherited": .plain("frozen-header"), "disabled": .plain("X-Disabled"),
+                ]),
             decryptor: vault,
             collection: CollectionRequestDefaults(
-                headers: [HTTPField(name: "X-Inherited", value: "{{inherited}}"),
-                          HTTPField(name: "X-Override", value: "{{unused}}")],
+                headers: [
+                    HTTPField(name: "X-Inherited", value: "{{inherited}}"),
+                    HTTPField(name: "X-Override", value: "{{unused}}"),
+                ],
                 authentication: RequestAuthentication(kind: .bearer, token: auth)
             )
         )
@@ -32,7 +39,8 @@ final class SnapshotTests: XCTestCase {
         XCTAssertEqual(capture.template.query, configuration.query)
         XCTAssertEqual(capture.template.headers.first?.name, "X-Inherited")
         XCTAssertEqual(capture.authentication.resolvedSecret, "frozen-token")
-        XCTAssertEqual(capture.submitted.headers.first { $0.name.lowercased() == "authorization" }?.value, "Bearer frozen-token")
+        XCTAssertEqual(
+            capture.submitted.headers.first { $0.name.lowercased() == "authorization" }?.value, "Bearer frozen-token")
         XCTAssertNil(capture.submitted.body)
         var emptyBody = configuration
         emptyBody.bodyEnabled = true
@@ -46,7 +54,8 @@ final class SnapshotTests: XCTestCase {
         var overridden = configuration
         overridden.headers.append(HTTPField(name: "Authorization", value: "manual"))
         let overriddenPrepared = try await RequestPreparer.prepare(
-            overridden, context: VariableContext(collection: ["path": .plain("path"), "disabled": .plain("X-Disabled")]),
+            overridden,
+            context: VariableContext(collection: ["path": .plain("path"), "disabled": .plain("X-Disabled")]),
             decryptor: nil,
             collection: CollectionRequestDefaults(authentication: RequestAuthentication(kind: .bearer, token: auth))
         )
@@ -76,12 +85,14 @@ final class SnapshotTests: XCTestCase {
         json["futureField"] = ["retained": true]
         try JSONSerialization.data(withJSONObject: json).write(to: metadata)
         let renamed = try await store.rename(id: saved.id, name: "Renamed exchange")
-        let renamedJSON = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: metadata)) as? [String: Any])
+        let renamedJSON = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(contentsOf: metadata)) as? [String: Any])
         XCTAssertEqual(renamedJSON["encryptedContext"] as? NSDictionary, envelope)
         XCTAssertNotNil(renamedJSON["futureField"])
 
         try FileManager.default.removeItem(at: response.bodyFileURL)
-        let restarted = SnapshotStore(rootURL: root.appendingPathComponent("snapshots"), vault: SecretVault(keyStore: keyStore))
+        let restarted = SnapshotStore(
+            rootURL: root.appendingPathComponent("snapshots"), vault: SecretVault(keyStore: keyStore))
         let load = try await restarted.load()
         XCTAssertEqual(load.snapshots, [renamed])
         XCTAssertTrue(load.containsEncryptedData)
@@ -134,10 +145,12 @@ final class SnapshotTests: XCTestCase {
         try Data("{\"version\":99}".utf8).write(to: unsupported.appendingPathComponent("snapshot.json"))
         let target = root.appendingPathComponent("unrelated")
         try FileManager.default.createDirectory(at: target, withIntermediateDirectories: false)
-        try FileManager.default.createSymbolicLink(at: snapshots.appendingPathComponent(UUID().uuidString), withDestinationURL: target)
+        try FileManager.default.createSymbolicLink(
+            at: snapshots.appendingPathComponent(UUID().uuidString), withDestinationURL: target)
         let abandoned = snapshots.appendingPathComponent(".staging/" + UUID().uuidString)
         try FileManager.default.createDirectory(at: abandoned, withIntermediateDirectories: true)
-        try Data("Postie snapshot staging v1\n".utf8).write(to: abandoned.appendingPathComponent(".postie-snapshot-stage"))
+        try Data("Postie snapshot staging v1\n".utf8).write(
+            to: abandoned.appendingPathComponent(".postie-snapshot-stage"))
         try Data([1]).write(to: abandoned.appendingPathComponent("response.body"))
         let store = SnapshotStore(rootURL: snapshots, vault: SecretVault(keyStore: SnapshotTestKeyStore()))
         let loaded = try await store.load()
@@ -151,7 +164,9 @@ final class SnapshotTests: XCTestCase {
 
         let fileParent = root.appendingPathComponent("not-a-directory")
         try Data().write(to: fileParent)
-        let uncertain = SnapshotStore(rootURL: fileParent.appendingPathComponent("snapshots"), vault: SecretVault(keyStore: SnapshotTestKeyStore()))
+        let uncertain = SnapshotStore(
+            rootURL: fileParent.appendingPathComponent("snapshots"),
+            vault: SecretVault(keyStore: SnapshotTestKeyStore()))
         do {
             _ = try await uncertain.load()
             XCTFail("Lookup uncertainty must never be reported as an empty snapshot store")
@@ -172,7 +187,8 @@ final class SnapshotTests: XCTestCase {
         } catch {}
         let loaded = try await store.load()
         XCTAssertTrue(loaded.snapshots.isEmpty)
-        let unavailable = SnapshotStore(rootURL: root.appendingPathComponent("denied"), vault: SecretVault(keyStore: SnapshotTestKeyStore()))
+        let unavailable = SnapshotStore(
+            rootURL: root.appendingPathComponent("denied"), vault: SecretVault(keyStore: SnapshotTestKeyStore()))
         do {
             _ = try await unavailable.save(response: response, source: source, name: "Denied", bodyLease: lease)
             XCTFail("Encryption failure must not publish")
@@ -185,8 +201,10 @@ final class SnapshotTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: root) }
         let bodyRoot = root.appendingPathComponent("bodies")
         let manager = try HTTPExecutionManager(bodyDirectory: bodyRoot)
-        let session = try XCTUnwrap(FileManager.default.contentsOfDirectory(at: bodyRoot, includingPropertiesForKeys: nil)
-            .first { $0.lastPathComponent.hasPrefix(".postie-http-session-") }).resolvingSymlinksInPath()
+        let session = try XCTUnwrap(
+            FileManager.default.contentsOfDirectory(at: bodyRoot, includingPropertiesForKeys: nil)
+                .first { $0.lastPathComponent.hasPrefix(".postie-http-session-") }
+        ).resolvingSymlinksInPath()
         let bodyURL = session.appendingPathComponent("synthetic.body")
         try Data([1, 2]).write(to: bodyURL)
         let request = HTTPRequestConfiguration(url: "https://example.invalid")
@@ -226,19 +244,24 @@ final class SnapshotTests: XCTestCase {
     }
 
     private func temporaryRoot() throws -> URL {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("postie-snapshot-tests-" + UUID().uuidString)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "postie-snapshot-tests-" + UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         return root
     }
 
-    private func fixture(root: URL, body: Data, vault: SecretVault) async throws -> (HTTPResponseRecord, SnapshotSource, HTTPBodyLease) {
+    private func fixture(root: URL, body: Data, vault: SecretVault) async throws -> (
+        HTTPResponseRecord, SnapshotSource, HTTPBodyLease
+    ) {
         let token = try await vault.encrypt("private-token-value")
         let headerName = try await vault.encrypt("private-header-name")
         let configuration = HTTPRequestConfiguration(
             name: "Original request", url: "https://example.invalid/?q={{query}}",
             headers: [HTTPField(name: "{{headerName}}", value: "{{headerValue}}")],
-            variables: ["query": .plain("private-query-value"), "headerName": .encrypted(headerName),
-                        "headerValue": .plain("private-header-value")],
+            variables: [
+                "query": .plain("private-query-value"), "headerName": .encrypted(headerName),
+                "headerValue": .plain("private-header-value"),
+            ],
             authentication: RequestAuthentication(kind: .bearer, token: token)
         )
         let prepared = try await RequestPreparer.prepare(configuration, context: .init(), decryptor: vault)
@@ -249,21 +272,24 @@ final class SnapshotTests: XCTestCase {
             runID: UUID(), request: configuration, finalURL: capture.submitted.url, statusCode: 418,
             requestHeaders: capture.submitted.headers,
             responseHeaders: [HTTPField(name: "Content-Type", value: "application/octet-stream")],
-            redirects: [HTTPRedirect(
-                statusCode: 302, url: capture.submitted.url, nextURL: capture.submitted.url,
-                method: "GET", nextMethod: "GET", requestHeaders: capture.submitted.headers,
-                responseHeaders: [HTTPField(name: "X-Response", value: "original")],
-                sensitiveRequestHeaderNames: capture.submitted.sensitiveNames,
-                secretRequestHeaderNames: capture.submitted.secretNames,
-                requestHeaderSources: capture.submitted.headerSources
-            )], bodyFileURL: bodyURL, bodyByteCount: Int64(body.count), duration: 0.25,
+            redirects: [
+                HTTPRedirect(
+                    statusCode: 302, url: capture.submitted.url, nextURL: capture.submitted.url,
+                    method: "GET", nextMethod: "GET", requestHeaders: capture.submitted.headers,
+                    responseHeaders: [HTTPField(name: "X-Response", value: "original")],
+                    sensitiveRequestHeaderNames: capture.submitted.sensitiveNames,
+                    secretRequestHeaderNames: capture.submitted.secretNames,
+                    requestHeaderSources: capture.submitted.headerSources
+                )
+            ], bodyFileURL: bodyURL, bodyByteCount: Int64(body.count), duration: 0.25,
             sensitiveRequestHeaderNames: capture.submitted.sensitiveNames,
             secretRequestHeaderNames: capture.submitted.secretNames,
             requestHeaderSources: capture.submitted.headerSources, snapshotCapture: capture,
             completedAt: Date(timeIntervalSince1970: 1_792_345_678)
         )
-        let source = SnapshotSource(identity: RequestIdentity(collectionID: UUID(), requestID: configuration.id),
-                                    collectionName: "Original collection", requestName: configuration.name)
+        let source = SnapshotSource(
+            identity: RequestIdentity(collectionID: UUID(), requestID: configuration.id),
+            collectionName: "Original collection", requestName: configuration.name)
         return (response, source, HTTPBodyLease(token: UUID(), runID: response.runID, bodyURL: bodyURL))
     }
 }

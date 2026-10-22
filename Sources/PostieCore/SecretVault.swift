@@ -284,7 +284,7 @@ private struct SystemKeychainItemClient: KeychainItemClient {
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
             kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne
+            kSecMatchLimit as String: kSecMatchLimitOne,
         ]
 
         var result: CFTypeRef?
@@ -305,7 +305,7 @@ private struct SystemKeychainItemClient: KeychainItemClient {
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
-            kSecValueData as String: data
+            kSecValueData as String: data,
         ]
 
         let status = SecItemAdd(attributes as CFDictionary, nil)

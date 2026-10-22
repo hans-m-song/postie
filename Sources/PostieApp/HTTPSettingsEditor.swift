@@ -164,14 +164,17 @@ struct HTTPSettingsEditor: View {
         switch scope {
         case let .global(options, update):
             settingRow("Follow redirects") {
-                Picker("Follow redirects", selection: Binding(
-                    get: { options.followRedirects },
-                    set: { value in
-                        var next = options
-                        next.followRedirects = value
-                        update(next)
-                    }
-                )) {
+                Picker(
+                    "Follow redirects",
+                    selection: Binding(
+                        get: { options.followRedirects },
+                        set: { value in
+                            var next = options
+                            next.followRedirects = value
+                            update(next)
+                        }
+                    )
+                ) {
                     Text("Yes").tag(true)
                     Text("No").tag(false)
                 }
@@ -181,14 +184,17 @@ struct HTTPSettingsEditor: View {
             }
         case let .request(overrides, global, update):
             settingRow("Follow redirects") {
-                Picker("Follow redirects", selection: Binding<Bool?>(
-                    get: { overrides.followRedirects },
-                    set: { value in
-                        var next = overrides
-                        next.followRedirects = value
-                        update(next)
-                    }
-                )) {
+                Picker(
+                    "Follow redirects",
+                    selection: Binding<Bool?>(
+                        get: { overrides.followRedirects },
+                        set: { value in
+                            var next = overrides
+                            next.followRedirects = value
+                            update(next)
+                        }
+                    )
+                ) {
                     Text("Use global (\(global.followRedirects ? "Yes" : "No"))")
                         .tag(Optional<Bool>.none)
                     Text("Yes").tag(Optional(true))
@@ -260,14 +266,17 @@ struct HTTPSettingsEditor: View {
                     Text("seconds")
                         .foregroundStyle(.secondary)
                 }
-                Toggle("Unlimited", isOn: Binding(
-                    get: { options.overallTimeout == nil },
-                    set: { isUnlimited in
-                        var next = options
-                        next.overallTimeout = isUnlimited ? nil : HTTPOptions().overallTimeout
-                        update(next)
-                    }
-                ))
+                Toggle(
+                    "Unlimited",
+                    isOn: Binding(
+                        get: { options.overallTimeout == nil },
+                        set: { isUnlimited in
+                            var next = options
+                            next.overallTimeout = isUnlimited ? nil : HTTPOptions().overallTimeout
+                            update(next)
+                        }
+                    )
+                )
                 .toggleStyle(.checkbox)
             }
         case let .request(overrides, global, update):
@@ -288,15 +297,18 @@ struct HTTPSettingsEditor: View {
                     Text("seconds")
                         .foregroundStyle(.secondary)
                 }
-                Toggle("Unlimited", isOn: Binding(
-                    get: { overrides.overallTimeoutIsUnlimited },
-                    set: { isUnlimited in
-                        var next = overrides
-                        next.overallTimeoutIsUnlimited = isUnlimited
-                        if isUnlimited { next.overallTimeout = nil }
-                        update(next)
-                    }
-                ))
+                Toggle(
+                    "Unlimited",
+                    isOn: Binding(
+                        get: { overrides.overallTimeoutIsUnlimited },
+                        set: { isUnlimited in
+                            var next = overrides
+                            next.overallTimeoutIsUnlimited = isUnlimited
+                            if isUnlimited { next.overallTimeout = nil }
+                            update(next)
+                        }
+                    )
+                )
                 .toggleStyle(.checkbox)
             }
         }
@@ -330,14 +342,17 @@ struct HTTPSettingsEditor: View {
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 .frame(width: 80)
-                Toggle("Unlimited", isOn: Binding(
-                    get: { options.maximumResponseBytes == nil },
-                    set: { isUnlimited in
-                        var next = options
-                        next.maximumResponseBytes = isUnlimited ? nil : HTTPOptions().maximumResponseBytes
-                        update(next)
-                    }
-                ))
+                Toggle(
+                    "Unlimited",
+                    isOn: Binding(
+                        get: { options.maximumResponseBytes == nil },
+                        set: { isUnlimited in
+                            var next = options
+                            next.maximumResponseBytes = isUnlimited ? nil : HTTPOptions().maximumResponseBytes
+                            update(next)
+                        }
+                    )
+                )
                 .toggleStyle(.checkbox)
             }
         case let .request(overrides, global, update):
@@ -365,15 +380,18 @@ struct HTTPSettingsEditor: View {
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 .frame(width: 80)
-                Toggle("Unlimited", isOn: Binding(
-                    get: { overrides.responseSizeIsUnlimited },
-                    set: { isUnlimited in
-                        var next = overrides
-                        next.responseSizeIsUnlimited = isUnlimited
-                        if isUnlimited { next.maximumResponseBytes = nil }
-                        update(next)
-                    }
-                ))
+                Toggle(
+                    "Unlimited",
+                    isOn: Binding(
+                        get: { overrides.responseSizeIsUnlimited },
+                        set: { isUnlimited in
+                            var next = overrides
+                            next.responseSizeIsUnlimited = isUnlimited
+                            if isUnlimited { next.maximumResponseBytes = nil }
+                            update(next)
+                        }
+                    )
+                )
                 .toggleStyle(.checkbox)
             }
         }
@@ -428,17 +446,20 @@ private struct DecimalNumberField: View {
     @FocusState private var isFocused: Bool
 
     var body: some View {
-        TextField(placeholder, text: Binding(
-            get: { text },
-            set: { newValue in
-                text = newValue
-                guard let onChangeValue = Self.parse(newValue) else {
-                    if newValue.isEmpty && allowsClearing { onChange(nil) }
-                    return
+        TextField(
+            placeholder,
+            text: Binding(
+                get: { text },
+                set: { newValue in
+                    text = newValue
+                    guard let onChangeValue = Self.parse(newValue) else {
+                        if newValue.isEmpty && allowsClearing { onChange(nil) }
+                        return
+                    }
+                    onChange(onChangeValue)
                 }
-                onChange(onChangeValue)
-            }
-        ))
+            )
+        )
         .textFieldStyle(.roundedBorder)
         .font(.system(.body, design: .monospaced))
         .multilineTextAlignment(.trailing)
@@ -502,17 +523,20 @@ private struct ResponseSizeField: View {
     @FocusState private var isFocused: Bool
 
     var body: some View {
-        TextField(placeholder, text: Binding(
-            get: { text },
-            set: { newValue in
-                text = newValue
-                guard let newBytes = Self.parse(newValue, unit: unit) else {
-                    if newValue.isEmpty && allowsClearing { onChange(nil) }
-                    return
+        TextField(
+            placeholder,
+            text: Binding(
+                get: { text },
+                set: { newValue in
+                    text = newValue
+                    guard let newBytes = Self.parse(newValue, unit: unit) else {
+                        if newValue.isEmpty && allowsClearing { onChange(nil) }
+                        return
+                    }
+                    onChange(newBytes)
                 }
-                onChange(newBytes)
-            }
-        ))
+            )
+        )
         .textFieldStyle(.roundedBorder)
         .font(.system(.body, design: .monospaced))
         .multilineTextAlignment(.trailing)
@@ -571,7 +595,8 @@ enum HTTPSettingsInput {
         decimalSeparator: String
     ) -> Int64? {
         guard multiplier > 0,
-              let parts = decimalParts(from: input, decimalSeparator: decimalSeparator) else { return nil }
+            let parts = decimalParts(from: input, decimalSeparator: decimalSeparator)
+        else { return nil }
 
         var scale: Int64 = 1
         var fractionalDigits = 0
@@ -591,7 +616,10 @@ enum HTTPSettingsInput {
         let remainderText = String(maximumRemainder)
         let maximumFraction = String(repeating: "0", count: fractionalDigits - remainderText.count) + remainderText
         if wholeComparison == 0,
-           compareFractions(parts.fraction, maximumFraction) > 0 { return nil }
+            compareFractions(parts.fraction, maximumFraction) > 0
+        {
+            return nil
+        }
 
         let whole = Int64(parts.whole) ?? 0
         let baseBytes = whole * multiplier
@@ -600,7 +628,8 @@ enum HTTPSettingsInput {
         let fractionBytes = Int64(paddedFraction) ?? 0
         var bytes = baseBytes + fractionBytes
         if let firstDiscardedDigit = parts.fraction.dropFirst(fractionalDigits).first,
-           firstDiscardedDigit >= "5" {
+            firstDiscardedDigit >= "5"
+        {
             guard bytes < Int64.max else { return nil }
             bytes += 1
         }
@@ -611,7 +640,8 @@ enum HTTPSettingsInput {
         guard let parts = decimalParts(from: input, decimalSeparator: decimalSeparator) else { return nil }
         let normalized = parts.fraction.isEmpty ? parts.whole : parts.whole + "." + parts.fraction
         guard let value = Decimal(string: normalized, locale: Locale(identifier: "en_US_POSIX")),
-              !value.isNaN else { return nil }
+            !value.isNaN
+        else { return nil }
         return value
     }
 
@@ -627,8 +657,9 @@ enum HTTPSettingsInput {
         let integer = components[0]
         let fraction = components.count == 2 ? components[1] : ""
         guard integer.isEmpty || isDigits(integer),
-              components.count == 1 || isDigits(fraction),
-              !integer.isEmpty || components.count == 2 else { return nil }
+            components.count == 1 || isDigits(fraction),
+            !integer.isEmpty || components.count == 2
+        else { return nil }
 
         return (normalizeDigits(integer.isEmpty ? "0" : integer), fraction)
     }

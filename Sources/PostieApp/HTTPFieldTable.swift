@@ -87,8 +87,8 @@ struct FieldTable: View {
                 keyPath: \.name,
                 focus: .name(field.id)
             )
-                .font(.system(.body, design: .monospaced))
-                .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+            .font(.system(.body, design: .monospaced))
+            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
             Divider().frame(height: 22)
             editableField(
                 valuePlaceholder,
@@ -96,8 +96,8 @@ struct FieldTable: View {
                 keyPath: \.value,
                 focus: .value(field.id)
             )
-                .font(.system(.body, design: .monospaced))
-                .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+            .font(.system(.body, design: .monospaced))
+            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
             if isTrailingField {
                 Color.clear.frame(width: 26, height: parameterWrapping ? 22 : nil)
             } else {
@@ -160,7 +160,7 @@ struct FieldTable: View {
                     availableVariables: availableVariables,
                     wrapping: parameterWrapping ? .unbounded : .singleLine
                 )
-                    .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+                .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
                 Text(HeaderPresentation.sourceStatusLabel(source: inheritedFieldSourceLabel, status: status))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -176,8 +176,8 @@ struct FieldTable: View {
                 availableVariables: availableVariables,
                 wrapping: parameterWrapping ? .unbounded : .singleLine
             )
-                .font(.system(size: NSFont.systemFontSize, design: .monospaced))
-                .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+            .font(.system(size: NSFont.systemFontSize, design: .monospaced))
+            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
             if let onOpenInheritedSource {
                 Button(action: onOpenInheritedSource) {
                     Image(systemName: "arrow.up.right.square")
@@ -218,7 +218,8 @@ struct FieldTable: View {
             set: { value in
                 updateField(id) { $0[keyPath: keyPath] = value }
                 guard trailingField.id == id,
-                      !trailingField.name.isEmpty || !trailingField.value.isEmpty else { return }
+                    !trailingField.name.isEmpty || !trailingField.value.isEmpty
+                else { return }
                 fields.append(trailingField)
                 trailingField = HTTPField()
             }

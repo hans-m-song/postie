@@ -300,22 +300,20 @@ private struct NativeHighlightedTextField: NSViewRepresentable {
         ) {
             self.text = text
             self.focused = focused
-            if self.inspectionOwner != inspectionOwner || self.isReadOnly != isReadOnly || !isEnabled ||
-                inspectedVariable.map({ !model.isCurrent($0) }) == true {
+            if self.inspectionOwner != inspectionOwner || self.isReadOnly != isReadOnly || !isEnabled
+                || inspectedVariable.map({ !model.isCurrent($0) }) == true
+            {
                 dismissInspection()
             }
             self.inspectionOwner = inspectionOwner
-            let completionContextChanged = self.completionVariables != completionVariables ||
-                self.isURL != isURL || self.isReadOnly != isReadOnly
+            let completionContextChanged =
+                self.completionVariables != completionVariables || self.isURL != isURL || self.isReadOnly != isReadOnly
             let wasEnabled = self.isEnabled
             let wasReadOnly = self.isReadOnly
             let wrappingChanged = self.wrapping != wrapping
-            let inputsChanged = self.availableVariables != availableVariables ||
-                    self.validPathParameters != validPathParameters ||
-                    completionContextChanged ||
-                    wrappingChanged ||
-                    wasEnabled != isEnabled ||
-                    wasReadOnly != isReadOnly
+            let inputsChanged =
+                self.availableVariables != availableVariables || self.validPathParameters != validPathParameters
+                || completionContextChanged || wrappingChanged || wasEnabled != isEnabled || wasReadOnly != isReadOnly
             guard inputsChanged else {
                 return
             }
@@ -356,8 +354,9 @@ private struct NativeHighlightedTextField: NSViewRepresentable {
         func updateTextIfNeeded(_ value: String, in textField: SyntaxHighlightedTextField) {
             if let fieldEditor = textField.currentEditor() as? NSTextView {
                 guard isReadOnly,
-                      !fieldEditor.hasMarkedText(),
-                      fieldEditor.string != value else { return }
+                    !fieldEditor.hasMarkedText(),
+                    fieldEditor.string != value
+                else { return }
                 let selection = fieldEditor.selectedRange()
                 let length = (value as NSString).length
                 let location = min(selection.location, length)
@@ -392,12 +391,13 @@ private struct NativeHighlightedTextField: NSViewRepresentable {
             let generation = focusGeneration
             DispatchQueue.main.async { [weak self, weak textField] in
                 guard let self,
-                      self.focusGeneration == generation,
-                      self.focused?.wrappedValue == true,
-                      let textField,
-                      textField.isEnabled,
-                      textField.currentEditor() == nil,
-                      let window = textField.window else {
+                    self.focusGeneration == generation,
+                    self.focused?.wrappedValue == true,
+                    let textField,
+                    textField.isEnabled,
+                    textField.currentEditor() == nil,
+                    let window = textField.window
+                else {
                     return
                 }
                 window.makeFirstResponder(textField)
@@ -468,10 +468,11 @@ private struct NativeHighlightedTextField: NSViewRepresentable {
 
         func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
             guard !isReadOnly,
-                  let textField,
-                  control === textField,
-                  completionPopover.isShown,
-                  !completionSuggestions.isEmpty else {
+                let textField,
+                control === textField,
+                completionPopover.isShown,
+                !completionSuggestions.isEmpty
+            else {
                 return false
             }
 
@@ -503,33 +504,38 @@ private struct NativeHighlightedTextField: NSViewRepresentable {
 
         func refreshCompletion(in textField: SyntaxHighlightedTextField, fieldEditor: NSTextView?) {
             if let fieldEditor, !fieldEditor.hasMarkedText(),
-               isEnabled, textField.isEnabled, activeFieldEditor === fieldEditor,
-               let reference = VariableInspectionMatcher.reference(
-                in: fieldEditor.string, selection: fieldEditor.selectedRange(), definedNames: availableVariables
-               ), let inspectionOwner,
-               let inspection = model.variableInspection(named: reference.name, in: inspectionOwner) {
+                isEnabled, textField.isEnabled, activeFieldEditor === fieldEditor,
+                let reference = VariableInspectionMatcher.reference(
+                    in: fieldEditor.string, selection: fieldEditor.selectedRange(), definedNames: availableVariables
+                ), let inspectionOwner,
+                let inspection = model.variableInspection(named: reference.name, in: inspectionOwner)
+            {
                 dismissCompletion()
                 inspectedVariable = inspection
                 inspectionGeneration += 1
                 let generation = inspectionGeneration
                 DispatchQueue.main.async { [weak self, weak textField, weak fieldEditor] in
                     guard let self, let textField, let fieldEditor,
-                          self.inspectionGeneration == generation,
-                          self.activeFieldEditor === fieldEditor,
-                          textField.currentEditor() === fieldEditor,
-                          self.model.isCurrent(inspection),
-                          VariableInspectionMatcher.reference(in: fieldEditor.string, selection: fieldEditor.selectedRange()) == reference else { return }
+                        self.inspectionGeneration == generation,
+                        self.activeFieldEditor === fieldEditor,
+                        textField.currentEditor() === fieldEditor,
+                        self.model.isCurrent(inspection),
+                        VariableInspectionMatcher.reference(
+                            in: fieldEditor.string, selection: fieldEditor.selectedRange()) == reference
+                    else { return }
                     self.inspectionPopover.show(
                         inspection, model: self.model,
                         relativeTo: self.tokenRect(reference.range, in: textField, editor: fieldEditor),
                         of: textField,
                         isCurrent: { [weak self, weak textField] in
                             guard let self, let textField,
-                                  self.inspectionPopover.isShown,
-                                  self.inspectedVariable == inspection,
-                                  self.model.isCurrent(inspection) else { return false }
+                                self.inspectionPopover.isShown,
+                                self.inspectedVariable == inspection,
+                                self.model.isCurrent(inspection)
+                            else { return false }
                             let value = (textField.currentEditor() as? NSTextView)?.string ?? textField.stringValue
-                            return VariableInspectionMatcher.reference(in: value, selection: reference.range)?.name == reference.name
+                            return VariableInspectionMatcher.reference(in: value, selection: reference.range)?.name
+                                == reference.name
                         }
                     )
                 }
@@ -537,16 +543,17 @@ private struct NativeHighlightedTextField: NSViewRepresentable {
             }
             dismissInspection()
             guard !isReadOnly,
-                  isEnabled,
-                  textField.isEnabled,
-                  !completionVariables.isEmpty,
-                  let fieldEditor,
-                  activeFieldEditor === fieldEditor,
-                  !fieldEditor.hasMarkedText(),
-                  let context = VariableCompletionMatcher.context(
+                isEnabled,
+                textField.isEnabled,
+                !completionVariables.isEmpty,
+                let fieldEditor,
+                activeFieldEditor === fieldEditor,
+                !fieldEditor.hasMarkedText(),
+                let context = VariableCompletionMatcher.context(
                     in: fieldEditor.string,
                     selection: fieldEditor.selectedRange()
-                  ) else {
+                )
+            else {
                 dismissCompletion()
                 return
             }
@@ -599,9 +606,10 @@ private struct NativeHighlightedTextField: NSViewRepresentable {
 
         private func adoptFieldEditor(_ fieldEditor: NSTextView, in textField: SyntaxHighlightedTextField) {
             guard self.textField === textField,
-                  textField.isEnabled,
-                  textField.currentEditor() === fieldEditor,
-                  textField.window?.firstResponder === fieldEditor else {
+                textField.isEnabled,
+                textField.currentEditor() === fieldEditor,
+                textField.window?.firstResponder === fieldEditor
+            else {
                 return
             }
             guard activeFieldEditor !== fieldEditor else {
@@ -642,8 +650,9 @@ private struct NativeHighlightedTextField: NSViewRepresentable {
 
         @objc private func fieldEditorSelectionDidChange(_ notification: Notification) {
             guard let fieldEditor = notification.object as? NSTextView,
-                  activeFieldEditor === fieldEditor,
-                  let textField else {
+                activeFieldEditor === fieldEditor,
+                let textField
+            else {
                 return
             }
             refreshCompletion(in: textField, fieldEditor: fieldEditor)
@@ -655,12 +664,13 @@ private struct NativeHighlightedTextField: NSViewRepresentable {
 
         private func acceptCompletion(at index: Int) {
             guard !isReadOnly,
-                  completionSuggestions.indices.contains(index),
-                  let fieldEditor = activeFieldEditor,
-                  let context = completionContext,
-                  let textField,
-                  let currentEditor = textField.currentEditor() as? NSTextView,
-                  currentEditor === fieldEditor else {
+                completionSuggestions.indices.contains(index),
+                let fieldEditor = activeFieldEditor,
+                let context = completionContext,
+                let textField,
+                let currentEditor = textField.currentEditor() as? NSTextView,
+                currentEditor === fieldEditor
+            else {
                 dismissCompletion()
                 return
             }
@@ -719,9 +729,10 @@ private struct NativeHighlightedTextField: NSViewRepresentable {
             presentationTask = Task { @MainActor [weak self, weak textField] in
                 let result = await task.value
                 guard let self,
-                      let textField,
-                      !result.isCancelled,
-                      generation == self.highlightGeneration else {
+                    let textField,
+                    !result.isCancelled,
+                    generation == self.highlightGeneration
+                else {
                     return
                 }
                 let currentEditor = textField.currentEditor() as? NSTextView
@@ -734,8 +745,9 @@ private struct NativeHighlightedTextField: NSViewRepresentable {
                 }
 
                 if let currentEditor,
-                   self.activeFieldEditor === currentEditor,
-                   (requestedFieldEditor !== currentEditor || self.editSession != session) {
+                    self.activeFieldEditor === currentEditor,
+                    (requestedFieldEditor !== currentEditor || self.editSession != session)
+                {
                     self.lastScheduledRequest = nil
                     self.lastAppliedRequest = nil
                     self.scheduleHighlighting(in: textField)
@@ -746,10 +758,11 @@ private struct NativeHighlightedTextField: NSViewRepresentable {
                 textField.highlightedCell.spans = result.spans
                 textField.toolTip = result.isPaused ? "Highlighting paused over 1 MiB" : nil
                 if let currentEditor,
-                   let requestedFieldEditor,
-                   currentEditor === requestedFieldEditor,
-                   self.activeFieldEditor === currentEditor,
-                   self.editSession == session {
+                    let requestedFieldEditor,
+                    currentEditor === requestedFieldEditor,
+                    self.activeFieldEditor === currentEditor,
+                    self.editSession == session
+                {
                     SyntaxHighlighting.apply(result, to: currentEditor)
                 }
                 textField.needsDisplay = true
@@ -814,8 +827,9 @@ private final class SyntaxHighlightedTextFieldCell: NSTextFieldCell {
 
     private func notifyFieldEditorSelected(_ editor: NSText, in controlView: NSView) {
         guard let textField = controlView as? SyntaxHighlightedTextField,
-              textField.currentEditor() === editor,
-              textField.window?.firstResponder === editor else {
+            textField.currentEditor() === editor,
+            textField.window?.firstResponder === editor
+        else {
             return
         }
         onFieldEditorSelected?(editor)
@@ -836,17 +850,19 @@ private final class SyntaxHighlightedTextFieldCell: NSTextFieldCell {
 
         let text = NSMutableAttributedString(string: stringValue)
         let textRange = NSRange(location: 0, length: text.length)
-        let foregroundColor = textField.isEnabled
+        let foregroundColor =
+            textField.isEnabled
             ? self.foregroundColor ?? .labelColor
             : .disabledControlTextColor
         let paragraphStyle = NSMutableParagraphStyle()
         paragraphStyle.alignment = alignment
         paragraphStyle.lineBreakMode = lineBreakMode
-        text.addAttributes([
-            .font: textField.font ?? NSFont.monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular),
-            .foregroundColor: foregroundColor,
-            .paragraphStyle: paragraphStyle
-        ], range: textRange)
+        text.addAttributes(
+            [
+                .font: textField.font ?? NSFont.monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular),
+                .foregroundColor: foregroundColor,
+                .paragraphStyle: paragraphStyle,
+            ], range: textRange)
         for span in spans where span.length > 0 && NSMaxRange(span.range) <= text.length {
             text.addAttribute(.foregroundColor, value: span.color.appKitColor, range: span.range)
         }

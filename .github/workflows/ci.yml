@@ -1,0 +1,66 @@
+name: Linux CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Swift format and syntax
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    container:
+      image: swift:6.4.1-noble@sha256:19cbe56bdaec1918f7cf5fdeba42b9bd55bdd8a6149c9990d0e0e3a89a127d63
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check workflow syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          apt-get update
+          apt-get install --no-install-recommends --yes curl
+          archive="$(mktemp /tmp/actionlint.XXXXXX)"
+          install_directory="$(mktemp --directory /tmp/actionlint.XXXXXX)"
+          trap 'rm --force "$archive"; rm --force --recursive "$install_directory"' EXIT
+          curl --fail --location --silent --show-error \
+            --output "$archive" \
+            https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
+          printf '%s  %s\n' \
+            8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8 \
+            "$archive" | sha256sum --check
+          tar --extract --gzip --file "$archive" --directory "$install_directory" actionlint
+          "$install_directory/actionlint"
+
+      - name: Lint Swift formatting
+        run: swift format lint --strict --recursive Sources Tests Package.swift
+
+      - name: Parse Swift files
+        run: bash tools/check-swift-syntax.sh
+
+      - name: Check whitespace in the event range
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          case "$EVENT_NAME" in
+            pull_request) base_sha="$PR_BASE_SHA" ;;
+            push) base_sha="$PUSH_BEFORE_SHA" ;;
+            *) printf 'Unsupported event: %s\n' "$EVENT_NAME" >&2; exit 2 ;;
+          esac
+          bash tools/check-whitespace.sh "$base_sha" "$HEAD_SHA"

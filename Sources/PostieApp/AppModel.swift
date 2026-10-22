@@ -154,9 +154,12 @@ final class AppModel: ObservableObject {
     private var workspaceRevision: UInt64 = 0
 
     init(arguments: [String] = ProcessInfo.processInfo.arguments, secretVault: SecretVault? = nil) {
-        self.secretVault = secretVault ?? SecretVault(keyStore: KeychainApplicationKeyStore(
-            service: (Bundle.main.bundleIdentifier ?? "dev.postie.local") + ".workspace-encryption"
-        ))
+        self.secretVault =
+            secretVault
+            ?? SecretVault(
+                keyStore: KeychainApplicationKeyStore(
+                    service: (Bundle.main.bundleIdentifier ?? "dev.postie.local") + ".workspace-encryption"
+                ))
         do {
             let directories = try Self.directories(from: arguments)
             store = try CollectionStore(rootURL: directories.data)
@@ -208,11 +211,12 @@ final class AppModel: ObservableObject {
             variableDefinitionRequest = nil
         }
         guard selectedIdentity == identity,
-              selectedCollectionID == nil,
-              selectedSnapshotID == nil,
-              !showsOngoingRequests,
-              !showsGlobalVariables,
-              !showsGlobalSettings else { return }
+            selectedCollectionID == nil,
+            selectedSnapshotID == nil,
+            !showsOngoingRequests,
+            !showsGlobalVariables,
+            !showsGlobalSettings
+        else { return }
         recordNavigation(.request(identity, section: section))
     }
 
@@ -259,29 +263,25 @@ final class AppModel: ObservableObject {
 
     func canEdit(_ identity: RequestIdentity) -> Bool {
         guard workspaceLoaded, let collection = collection(for: identity), drafts[identity] != nil else { return false }
-        return !collection.isReadOnly &&
-            !deletingCollections.contains(identity.collectionID) &&
-            !deletingRequests.contains(identity) &&
-            !reconcilingRequests.contains(identity) &&
-            !isTerminating
+        return !collection.isReadOnly && !deletingCollections.contains(identity.collectionID)
+            && !deletingRequests.contains(identity) && !reconcilingRequests.contains(identity) && !isTerminating
     }
 
     func canFollowRedirect(_ identity: RequestIdentity) -> Bool {
         guard canEdit(identity),
-              activeRuns[identity] == nil,
-              let response = latestResponses[identity]?.response,
-              !response.redirectLimitReached,
-              response.redirects.count <= 10,
-              let redirect = response.pendingRedirect,
-              [301, 302, 303, 307, 308].contains(redirect.statusCode),
-              let request = response.redirectRequest,
-              let url = request.url,
-              ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { return false }
+            activeRuns[identity] == nil,
+            let response = latestResponses[identity]?.response,
+            !response.redirectLimitReached,
+            response.redirects.count <= 10,
+            let redirect = response.pendingRedirect,
+            [301, 302, 303, 307, 308].contains(redirect.statusCode),
+            let request = response.redirectRequest,
+            let url = request.url,
+            ["http", "https"].contains(url.scheme?.lowercased() ?? "")
+        else { return false }
 
-        return response.redirects.last?.id == redirect.id &&
-            response.finalURL == redirect.url &&
-            redirect.nextURL == url &&
-            request.httpMethod?.uppercased() == redirect.nextMethod.uppercased()
+        return response.redirects.last?.id == redirect.id && response.finalURL == redirect.url
+            && redirect.nextURL == url && request.httpMethod?.uppercased() == redirect.nextMethod.uppercased()
     }
 
     func select(_ identity: RequestIdentity?) {
@@ -402,8 +402,9 @@ final class AppModel: ObservableObject {
 
     func setCollectionEditorSection(_ section: CollectionEditorSection) {
         guard let selectedCollectionID,
-              collections.contains(where: { $0.id == selectedCollectionID }),
-              collectionEditorSection != section else { return }
+            collections.contains(where: { $0.id == selectedCollectionID }),
+            collectionEditorSection != section
+        else { return }
         collectionEditorSection = section
         recordNavigation(.collection(selectedCollectionID, section: section))
     }
@@ -459,8 +460,9 @@ final class AppModel: ObservableObject {
 
     private func isAvailableRequest(_ identity: RequestIdentity) -> Bool {
         guard drafts[identity] != nil,
-              !reconcilingRequests.contains(identity),
-              let collection = collection(id: identity.collectionID) else { return false }
+            !reconcilingRequests.contains(identity),
+            let collection = collection(id: identity.collectionID)
+        else { return false }
         return collection.requests.contains { $0.id == identity.requestID }
     }
 
@@ -518,7 +520,9 @@ final class AppModel: ObservableObject {
     }
 
     func updateCollectionHeaders(_ headers: [HTTPField], in id: UUID) {
-        guard canEditVariables(.collection(id)), let index = collections.firstIndex(where: { $0.id == id }) else { return }
+        guard canEditVariables(.collection(id)), let index = collections.firstIndex(where: { $0.id == id }) else {
+            return
+        }
         collections[index].headers = headers
         markWorkspaceChanged()
         scheduleVariableSave(.collection(id))
@@ -537,7 +541,8 @@ final class AppModel: ObservableObject {
         case .global:
             variableCompletions(in: VariableContext(global: globalVariables))
         case let .collection(id):
-            variableCompletions(in: VariableContext(global: globalVariables, collection: variables(for: .collection(id))))
+            variableCompletions(
+                in: VariableContext(global: globalVariables, collection: variables(for: .collection(id))))
         case let .request(identity):
             variableCompletions(for: identity)
         }
@@ -547,9 +552,8 @@ final class AppModel: ObservableObject {
         let names = Set(context.global.keys).union(context.collection.keys).union(context.request.keys)
         return names.sorted().compactMap { name in
             let resolved: (VariableValue, VariableScope)? =
-                context.request[name].map { ($0, .request) } ??
-                context.collection[name].map { ($0, .collection) } ??
-                context.global[name].map { ($0, .global) }
+                context.request[name].map { ($0, .request) } ?? context.collection[name].map { ($0, .collection) }
+                ?? context.global[name].map { ($0, .global) }
             guard let (value, scope) = resolved else { return nil }
 
             let preview: String?
@@ -609,7 +613,9 @@ final class AppModel: ObservableObject {
         case .global: showGlobalVariables()
         case let .collection(id): showCollection(id)
         case let .request(identity):
-            guard isAvailableNavigationLocation(.requestVariableDefinition(identity, name: inspection.name)) else { return }
+            guard isAvailableNavigationLocation(.requestVariableDefinition(identity, name: inspection.name)) else {
+                return
+            }
             showRequest(identity)
             requestEditorSections[identity] = .variables
             variableDefinitionRequest = VariableDefinitionRequest(owner: inspection.owner, name: inspection.name)
@@ -702,12 +708,15 @@ final class AppModel: ObservableObject {
         guard let value = variables(for: owner)[name] else { throw ConfigurationEditError.unavailable }
         guard value.isEncrypted != isSecret else { return }
         let vault = secretVault
-        try await commitProtectedValue(target: .variable(owner, name), blocksTerminationOnFailure: false, operation: {
-            switch value {
-            case let .plain(plain): return VariableValue.encrypted(try await vault.encrypt(plain))
-            case let .encrypted(envelope): return VariableValue.plain(try await vault.decrypt(envelope))
+        try await commitProtectedValue(
+            target: .variable(owner, name), blocksTerminationOnFailure: false,
+            operation: {
+                switch value {
+                case let .plain(plain): return VariableValue.encrypted(try await vault.encrypt(plain))
+                case let .encrypted(envelope): return VariableValue.plain(try await vault.decrypt(envelope))
+                }
             }
-        }) { [weak self] converted in
+        ) { [weak self] converted in
             self?.updateVariables(owner) { $0[name] = converted }
         }
     }
@@ -720,11 +729,15 @@ final class AppModel: ObservableObject {
         updateAuthenticationUsername(username, owner: .request(identity))
     }
 
-    func setAuthenticationSecret(_ value: String, field: AuthenticationSecretField, for identity: RequestIdentity) async throws {
+    func setAuthenticationSecret(_ value: String, field: AuthenticationSecretField, for identity: RequestIdentity)
+        async throws
+    {
         try await setAuthenticationSecret(value, field: field, owner: .request(identity))
     }
 
-    func revealAuthenticationSecret(field: AuthenticationSecretField, for identity: RequestIdentity) async throws -> String {
+    func revealAuthenticationSecret(field: AuthenticationSecretField, for identity: RequestIdentity) async throws
+        -> String
+    {
         try await revealAuthenticationSecret(field: field, owner: .request(identity))
     }
 
@@ -791,7 +804,8 @@ final class AppModel: ObservableObject {
 
     func previewAuthenticationHeader(for identity: RequestIdentity, source: HTTPHeaderSource) async throws -> String {
         guard let request = request(for: identity),
-              let collection = collection(for: identity) else { throw ConfigurationEditError.unavailable }
+            let collection = collection(for: identity)
+        else { throw ConfigurationEditError.unavailable }
         let variableContext = variableContext(for: identity)
         let collectionHeaders = collection.headers
 
@@ -835,18 +849,18 @@ final class AppModel: ObservableObject {
             resolvedHeaderName = expectedHeaderName
         }
         guard let resolvedHeaderName,
-              let value = prepared.request.value(forHTTPHeaderField: resolvedHeaderName),
-              self.request(for: identity) == request,
-              self.variableContext(for: identity) == variableContext,
-              self.collection(for: identity)?.headers == collectionHeaders,
-              source != .collectionAuth || self.collection(for: identity)?.authentication == authentication,
-              selectedIdentity == identity,
-              selectedCollectionID == nil,
-              !showsGlobalVariables,
-              !showsGlobalSettings,
-              !showsOngoingRequests,
-              requestEditorSection(for: identity) == .request ||
-                  requestEditorSection(for: identity) == .authentication else {
+            let value = prepared.request.value(forHTTPHeaderField: resolvedHeaderName),
+            self.request(for: identity) == request,
+            self.variableContext(for: identity) == variableContext,
+            self.collection(for: identity)?.headers == collectionHeaders,
+            source != .collectionAuth || self.collection(for: identity)?.authentication == authentication,
+            selectedIdentity == identity,
+            selectedCollectionID == nil,
+            !showsGlobalVariables,
+            !showsGlobalSettings,
+            !showsOngoingRequests,
+            requestEditorSection(for: identity) == .request || requestEditorSection(for: identity) == .authentication
+        else {
             throw ConfigurationEditError.unavailable
         }
         return value
@@ -880,8 +894,8 @@ final class AppModel: ObservableObject {
             return !deletingCollections.contains(id) && collections.contains { $0.id == id && !$0.isReadOnly }
         case let .request(identity):
             guard let collection = collection(for: identity), drafts[identity] != nil else { return false }
-            return !collection.isReadOnly && !deletingCollections.contains(identity.collectionID) &&
-                !deletingRequests.contains(identity) && !reconcilingRequests.contains(identity)
+            return !collection.isReadOnly && !deletingCollections.contains(identity.collectionID)
+                && !deletingRequests.contains(identity) && !reconcilingRequests.contains(identity)
         }
     }
 
@@ -892,11 +906,13 @@ final class AppModel: ObservableObject {
         apply: @escaping @MainActor (SecretEnvelope) -> Void
     ) async throws {
         let vault = secretVault
-        try await commitProtectedValue(target: target, operationID: operationID, operation: {
-            let envelope = try await vault.encrypt(value)
-            await vault.setAllowsKeyCreation(false)
-            return envelope
-        }, apply: apply)
+        try await commitProtectedValue(
+            target: target, operationID: operationID,
+            operation: {
+                let envelope = try await vault.encrypt(value)
+                await vault.setAllowsKeyCreation(false)
+                return envelope
+            }, apply: apply)
     }
 
     private func commitProtectedValue<Value: Sendable>(
@@ -942,7 +958,8 @@ final class AppModel: ObservableObject {
     private func refreshVariableError(_ owner: VariableOwner) {
         let requestError: String?
         if case let .request(identity) = owner { requestError = autosaveErrors[identity] } else { requestError = nil }
-        variableSaveErrors[owner] = secretCommitErrors.first { $0.key.owner == owner }?.value ?? scopeSaveErrors[owner] ?? requestError
+        variableSaveErrors[owner] =
+            secretCommitErrors.first { $0.key.owner == owner }?.value ?? scopeSaveErrors[owner] ?? requestError
     }
 
     private func updateVariables(_ owner: VariableOwner, _ update: (inout VariableValues) -> Void) {
@@ -996,7 +1013,8 @@ final class AppModel: ObservableObject {
 
     func updateURL(_ url: String, for identity: RequestIdentity) {
         updateDraft(identity) { request in
-            let parsed = QueryParameters.parse(displayURL: url, previousFields: request.query, previousBase: request.url)
+            let parsed = QueryParameters.parse(
+                displayURL: url, previousFields: request.query, previousBase: request.url)
             request.url = parsed.baseURL
             request.query = parsed.fields
         }
@@ -1026,9 +1044,10 @@ final class AppModel: ObservableObject {
 
     func renameCollection(id: UUID, name: String) async {
         guard !isTerminating,
-              !deletingCollections.contains(id),
-              store != nil,
-              collections.contains(where: { $0.id == id && !$0.isReadOnly }) else { return }
+            !deletingCollections.contains(id),
+            store != nil,
+            collections.contains(where: { $0.id == id && !$0.isReadOnly })
+        else { return }
         let normalizedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalizedName.isEmpty else { return }
 
@@ -1039,9 +1058,10 @@ final class AppModel: ObservableObject {
 
     func deleteCollection(id: UUID) async {
         guard !isTerminating,
-              !deletingCollections.contains(id),
-              !deletingRequests.contains(where: { $0.collectionID == id }),
-              collections.contains(where: { $0.id == id && !$0.isReadOnly }) else { return }
+            !deletingCollections.contains(id),
+            !deletingRequests.contains(where: { $0.collectionID == id }),
+            collections.contains(where: { $0.id == id && !$0.isReadOnly })
+        else { return }
         deletingCollections.insert(id)
         await withCollectionMutation(id) { [weak self] in
             await self?.performDeleteCollection(id: id)
@@ -1051,8 +1071,9 @@ final class AppModel: ObservableObject {
 
     func createRequest(in collectionID: UUID, name: String = "New request") async {
         guard !isTerminating,
-              !deletingCollections.contains(collectionID),
-              collections.contains(where: { $0.id == collectionID && !$0.isReadOnly }) else { return }
+            !deletingCollections.contains(collectionID),
+            collections.contains(where: { $0.id == collectionID && !$0.isReadOnly })
+        else { return }
         let normalizedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         await withCollectionMutation(collectionID) { [weak self] in
             await self?.performCreateRequest(
@@ -1071,9 +1092,10 @@ final class AppModel: ObservableObject {
 
     func deleteRequest(_ identity: RequestIdentity) async {
         guard !isTerminating,
-              !deletingCollections.contains(identity.collectionID),
-              !deletingRequests.contains(identity),
-              canEdit(identity) else { return }
+            !deletingCollections.contains(identity.collectionID),
+            !deletingRequests.contains(identity),
+            canEdit(identity)
+        else { return }
         deletingRequests.insert(identity)
         await withCollectionMutation(identity.collectionID) { [weak self] in
             await self?.performDeleteRequest(identity)
@@ -1083,8 +1105,9 @@ final class AppModel: ObservableObject {
 
     func reorderRequests(_ requestIDs: [UUID], in collectionID: UUID) async {
         guard !isTerminating,
-              !deletingCollections.contains(collectionID),
-              collections.contains(where: { $0.id == collectionID && !$0.isReadOnly }) else { return }
+            !deletingCollections.contains(collectionID),
+            collections.contains(where: { $0.id == collectionID && !$0.isReadOnly })
+        else { return }
         await withCollectionMutation(collectionID) { [weak self] in
             await self?.performReorderRequests(requestIDs, in: collectionID)
         }
@@ -1092,7 +1115,8 @@ final class AppModel: ObservableObject {
 
     func moveRequest(_ identity: RequestIdentity, by offset: Int) async {
         guard let collection = collections.first(where: { $0.id == identity.collectionID }),
-              let currentIndex = collection.requests.firstIndex(where: { $0.id == identity.requestID }) else { return }
+            let currentIndex = collection.requests.firstIndex(where: { $0.id == identity.requestID })
+        else { return }
         let destinationIndex = currentIndex + offset
         guard collection.requests.indices.contains(destinationIndex) else { return }
         var requestIDs = collection.requests.map(\.id)
@@ -1102,11 +1126,12 @@ final class AppModel: ObservableObject {
 
     func recover(_ issue: StorageIssue) async {
         guard issue.canRecover,
-              let collectionID = issue.collectionID,
-              let requestID = issue.requestID,
-              !isTerminating,
-              !deletingCollections.contains(collectionID),
-              let store else { return }
+            let collectionID = issue.collectionID,
+            let requestID = issue.requestID,
+            !isTerminating,
+            !deletingCollections.contains(collectionID),
+            let store
+        else { return }
 
         await withCollectionMutation(collectionID) { [weak self] in
             guard let self else { return }
@@ -1162,10 +1187,11 @@ final class AppModel: ObservableObject {
             let detail = autosaveErrors[identity] ?? "The latest change is still unsaved."
             return "\(name): \(detail)"
         }
-        failures.append(contentsOf: variableOwners.compactMap { owner in
-            guard dirtyVariableOwners.contains(owner) else { return nil }
-            return scopeSaveErrors[owner] ?? "Variable changes are still unsaved."
-        })
+        failures.append(
+            contentsOf: variableOwners.compactMap { owner in
+                guard dirtyVariableOwners.contains(owner) else { return nil }
+                return scopeSaveErrors[owner] ?? "Variable changes are still unsaved."
+            })
         failures.append(contentsOf: secretCommitErrors.values)
         guard failures.isEmpty else { throw SaveFlushError.failed(failures) }
     }
@@ -1191,10 +1217,11 @@ final class AppModel: ObservableObject {
 
     func startRequest(_ identity: RequestIdentity) {
         guard canEdit(identity),
-              activeRuns[identity] == nil,
-              var configuration = drafts[identity],
-              let collection = collection(for: identity),
-              let executionManager else { return }
+            activeRuns[identity] == nil,
+            var configuration = drafts[identity],
+            let collection = collection(for: identity),
+            let executionManager
+        else { return }
 
         configuration.options = requestOptionOverrides(for: identity).resolve(against: globalOptions)
         let snapshotSource = SnapshotSource(
@@ -1251,14 +1278,16 @@ final class AppModel: ObservableObject {
 
     func followRedirect(_ identity: RequestIdentity) {
         guard canFollowRedirect(identity),
-              let response = latestResponses[identity]?.response,
-              let redirectRequest = response.redirectRequest,
-              let redirectURL = redirectRequest.url,
-              let executionManager else { return }
+            let response = latestResponses[identity]?.response,
+            let redirectRequest = response.redirectRequest,
+            let redirectURL = redirectRequest.url,
+            let executionManager
+        else { return }
 
         var currentRequest = response.request
         currentRequest.url = redirectURL.absoluteString
-        currentRequest.method = redirectRequest.httpMethod ?? response.pendingRedirect?.nextMethod ?? currentRequest.method
+        currentRequest.method =
+            redirectRequest.httpMethod ?? response.pendingRedirect?.nextMethod ?? currentRequest.method
 
         let token = UUID()
         activeRuns[identity] = ActiveRun(
@@ -1317,7 +1346,8 @@ final class AppModel: ObservableObject {
         var receivedTerminalEvent = false
         for await event in run.events {
             guard activeRuns[identity]?.token == token,
-                  activeRuns[identity]?.runID == run.id else { break }
+                activeRuns[identity]?.runID == run.id
+            else { break }
             if receive(event, for: identity, token: token, runID: run.id) {
                 receivedTerminalEvent = true
                 break
@@ -1362,10 +1392,11 @@ final class AppModel: ObservableObject {
 
     func loadPreview(for identity: RequestIdentity) {
         guard var latest = latestResponses[identity],
-              latest.preview == nil,
-              latest.previewError == nil,
-              !latest.isLoadingPreview,
-              previewTasks[identity] == nil else { return }
+            latest.preview == nil,
+            latest.previewError == nil,
+            !latest.isLoadingPreview,
+            previewTasks[identity] == nil
+        else { return }
 
         let response = latest.response
         latest.isLoadingPreview = true
@@ -1404,11 +1435,12 @@ final class AppModel: ObservableObject {
 
     func canSaveSnapshot(for identity: RequestIdentity) -> Bool {
         guard !isTerminating,
-              snapshotStore != nil,
-              executionManager != nil,
-              let latest = latestResponses[identity],
-              latest.snapshotSource != nil,
-              latest.response.snapshotCapture != nil else { return false }
+            snapshotStore != nil,
+            executionManager != nil,
+            let latest = latestResponses[identity],
+            latest.snapshotSource != nil,
+            latest.response.snapshotCapture != nil
+        else { return false }
         return !savingSnapshotRunIDs.contains(latest.response.runID)
     }
 
@@ -1419,8 +1451,9 @@ final class AppModel: ObservableObject {
 
     func saveSnapshot(for identity: RequestIdentity) {
         guard canSaveSnapshot(for: identity),
-              let latest = latestResponses[identity],
-              let source = latest.snapshotSource else { return }
+            let latest = latestResponses[identity],
+            let source = latest.snapshotSource
+        else { return }
 
         let response = latest.response
         let runID = response.runID
@@ -1541,8 +1574,9 @@ final class AppModel: ObservableObject {
 
     private func openSnapshotIfNeeded(_ id: UUID) {
         guard openedSnapshots[id] == nil,
-              !openingSnapshots.contains(id),
-              let snapshotStore else { return }
+            !openingSnapshots.contains(id),
+            let snapshotStore
+        else { return }
         openingSnapshots.insert(id)
         snapshotOpenErrors.removeValue(forKey: id)
         Task { @MainActor [weak self, snapshotStore] in
@@ -1550,7 +1584,8 @@ final class AppModel: ObservableObject {
                 let opened = try await snapshotStore.open(id: id)
                 guard let self else { return }
                 if self.selectedSnapshotID == id,
-                   self.snapshots.contains(where: { $0.id == id }) {
+                    self.snapshots.contains(where: { $0.id == id })
+                {
                     self.openedSnapshots[id] = opened
                 }
                 self.openingSnapshots.remove(id)
@@ -1593,9 +1628,10 @@ final class AppModel: ObservableObject {
         let currentSnapshotStorageIssues = snapshotStorageIssues
         let currentSnapshotLoadError = snapshotLoadError
         guard !globalVariablesAreReadOnly, !globalOptionsAreReadOnly,
-              !currentCollections.contains(where: \.isReadOnly), currentStorageIssues.isEmpty,
-              currentSnapshotStorageIssues.isEmpty, currentSnapshotLoadError == nil,
-              variableSaveErrors.isEmpty, scopeSaveErrors.isEmpty, autosaveErrors.isEmpty else {
+            !currentCollections.contains(where: \.isReadOnly), currentStorageIssues.isEmpty,
+            currentSnapshotStorageIssues.isEmpty, currentSnapshotLoadError == nil,
+            variableSaveErrors.isEmpty, scopeSaveErrors.isEmpty, autosaveErrors.isEmpty
+        else {
             throw EncryptionKeyTransferError.storageNeedsRepair
         }
 
@@ -1606,7 +1642,8 @@ final class AppModel: ObservableObject {
             throw EncryptionKeyTransferError.workspaceUnavailable
         }
         guard loaded.issues.isEmpty, !loaded.globalVariablesAreReadOnly, !loaded.globalOptionsAreReadOnly,
-              !loaded.collections.contains(where: \.isReadOnly) else {
+            !loaded.collections.contains(where: \.isReadOnly)
+        else {
             throw EncryptionKeyTransferError.storageNeedsRepair
         }
 
@@ -1618,13 +1655,14 @@ final class AppModel: ObservableObject {
         }
 
         guard workspaceLoaded, !isTerminating,
-              globalVariables == currentGlobals, collections == currentCollections,
-              drafts == currentDrafts, snapshots == currentSnapshots,
-              storageIssues == currentStorageIssues, snapshotStorageIssues == currentSnapshotStorageIssues,
-              snapshotLoadError == currentSnapshotLoadError,
-              !globalVariablesAreReadOnly, !globalOptionsAreReadOnly,
-              !collections.contains(where: \.isReadOnly), variableSaveErrors.isEmpty,
-              scopeSaveErrors.isEmpty, autosaveErrors.isEmpty else {
+            globalVariables == currentGlobals, collections == currentCollections,
+            drafts == currentDrafts, snapshots == currentSnapshots,
+            storageIssues == currentStorageIssues, snapshotStorageIssues == currentSnapshotStorageIssues,
+            snapshotLoadError == currentSnapshotLoadError,
+            !globalVariablesAreReadOnly, !globalOptionsAreReadOnly,
+            !collections.contains(where: \.isReadOnly), variableSaveErrors.isEmpty,
+            scopeSaveErrors.isEmpty, autosaveErrors.isEmpty
+        else {
             throw EncryptionKeyTransferError.workspaceChanged
         }
 
@@ -1664,13 +1702,14 @@ final class AppModel: ObservableObject {
 
     private func refreshSelectedSnapshotAfterKeyImport() async {
         guard !isTerminating,
-              let id = selectedSnapshotID,
-              snapshots.contains(where: { $0.id == id }),
-              !openingSnapshots.contains(id),
-              let opened = openedSnapshots[id],
-              opened.context == nil,
-              opened.contextError?.contains(SecretVaultError.missingKey.localizedDescription) == true,
-              let snapshotStore else { return }
+            let id = selectedSnapshotID,
+            snapshots.contains(where: { $0.id == id }),
+            !openingSnapshots.contains(id),
+            let opened = openedSnapshots[id],
+            opened.context == nil,
+            opened.contextError?.contains(SecretVaultError.missingKey.localizedDescription) == true,
+            let snapshotStore
+        else { return }
 
         openedSnapshots.removeValue(forKey: id)
         snapshotOpenErrors.removeValue(forKey: id)
@@ -1706,16 +1745,18 @@ final class AppModel: ObservableObject {
                     snapshotError = error.localizedDescription
                 }
                 guard revision == workspaceRevision else { continue }
-                let available = Dictionary(uniqueKeysWithValues: loaded.collections.flatMap { collection in
-                    collection.requests.map { (RequestIdentity(collectionID: collection.id, requestID: $0.id), $0) }
-                })
+                let available = Dictionary(
+                    uniqueKeysWithValues: loaded.collections.flatMap { collection in
+                        collection.requests.map { (RequestIdentity(collectionID: collection.id, requestID: $0.id), $0) }
+                    })
                 let indexedIssues = Self.indexedIssueIdentities(loaded.issues)
                 let tracked = trackedRequestIdentities()
                 let unindexedIssues = Self.unindexedIssueIdentities(loaded.issues)
                 let readOnlyCollectionIDs = Set(loaded.collections.filter(\.isReadOnly).map(\.id))
-                let readOnlyMembers = Set(tracked.filter {
-                    readOnlyCollectionIDs.contains($0.collectionID) && !unindexedIssues.contains($0)
-                })
+                let readOnlyMembers = Set(
+                    tracked.filter {
+                        readOnlyCollectionIDs.contains($0.collectionID) && !unindexedIssues.contains($0)
+                    })
                 let workspaceMembers = Set(available.keys)
                     .union(indexedIssues)
                     .union(readOnlyMembers)
@@ -1729,31 +1770,36 @@ final class AppModel: ObservableObject {
                 guard revision == workspaceRevision else { continue }
 
                 let retainedCollections = Dictionary(uniqueKeysWithValues: collections.map { ($0.id, $0) })
-                let nextCollections = sorted(loaded.collections.map { collection in
-                    var collection = collection
-                    if dirtyVariableOwners.contains(.collection(collection.id)), let retained = retainedCollections[collection.id] {
-                        collection.variables = retained.variables
-                        collection.headers = retained.headers
-                        collection.authentication = retained.authentication
-                    }
-                    return collection
-                })
+                let nextCollections = sorted(
+                    loaded.collections.map { collection in
+                        var collection = collection
+                        if dirtyVariableOwners.contains(.collection(collection.id)),
+                            let retained = retainedCollections[collection.id]
+                        {
+                            collection.variables = retained.variables
+                            collection.headers = retained.headers
+                            collection.authentication = retained.authentication
+                        }
+                        return collection
+                    })
                 let nextGlobals = dirtyVariableOwners.contains(.global) ? globalVariables : loaded.globalVariables
                 var nextDrafts = drafts.filter { !unavailable.contains($0.key) }
                 for (identity, request) in available where nextDrafts[identity] == nil {
                     nextDrafts[identity] = request
                 }
-                let hasCiphertext = nextGlobals.values.contains(where: \.isEncrypted) ||
-                    loaded.globalVariables.values.contains(where: \.isEncrypted) ||
-                    nextCollections.contains(where: Self.containsCiphertext) ||
-                    loaded.collections.contains(where: Self.containsCiphertext) ||
-                    available.values.contains(where: Self.containsCiphertext) ||
-                    nextDrafts.values.contains(where: Self.containsCiphertext)
-                let snapshotKeyStateIsSafe = snapshotError == nil &&
-                    snapshotLoad?.containsEncryptedData == false &&
-                    snapshotLoad?.issues.isEmpty == true
-                await secretVault.setAllowsKeyCreation(!hasCiphertext && snapshotKeyStateIsSafe && loaded.issues.isEmpty &&
-                    !loaded.globalVariablesAreReadOnly && !loaded.collections.contains(where: \.isReadOnly))
+                let hasCiphertext =
+                    nextGlobals.values.contains(where: \.isEncrypted)
+                    || loaded.globalVariables.values.contains(where: \.isEncrypted)
+                    || nextCollections.contains(where: Self.containsCiphertext)
+                    || loaded.collections.contains(where: Self.containsCiphertext)
+                    || available.values.contains(where: Self.containsCiphertext)
+                    || nextDrafts.values.contains(where: Self.containsCiphertext)
+                let snapshotKeyStateIsSafe =
+                    snapshotError == nil && snapshotLoad?.containsEncryptedData == false
+                    && snapshotLoad?.issues.isEmpty == true
+                await secretVault.setAllowsKeyCreation(
+                    !hasCiphertext && snapshotKeyStateIsSafe && loaded.issues.isEmpty
+                        && !loaded.globalVariablesAreReadOnly && !loaded.collections.contains(where: \.isReadOnly))
                 guard revision == workspaceRevision else {
                     await secretVault.setAllowsKeyCreation(false)
                     continue
@@ -1821,40 +1867,41 @@ final class AppModel: ObservableObject {
     }
 
     private static func indexedIssueIdentities(_ issues: [StorageIssue]) -> Set<RequestIdentity> {
-        Set(issues.compactMap { issue in
-            guard let collectionID = issue.collectionID,
-                  let requestID = issue.requestID,
-                  !isUnindexedRequestIssue(issue) else { return nil }
-            return RequestIdentity(collectionID: collectionID, requestID: requestID)
-        })
+        Set(
+            issues.compactMap { issue in
+                guard let collectionID = issue.collectionID,
+                    let requestID = issue.requestID,
+                    !isUnindexedRequestIssue(issue)
+                else { return nil }
+                return RequestIdentity(collectionID: collectionID, requestID: requestID)
+            })
     }
 
     private static func unindexedIssueIdentities(_ issues: [StorageIssue]) -> Set<RequestIdentity> {
-        Set(issues.compactMap { issue in
-            guard isUnindexedRequestIssue(issue),
-                  let collectionID = issue.collectionID,
-                  let requestID = issue.requestID else { return nil }
-            return RequestIdentity(collectionID: collectionID, requestID: requestID)
-        })
+        Set(
+            issues.compactMap { issue in
+                guard isUnindexedRequestIssue(issue),
+                    let collectionID = issue.collectionID,
+                    let requestID = issue.requestID
+                else { return nil }
+                return RequestIdentity(collectionID: collectionID, requestID: requestID)
+            })
     }
 
     private static func isUnindexedRequestIssue(_ issue: StorageIssue) -> Bool {
         let issueKind = issue.id.split(separator: ":").dropFirst().first
-        return issue.canRecover ||
-            issueKind?.hasPrefix("request-orphan") == true ||
-            issue.message.localizedCaseInsensitiveContains("unindexed")
+        return issue.canRecover || issueKind?.hasPrefix("request-orphan") == true
+            || issue.message.localizedCaseInsensitiveContains("unindexed")
     }
 
     private static func containsCiphertext(_ request: HTTPRequestConfiguration) -> Bool {
-        request.variables.values.contains(where: \.isEncrypted) ||
-            request.authentication.password != nil || request.authentication.token != nil ||
-            request.authentication.apiKey != nil
+        request.variables.values.contains(where: \.isEncrypted) || request.authentication.password != nil
+            || request.authentication.token != nil || request.authentication.apiKey != nil
     }
 
     private static func containsCiphertext(_ collection: RequestCollection) -> Bool {
-        collection.variables.values.contains(where: \.isEncrypted) ||
-            collection.authentication.password != nil || collection.authentication.token != nil ||
-            collection.authentication.apiKey != nil
+        collection.variables.values.contains(where: \.isEncrypted) || collection.authentication.password != nil
+            || collection.authentication.token != nil || collection.authentication.apiKey != nil
     }
 
     private func scheduleVariableSave(_ owner: VariableOwner) {
@@ -1883,7 +1930,9 @@ final class AppModel: ObservableObject {
         let defaults: CollectionRequestDefaults?
         if case let .collection(id) = owner, let collection = collection(id: id) {
             defaults = CollectionRequestDefaults(headers: collection.headers, authentication: collection.authentication)
-        } else { defaults = nil }
+        } else {
+            defaults = nil
+        }
         let previous = variableSaveChains[owner]
         variableSaveChains[owner] = Task { [weak self] in
             await previous?.value
@@ -2004,8 +2053,9 @@ final class AppModel: ObservableObject {
 
     private func finishRun(_ identity: RequestIdentity, token: UUID, runID: UUID? = nil, error: String) {
         guard let active = activeRuns[identity],
-              active.token == token,
-              runID == nil || active.runID == runID else { return }
+            active.token == token,
+            runID == nil || active.runID == runID
+        else { return }
         runErrors[identity] = error
         settleRun(identity, token: token)
     }
@@ -2075,7 +2125,9 @@ final class AppModel: ObservableObject {
     }
 
     private func performDeleteCollection(id: UUID) async {
-        guard let store, let collection = collections.first(where: { $0.id == id }), !collection.isReadOnly else { return }
+        guard let store, let collection = collections.first(where: { $0.id == id }), !collection.isReadOnly else {
+            return
+        }
         var requestIdentities = collection.requests.map {
             RequestIdentity(collectionID: id, requestID: $0.id)
         }
@@ -2137,8 +2189,9 @@ final class AppModel: ObservableObject {
 
     private func performDuplicateRequest(_ identity: RequestIdentity) async {
         guard let store,
-              collections.contains(where: { $0.id == identity.collectionID && !$0.isReadOnly }),
-              var duplicate = drafts[identity] else { return }
+            collections.contains(where: { $0.id == identity.collectionID && !$0.isReadOnly }),
+            var duplicate = drafts[identity]
+        else { return }
 
         duplicate.id = UUID()
         duplicate.name = "\(duplicate.name) copy"
@@ -2163,7 +2216,8 @@ final class AppModel: ObservableObject {
 
     private func performDeleteRequest(_ identity: RequestIdentity) async {
         guard let store,
-              collections.contains(where: { $0.id == identity.collectionID && !$0.isReadOnly }) else { return }
+            collections.contains(where: { $0.id == identity.collectionID && !$0.isReadOnly })
+        else { return }
         await cancelAndWait(for: identity)
         await waitForSaves(for: identity)
 
@@ -2189,7 +2243,8 @@ final class AppModel: ObservableObject {
 
     private func performReorderRequests(_ requestedIDs: [UUID], in collectionID: UUID) async {
         guard let store,
-              let collection = collections.first(where: { $0.id == collectionID && !$0.isReadOnly }) else { return }
+            let collection = collections.first(where: { $0.id == collectionID && !$0.isReadOnly })
+        else { return }
         let availableIDs = Set(collection.requests.map(\.id))
         var seen = Set<UUID>()
         var orderedIDs = requestedIDs.filter { availableIDs.contains($0) && seen.insert($0).inserted }
@@ -2249,7 +2304,8 @@ final class AppModel: ObservableObject {
                     return
                 }
                 guard let self,
-                      let continuation = self.mutationDrainWaiters.removeValue(forKey: waiterID) else { return }
+                    let continuation = self.mutationDrainWaiters.removeValue(forKey: waiterID)
+                else { return }
                 self.mutationDrainTimeoutTasks.removeValue(forKey: waiterID)
                 continuation.resume(throwing: MutationDrainError.timedOut)
             }
@@ -2318,11 +2374,12 @@ final class AppModel: ObservableObject {
             collection.requests.first.map { RequestIdentity(collectionID: collection.id, requestID: $0.id) }
         }
         if let selectedIdentity,
-           selectedCollectionID == nil,
-           selectedSnapshotID == nil,
-           !showsGlobalVariables,
-           !showsGlobalSettings,
-           !showsOngoingRequests {
+            selectedCollectionID == nil,
+            selectedSnapshotID == nil,
+            !showsGlobalVariables,
+            !showsGlobalSettings,
+            !showsOngoingRequests
+        {
             recordNavigation(.request(selectedIdentity, section: requestEditorSection(for: selectedIdentity)))
         }
     }
@@ -2368,7 +2425,8 @@ final class AppModel: ObservableObject {
             .appendingPathComponent("postie", isDirectory: true)
         return Directories(
             data: dataDirectory ?? defaultDataDirectory,
-            body: bodyDirectory ?? FileManager.default.temporaryDirectory.appendingPathComponent("Postie", isDirectory: true)
+            body: bodyDirectory
+                ?? FileManager.default.temporaryDirectory.appendingPathComponent("Postie", isDirectory: true)
         )
     }
 

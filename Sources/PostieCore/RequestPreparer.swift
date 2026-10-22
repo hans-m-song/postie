@@ -55,7 +55,7 @@ public enum RequestPreparer {
         "authorization",
         "proxy-authorization",
         "cookie",
-        "set-cookie"
+        "set-cookie",
     ]
 
     private static let unreservedCharacters = CharacterSet(
@@ -109,7 +109,8 @@ public enum RequestPreparer {
 
         let pathParameters = try pathParameterValues(in: configuration)
         let effectiveContext = contextByAddingConfigurationRequestValues(configuration, to: context)
-        let selectedAuthentication = configuration.inheritsCollectionAuthentication
+        let selectedAuthentication =
+            configuration.inheritsCollectionAuthentication
             ? collection.authentication
             : configuration.authentication
         let selectedAuthenticationHeaderName = try authenticationHeaderName(for: selectedAuthentication)
@@ -117,25 +118,29 @@ public enum RequestPreparer {
         let collectionHeaderNames = collection.headers.filter { $0.isEnabled && hasNonblankName($0) }
         let headerNameSources = collectionHeaderNames.map(\.name) + requestHeaders.map(\.name)
         let headerNameVariables = try referencedNames(in: headerNameSources)
-        var resolvedVariables = try await resolveVariables(headerNameVariables, in: effectiveContext, decryptor: decryptor)
+        var resolvedVariables = try await resolveVariables(
+            headerNameVariables, in: effectiveContext, decryptor: decryptor)
         let resolvedNameValues = resolvedVariables.mapValues(\.value)
         let resolvedRequestHeaderNames = try requestHeaders.map {
             try substitute($0.name, values: resolvedNameValues).lowercased()
         }
         let suppressedHeaderNames = Set(resolvedRequestHeaderNames)
-        let manualAuthenticationHeaderOverride = selectedAuthenticationHeaderName.map { authenticationHeaderName in
-            zip(requestHeaders, resolvedRequestHeaderNames).contains { pair in
-                pair.0.isEnabled && isActive(pair.0) && pair.1 == authenticationHeaderName.lowercased()
-            }
-        } ?? false
-        let authenticationToPrepare = manualAuthenticationHeaderOverride ? RequestAuthentication() : selectedAuthentication
+        let manualAuthenticationHeaderOverride =
+            selectedAuthenticationHeaderName.map { authenticationHeaderName in
+                zip(requestHeaders, resolvedRequestHeaderNames).contains { pair in
+                    pair.0.isEnabled && isActive(pair.0) && pair.1 == authenticationHeaderName.lowercased()
+                }
+            } ?? false
+        let authenticationToPrepare =
+            manualAuthenticationHeaderOverride ? RequestAuthentication() : selectedAuthentication
         var inheritedHeaders: [HTTPField] = []
         for field in collection.headers where isActive(field) {
             let name = try substitute(field.name, values: resolvedNameValues)
             let normalizedName = name.lowercased()
-            let matchesStructuredAuthenticationHeader = selectedAuthenticationHeaderName.map {
-                $0.caseInsensitiveCompare(name) == .orderedSame
-            } ?? false
+            let matchesStructuredAuthenticationHeader =
+                selectedAuthenticationHeaderName.map {
+                    $0.caseInsensitiveCompare(name) == .orderedSame
+                } ?? false
             guard !suppressedHeaderNames.contains(normalizedName), !matchesStructuredAuthenticationHeader else {
                 continue
             }
@@ -176,7 +181,8 @@ public enum RequestPreparer {
 
         if let secretTemplate {
             let additionalNames = try referencedNames(in: [secretTemplate]).filter { resolvedVariables[$0] == nil }
-            let additionalVariables = try await resolveVariables(additionalNames, in: effectiveContext, decryptor: decryptor)
+            let additionalVariables = try await resolveVariables(
+                additionalNames, in: effectiveContext, decryptor: decryptor)
             resolvedVariables.merge(additionalVariables) { current, _ in current }
         }
 
@@ -214,7 +220,8 @@ public enum RequestPreparer {
             requestHeaderSources[name] = .request
         }
         if let structuredHeader {
-            let source: HTTPHeaderSource = configuration.inheritsCollectionAuthentication ? .collectionAuth : .requestAuth
+            let source: HTTPHeaderSource =
+                configuration.inheritsCollectionAuthentication ? .collectionAuth : .requestAuth
             requestHeaderSources[structuredHeader.name.lowercased()] = source
         }
         let presentHeaderNames = Set((request.allHTTPHeaderFields ?? [:]).keys.map { $0.lowercased() })
@@ -225,7 +232,8 @@ public enum RequestPreparer {
         }
 
         let capturedNames = Set(try referencedNames(in: sources + (secretTemplate.map { [$0] } ?? [])))
-        let redactionInputs = captureRedactionInputs
+        let redactionInputs =
+            captureRedactionInputs
             ? try await captureSecretInputs(in: effectiveContext, resolved: resolvedVariables, decryptor: decryptor)
             : nil
         let capture = SnapshotPreparationCapture(
@@ -291,13 +299,15 @@ public enum RequestPreparer {
         try Task.checkCancellation()
         for name in names {
             guard let (value, scope) = effectiveValue(named: name, in: context),
-                  case .encrypted(let envelope) = value else {
+                case .encrypted(let envelope) = value
+            else {
                 continue
             }
             try Task.checkCancellation()
             let nameByteCount = name.utf8.count
             guard attemptedCount < maximumSecretCount, byteCount < maximumByteCount,
-                  nameByteCount <= maximumByteCount - byteCount else {
+                nameByteCount <= maximumByteCount - byteCount
+            else {
                 isComplete = false
                 break
             }
@@ -335,7 +345,8 @@ public enum RequestPreparer {
         let query = QueryParameters.normalize(url: configuration.url, fields: configuration.query)
         var sources = [query.baseURL]
         sources.append(contentsOf: pathParameters.map(\.value))
-        sources.append(contentsOf: query.fields.filter(QueryParameters.isActive).flatMap(QueryParameters.templateSources))
+        sources.append(
+            contentsOf: query.fields.filter(QueryParameters.isActive).flatMap(QueryParameters.templateSources))
         sources.append(contentsOf: (headers ?? configuration.headers).filter(isActive).flatMap { [$0.name, $0.value] })
 
         if configuration.bodyEnabled {
@@ -504,7 +515,8 @@ public enum RequestPreparer {
             }
             let username = try substitute(authentication.username, values: variableValues)
             let password = try substitute(secretTemplate, values: variableValues)
-            guard !username.contains(":"), !containsControlCharacters(username), !containsControlCharacters(password) else {
+            guard !username.contains(":"), !containsControlCharacters(username), !containsControlCharacters(password)
+            else {
                 throw RequestPreparationError.invalidBasicCredentials
             }
             let credentials = Data("\(username):\(password)".utf8).base64EncodedString()
@@ -515,10 +527,10 @@ public enum RequestPreparer {
             }
             let token = try substitute(secretTemplate, values: variableValues)
             guard !token.isEmpty,
-                  token.unicodeScalars.allSatisfy({
-                      !CharacterSet.whitespacesAndNewlines.contains($0) &&
-                          !CharacterSet.controlCharacters.contains($0)
-                  }) else {
+                token.unicodeScalars.allSatisfy({
+                    !CharacterSet.whitespacesAndNewlines.contains($0) && !CharacterSet.controlCharacters.contains($0)
+                })
+            else {
                 throw RequestPreparationError.invalidBearerCredential
             }
             return (headerName ?? "Authorization", "Bearer \(token)")
@@ -545,11 +557,13 @@ public enum RequestPreparer {
         var seen = Set<String>()
         var values: [PathParameterValue] = []
 
-        for reference in TemplateEngine.pathReferences(in: configuration.url) where seen.insert(reference.name).inserted {
+        for reference in TemplateEngine.pathReferences(in: configuration.url) where seen.insert(reference.name).inserted
+        {
             let candidates = configuration.pathParameters.filter { $0.name == reference.name && $0.isEnabled }
             guard candidates.count == 1,
-                  let candidate = candidates.first,
-                  !candidate.value.isEmpty else {
+                let candidate = candidates.first,
+                !candidate.value.isEmpty
+            else {
                 throw RequestPreparationError.invalidPathParameter(reference.name)
             }
             values.append(PathParameterValue(name: reference.name, value: candidate.value))
@@ -582,14 +596,16 @@ public enum RequestPreparer {
             values: encodedPathValues
         )
         let resolvedURL = try substitute(urlWithPathValues, values: variableValues)
-        guard !resolvedURL.unicodeScalars.contains(where: {
-            CharacterSet.whitespacesAndNewlines.contains($0) || CharacterSet.controlCharacters.contains($0)
-        }),
-              var components = URLComponents(string: resolvedURL),
-              let scheme = components.scheme?.lowercased(),
-              ["http", "https"].contains(scheme),
-              let host = components.host,
-              !host.isEmpty else {
+        guard
+            !resolvedURL.unicodeScalars.contains(where: {
+                CharacterSet.whitespacesAndNewlines.contains($0) || CharacterSet.controlCharacters.contains($0)
+            }),
+            var components = URLComponents(string: resolvedURL),
+            let scheme = components.scheme?.lowercased(),
+            ["http", "https"].contains(scheme),
+            let host = components.host,
+            !host.isEmpty
+        else {
             throw RequestPreparationError.invalidURL
         }
 
@@ -598,7 +614,8 @@ public enum RequestPreparer {
         }
 
         if let encodedQuery = try QueryParameters.encodedQuery(fields: query.fields, values: variableValues) {
-            components.percentEncodedQuery = components.percentEncodedQuery.map { $0 + "&" + encodedQuery } ?? encodedQuery
+            components.percentEncodedQuery =
+                components.percentEncodedQuery.map { $0 + "&" + encodedQuery } ?? encodedQuery
         }
 
         guard let url = components.url else {
@@ -612,12 +629,13 @@ public enum RequestPreparer {
 
         var resolvedHeaders: [HTTPField] = []
         for field in (headers ?? configuration.headers) where isActive(field) {
-            resolvedHeaders.append(HTTPField(
-                id: field.id,
-                name: try substitute(field.name, values: variableValues),
-                value: try substitute(field.value, values: variableValues),
-                isEnabled: true
-            ))
+            resolvedHeaders.append(
+                HTTPField(
+                    id: field.id,
+                    name: try substitute(field.name, values: variableValues),
+                    value: try substitute(field.value, values: variableValues),
+                    isEnabled: true
+                ))
         }
 
         for field in resolvedHeaders {
@@ -690,9 +708,10 @@ public enum RequestPreparer {
 
     private static func validateOptions(_ options: HTTPOptions) throws {
         guard options.inactivityTimeout.isFinite,
-              options.inactivityTimeout > 0,
-              options.overallTimeout.map({ $0.isFinite && $0 > 0 }) ?? true,
-              options.maximumResponseBytes.map({ $0 >= 0 }) ?? true else {
+            options.inactivityTimeout > 0,
+            options.overallTimeout.map({ $0.isFinite && $0 > 0 }) ?? true,
+            options.maximumResponseBytes.map({ $0 >= 0 }) ?? true
+        else {
             throw RequestPreparationError.invalidTimeout
         }
     }

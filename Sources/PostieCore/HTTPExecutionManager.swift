@@ -183,7 +183,8 @@ private final class HTTPBodyStore {
         }
 
         var isDirectory = ObjCBool(false)
-        guard fileManager.fileExists(atPath: baseDirectory.path, isDirectory: &isDirectory), isDirectory.boolValue else {
+        guard fileManager.fileExists(atPath: baseDirectory.path, isDirectory: &isDirectory), isDirectory.boolValue
+        else {
             throw HTTPExecutionError.bodyStorageUnavailable
         }
 
@@ -238,29 +239,34 @@ private final class HTTPBodyStore {
     }
 
     private static func removeStaleSessionDirectories(in baseDirectory: URL) {
-        guard let entries = try? FileManager.default.contentsOfDirectory(
-            at: baseDirectory,
-            includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey]
-        ) else {
+        guard
+            let entries = try? FileManager.default.contentsOfDirectory(
+                at: baseDirectory,
+                includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey]
+            )
+        else {
             return
         }
 
         for entry in entries {
             let name = entry.lastPathComponent
             guard name.hasPrefix(sessionDirectoryPrefix),
-                  UUID(uuidString: String(name.dropFirst(sessionDirectoryPrefix.count))) != nil,
-                  let values = try? entry.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey]),
-                  values.isDirectory == true,
-                  values.isSymbolicLink != true else {
+                UUID(uuidString: String(name.dropFirst(sessionDirectoryPrefix.count))) != nil,
+                let values = try? entry.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey]),
+                values.isDirectory == true,
+                values.isSymbolicLink != true
+            else {
                 continue
             }
 
             let ownerLockURL = entry.appendingPathComponent(ownerLockName)
-            guard let ownerLock = try? HTTPStorageFileLock(
-                at: ownerLockURL,
-                createIfMissing: false,
-                nonblocking: true
-            ) else {
+            guard
+                let ownerLock = try? HTTPStorageFileLock(
+                    at: ownerLockURL,
+                    createIfMissing: false,
+                    nonblocking: true
+                )
+            else {
                 continue
             }
 
@@ -347,21 +353,22 @@ public actor HTTPExecutionManager {
 
         let bodyURL = response.bodyFileURL.standardizedFileURL.resolvingSymlinksInPath()
         guard let retainedResponse = retainedResponses[response.runID],
-              retainedResponse.identity == identity,
-              retainedResponse.bodyURL == bodyURL,
-              retainedBodies.contains(bodyURL),
-              !response.redirectLimitReached,
-              response.redirects.count <= 10,
-              let pendingRedirect = response.pendingRedirect,
-              response.statusCode == pendingRedirect.statusCode,
-              [301, 302, 303, 307, 308].contains(pendingRedirect.statusCode),
-              let redirectRequest = response.redirectRequest,
-              let redirectURL = redirectRequest.url,
-              redirectURL.scheme.map({ ["http", "https"].contains($0.lowercased()) }) == true,
-              redirectURL == pendingRedirect.nextURL,
-              response.finalURL == pendingRedirect.url,
-              redirectRequest.httpMethod?.uppercased() == pendingRedirect.nextMethod.uppercased(),
-              response.redirects.last?.id == pendingRedirect.id else {
+            retainedResponse.identity == identity,
+            retainedResponse.bodyURL == bodyURL,
+            retainedBodies.contains(bodyURL),
+            !response.redirectLimitReached,
+            response.redirects.count <= 10,
+            let pendingRedirect = response.pendingRedirect,
+            response.statusCode == pendingRedirect.statusCode,
+            [301, 302, 303, 307, 308].contains(pendingRedirect.statusCode),
+            let redirectRequest = response.redirectRequest,
+            let redirectURL = redirectRequest.url,
+            redirectURL.scheme.map({ ["http", "https"].contains($0.lowercased()) }) == true,
+            redirectURL == pendingRedirect.nextURL,
+            response.finalURL == pendingRedirect.url,
+            redirectRequest.httpMethod?.uppercased() == pendingRedirect.nextMethod.uppercased(),
+            response.redirects.last?.id == pendingRedirect.id
+        else {
             throw HTTPExecutionError.redirectUnavailable
         }
 
@@ -369,7 +376,8 @@ public actor HTTPExecutionManager {
         if !sameOrigin(response.finalURL, redirectURL) {
             Self.stripCrossOriginCredentials(
                 from: &capturedRequest,
-                additionalNames: retainedResponse.sensitiveRequestHeaderNames.union(retainedResponse.secretRequestHeaderNames)
+                additionalNames: retainedResponse.sensitiveRequestHeaderNames.union(
+                    retainedResponse.secretRequestHeaderNames)
             )
         }
         let requestHeaderSources = reconciledHeaderSources(
@@ -456,8 +464,9 @@ public actor HTTPExecutionManager {
 
     private func origin(of url: URL) -> (scheme: String, host: String, port: Int)? {
         guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-              let scheme = components.scheme?.lowercased(),
-              let host = components.host?.lowercased() else {
+            let scheme = components.scheme?.lowercased(),
+            let host = components.host?.lowercased()
+        else {
             return nil
         }
 
@@ -473,8 +482,9 @@ public actor HTTPExecutionManager {
 
     public func cancel(identity: RequestIdentity, runID expectedRunID: UUID? = nil) {
         guard let runID = runByIdentity[identity],
-              expectedRunID == nil || expectedRunID == runID,
-              var activeRun = activeRuns[runID] else {
+            expectedRunID == nil || expectedRunID == runID,
+            var activeRun = activeRuns[runID]
+        else {
             return
         }
 
@@ -492,7 +502,8 @@ public actor HTTPExecutionManager {
     public func discardBody(at url: URL) throws {
         let resolvedURL = url.standardizedFileURL.resolvingSymlinksInPath()
         guard resolvedURL.deletingLastPathComponent() == bodyDirectory,
-              retainedBodies.contains(resolvedURL) else {
+            retainedBodies.contains(resolvedURL)
+        else {
             throw HTTPExecutionError.bodyNotOwned
         }
 
@@ -521,14 +532,16 @@ public actor HTTPExecutionManager {
         }
         let bodyURL = response.bodyFileURL.standardizedFileURL
         guard let retained = retainedResponses[response.runID],
-              retained.bodyURL == bodyURL,
-              retainedBodies.contains(bodyURL),
-              !pendingBodyDiscards.contains(bodyURL) else {
+            retained.bodyURL == bodyURL,
+            retainedBodies.contains(bodyURL),
+            !pendingBodyDiscards.contains(bodyURL)
+        else {
             throw HTTPExecutionError.bodyNotOwned
         }
         let values = try bodyURL.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
         guard values.isRegularFile == true, values.isSymbolicLink != true,
-              values.fileSize.map(Int64.init) == response.bodyByteCount else {
+            values.fileSize.map(Int64.init) == response.bodyByteCount
+        else {
             throw HTTPExecutionError.bodyUnavailable
         }
         let lease = HTTPBodyLease(token: UUID(), runID: response.runID, bodyURL: bodyURL)
@@ -543,7 +556,8 @@ public actor HTTPExecutionManager {
         }
         let values = try bodyURL.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
         guard values.isRegularFile == true, values.isSymbolicLink != true,
-              values.fileSize.map(Int64.init) == response.bodyByteCount else {
+            values.fileSize.map(Int64.init) == response.bodyByteCount
+        else {
             throw HTTPExecutionError.bodyUnavailable
         }
         retainedBodies.insert(bodyURL)
@@ -557,12 +571,14 @@ public actor HTTPExecutionManager {
 
     public func releaseBodyLease(_ lease: HTTPBodyLease) {
         guard let retainedLease = bodyLeases[lease.token],
-              retainedLease.runID == lease.runID, retainedLease.bodyURL == lease.bodyURL else {
+            retainedLease.runID == lease.runID, retainedLease.bodyURL == lease.bodyURL
+        else {
             return
         }
         bodyLeases.removeValue(forKey: lease.token)
         if pendingBodyDiscards.contains(lease.bodyURL),
-           !bodyLeases.values.contains(where: { $0.bodyURL == lease.bodyURL }) {
+            !bodyLeases.values.contains(where: { $0.bodyURL == lease.bodyURL })
+        {
             pendingBodyDiscards.remove(lease.bodyURL)
             try? discardBody(at: lease.bodyURL)
         }
@@ -863,7 +879,8 @@ private final class HTTPDownloadDelegate: NSObject, URLSessionDownloadDelegate, 
             redirectedRequest.httpMethod = "GET"
         }
         if redirectedRequest.httpMethod?.caseInsensitiveCompare(currentRequest.httpMethod ?? "GET") == .orderedSame,
-           redirectedRequest.httpBody == nil {
+            redirectedRequest.httpBody == nil
+        {
             redirectedRequest.httpBody = currentRequest.httpBody
         }
 
@@ -897,7 +914,8 @@ private final class HTTPDownloadDelegate: NSObject, URLSessionDownloadDelegate, 
         continuation.yield(.redirect(redirect))
 
         guard [301, 302, 303, 307, 308].contains(response.statusCode),
-              ["http", "https"].contains(nextURL.scheme?.lowercased() ?? "") else {
+            ["http", "https"].contains(nextURL.scheme?.lowercased() ?? "")
+        else {
             redirectRequest = nil
             pendingRedirect = nil
             completionHandler(nil)
@@ -1060,8 +1078,9 @@ private final class HTTPDownloadDelegate: NSObject, URLSessionDownloadDelegate, 
 
     private func origin(of url: URL) -> (scheme: String, host: String, port: Int)? {
         guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-              let scheme = components.scheme?.lowercased(),
-              let host = components.host?.lowercased() else {
+            let scheme = components.scheme?.lowercased(),
+            let host = components.host?.lowercased()
+        else {
             return nil
         }
 

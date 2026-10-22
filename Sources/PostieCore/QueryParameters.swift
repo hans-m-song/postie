@@ -43,7 +43,8 @@ public struct QueryParameterState: Equatable, Sendable {
 }
 
 public enum QueryParameters {
-    private static let unreserved = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
+    private static let unreserved = CharacterSet(
+        charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
 
     public static func isActive(_ field: HTTPField) -> Bool {
         guard field.isEnabled else { return false }
@@ -100,7 +101,8 @@ public enum QueryParameters {
 
         for index in fields.indices {
             if let previousIndex = enabled.indices.first(where: {
-                available.contains($0) && fields[index].name == enabled[$0].name && fields[index].value == enabled[$0].value
+                available.contains($0) && fields[index].name == enabled[$0].name
+                    && fields[index].value == enabled[$0].value
             }) {
                 matched[index] = previousIndex
                 available.remove(previousIndex)
@@ -172,8 +174,12 @@ public enum QueryParameters {
     private static func renderField(_ field: HTTPField, preserveTemplates: Bool) -> String {
         let metadata = field.queryEncoding
         let raw = rawComponents(for: field)
-        let name = reusable(raw.name, preserveTemplates: preserveTemplates) ?? encode(field.name, preserveTemplates: preserveTemplates)
-        let value = reusable(raw.value, preserveTemplates: preserveTemplates) ?? encode(field.value, preserveTemplates: preserveTemplates)
+        let name =
+            reusable(raw.name, preserveTemplates: preserveTemplates)
+            ?? encode(field.name, preserveTemplates: preserveTemplates)
+        let value =
+            reusable(raw.value, preserveTemplates: preserveTemplates)
+            ?? encode(field.value, preserveTemplates: preserveTemplates)
         let hasEquals = metadata?.hasEquals ?? true
         return name + (hasEquals || !field.value.isEmpty ? "=" + value : "")
     }
@@ -208,14 +214,16 @@ public enum QueryParameters {
         while index < scalars.count {
             let scalar = scalars[index]
             if scalar == "%", index + 2 < scalars.count,
-               hex.contains(scalars[index + 1]), hex.contains(scalars[index + 2]) {
+                hex.contains(scalars[index + 1]), hex.contains(scalars[index + 2])
+            {
                 output += String(String.UnicodeScalarView(scalars[index...index + 2]))
                 index += 3
                 continue
             }
 
             let text = String(scalar)
-            output += scalar.isASCII && allowed.contains(scalar)
+            output +=
+                scalar.isASCII && allowed.contains(scalar)
                 ? text
                 : encode(text, preserveTemplates: false)
             index += 1
@@ -249,7 +257,9 @@ public enum QueryParameters {
             }
 
             let next = source.index(after: cursor)
-            output += String(source[cursor..<next]).addingPercentEncoding(withAllowedCharacters: unreserved) ?? String(source[cursor..<next])
+            output +=
+                String(source[cursor..<next]).addingPercentEncoding(withAllowedCharacters: unreserved)
+                ?? String(source[cursor..<next])
             cursor = next
         }
 
@@ -269,7 +279,8 @@ public enum QueryParameters {
         return parts
     }
 
-    private static func firstDelimiter<S: StringProtocol>(in source: S, matching delimiters: Set<Character>) -> S.Index? {
+    private static func firstDelimiter<S: StringProtocol>(in source: S, matching delimiters: Set<Character>) -> S.Index?
+    {
         var cursor = source.startIndex
         while cursor < source.endIndex {
             if source[cursor...].hasPrefix("{{") {

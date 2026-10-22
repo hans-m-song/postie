@@ -62,9 +62,11 @@ private struct ImportEncryptionKeySheet: View {
             Text("Import Encryption Key")
                 .font(.title3.weight(.semibold))
 
-            Text("Enter a Base64 encoded 32-byte key or choose a raw 32-byte or Base64 key file. The key is checked against encrypted workspace and snapshot values before it is stored.")
-                .fixedSize(horizontal: false, vertical: true)
-                .foregroundStyle(.secondary)
+            Text(
+                "Enter a Base64 encoded 32-byte key or choose a raw 32-byte or Base64 key file. The key is checked against encrypted workspace and snapshot values before it is stored."
+            )
+            .fixedSize(horizontal: false, vertical: true)
+            .foregroundStyle(.secondary)
 
             SecureField("Base64 key", text: keyTextBinding)
                 .textFieldStyle(.roundedBorder)
@@ -211,9 +213,11 @@ private struct ExportEncryptionKeySheet: View {
             Text("Export Encryption Key")
                 .font(.title3.weight(.semibold))
 
-            Text("Anyone with this key can decrypt encrypted workspace values, authentication secrets, and saved request context. Store it separately and share it only with people who should have that access.")
-                .fixedSize(horizontal: false, vertical: true)
-                .foregroundStyle(.secondary)
+            Text(
+                "Anyone with this key can decrypt encrypted workspace values, authentication secrets, and saved request context. Store it separately and share it only with people who should have that access."
+            )
+            .fixedSize(horizontal: false, vertical: true)
+            .foregroundStyle(.secondary)
 
             if let keyText {
                 Group {
@@ -336,7 +340,8 @@ enum EncryptionKeyFile {
     static func read(at url: URL) throws -> Data {
         let values = try url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
         guard values.isRegularFile == true, values.isSymbolicLink != true,
-              let size = values.fileSize, size <= maximumSize else {
+            let size = values.fileSize, size <= maximumSize
+        else {
             throw EncryptionKeyFileError.invalidFile
         }
 
@@ -356,8 +361,9 @@ enum EncryptionKeyFile {
     static func decodeBase64(_ text: String) throws -> Data {
         let encoded = String(text.filter { !$0.isWhitespace })
         guard encoded.utf8.count <= maximumSize,
-              let key = Data(base64Encoded: encoded), key.count == 32,
-              key.base64EncodedString() == encoded else {
+            let key = Data(base64Encoded: encoded), key.count == 32,
+            key.base64EncodedString() == encoded
+        else {
             throw EncryptionKeyFileError.invalidKey
         }
         return key
@@ -396,7 +402,8 @@ enum EncryptionKeyFile {
             _ = Darwin.close(descriptor)
             var currentFile = stat()
             if Darwin.lstat(url.path, &currentFile) == 0,
-               currentFile.st_dev == createdFile.st_dev, currentFile.st_ino == createdFile.st_ino {
+                currentFile.st_dev == createdFile.st_dev, currentFile.st_ino == createdFile.st_ino
+            {
                 _ = Darwin.unlink(url.path)
             }
             throw error

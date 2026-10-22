@@ -36,7 +36,8 @@ enum HeaderPresentation {
         onOpenSource: @escaping () -> Void
     ) -> DerivedHeaderRowPresentation? {
         guard let maskedValue = maskedAuthenticationValue(for: authentication.kind),
-              let headerName = authenticationHeaderName(for: authentication) else { return nil }
+            let headerName = authenticationHeaderName(for: authentication)
+        else { return nil }
 
         let displayName = headerName.isEmpty ? "API key header" : headerName
         let secretField = authenticationSecretField(for: authentication)
@@ -73,7 +74,9 @@ enum HeaderPresentation {
         }
     }
 
-    private static func authenticationSecretField(for authentication: RequestAuthentication) -> AuthenticationSecretField? {
+    private static func authenticationSecretField(for authentication: RequestAuthentication)
+        -> AuthenticationSecretField?
+    {
         switch authentication.kind {
         case .none: nil
         case .basic: .password
@@ -82,7 +85,9 @@ enum HeaderPresentation {
         }
     }
 
-    private static func hasSavedSecret(_ field: AuthenticationSecretField, in authentication: RequestAuthentication) -> Bool {
+    private static func hasSavedSecret(_ field: AuthenticationSecretField, in authentication: RequestAuthentication)
+        -> Bool
+    {
         switch field {
         case .password: authentication.password != nil
         case .token: authentication.token != nil
@@ -103,9 +108,8 @@ enum HeaderPresentation {
             $0.isEnabled && !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
         let literalMatches = namedRequestHeaders.filter {
-            !isTemplatedName &&
-                !hasTemplateSyntax(in: $0.name) &&
-                $0.name.caseInsensitiveCompare(headerName) == .orderedSame
+            !isTemplatedName && !hasTemplateSyntax(in: $0.name)
+                && $0.name.caseInsensitiveCompare(headerName) == .orderedSame
         }
 
         if !literalMatches.isEmpty { return "Overridden" }

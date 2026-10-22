@@ -113,11 +113,14 @@ private struct ActiveResponseStatus: View {
                 HStack {
                     ProgressView()
                         .controlSize(.small)
-                    Text(active.phase == .cancelling ? "Cancelling request" : active.runID == nil ? "Preparing request" : "Request in progress")
-                        .font(.headline)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .frame(minWidth: 0)
+                    Text(
+                        active.phase == .cancelling
+                            ? "Cancelling request" : active.runID == nil ? "Preparing request" : "Request in progress"
+                    )
+                    .font(.headline)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(minWidth: 0)
                     Spacer(minLength: 0)
                     Text(String(format: "%.1f s", model.elapsed(for: identity) ?? 0))
                         .monospacedDigit()
@@ -214,8 +217,11 @@ private struct ResponseExchangeView: View {
             DisclosureGroup(isExpanded: $isFinalExpanded) {
                 VStack(alignment: .leading, spacing: 14) {
                     DisclosureGroup("Request headers (\(response.requestHeaders.count))") {
-                        HeaderTable(fields: response.requestHeaders, sensitiveNames: response.sensitiveRequestHeaderNames, secretNames: response.secretRequestHeaderNames, sources: response.requestHeaderSources)
-                            .padding(.top, 7)
+                        HeaderTable(
+                            fields: response.requestHeaders, sensitiveNames: response.sensitiveRequestHeaderNames,
+                            secretNames: response.secretRequestHeaderNames, sources: response.requestHeaderSources
+                        )
+                        .padding(.top, 7)
                     }
                     .disclosureGroupStyle(PaddedDisclosureGroupStyle())
 
@@ -275,7 +281,10 @@ private struct RedirectDisclosure: View {
     var body: some View {
         DisclosureGroup(isExpanded: expansion ?? $localExpanded) {
             VStack(alignment: .leading, spacing: 13) {
-                ExchangeHeaderGroup(title: "Request headers", fields: redirect.requestHeaders, sensitiveNames: redirect.sensitiveRequestHeaderNames, secretNames: redirect.secretRequestHeaderNames, sources: redirect.requestHeaderSources)
+                ExchangeHeaderGroup(
+                    title: "Request headers", fields: redirect.requestHeaders,
+                    sensitiveNames: redirect.sensitiveRequestHeaderNames,
+                    secretNames: redirect.secretRequestHeaderNames, sources: redirect.requestHeaderSources)
                 ExchangeHeaderGroup(title: "Response headers", fields: redirect.responseHeaders)
             }
             .padding(.top, 8)
@@ -283,12 +292,14 @@ private struct RedirectDisclosure: View {
             HStack(spacing: 8) {
                 Text("\(redirect.statusCode) \(statusReasonPhrase(redirect.statusCode))")
                     .fontWeight(.medium)
-                Text("· \(redirect.method) \(redirect.url.absoluteString) → \(redirect.nextMethod) \(redirect.nextURL.absoluteString)")
-                    .lineLimit(2)
-                    .truncationMode(.middle)
-                    .foregroundStyle(.secondary)
-                    .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-                    .fixedSize(horizontal: false, vertical: true)
+                Text(
+                    "· \(redirect.method) \(redirect.url.absoluteString) → \(redirect.nextMethod) \(redirect.nextURL.absoluteString)"
+                )
+                .lineLimit(2)
+                .truncationMode(.middle)
+                .foregroundStyle(.secondary)
+                .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
             }
             .font(.callout)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -391,7 +402,8 @@ private struct HeaderTable: View {
             ForEach(fields) { field in
                 ResponseHeaderRow(
                     field: field,
-                    isSensitive: sensitiveNames.contains(field.name.lowercased()) || standardSensitiveNames.contains(field.name.lowercased()),
+                    isSensitive: sensitiveNames.contains(field.name.lowercased())
+                        || standardSensitiveNames.contains(field.name.lowercased()),
                     isNameSecret: secretNames.contains(field.name.lowercased()),
                     source: sources[field.name.lowercased()]
                 )
@@ -517,9 +529,12 @@ private struct ResponseBodyPreview: View {
                         RoundedRectangle(cornerRadius: 7).stroke(.quaternary, lineWidth: 1)
                     }
                     if preview.isTruncated && !(pretty && formatted != nil) {
-                        Label("Preview limited to the first 1 MiB. The saved response file is complete.", systemImage: "info.circle")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                        Label(
+                            "Preview limited to the first 1 MiB. The saved response file is complete.",
+                            systemImage: "info.circle"
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     }
                 }
             } else {
@@ -552,7 +567,8 @@ private struct ResponseBodyPreview: View {
         let contentType = headers.first {
             $0.name.caseInsensitiveCompare("Content-Type") == .orderedSame
         }?.value
-        let mediaType = contentType?
+        let mediaType =
+            contentType?
             .split(separator: ";", maxSplits: 1, omittingEmptySubsequences: false)
             .first?
             .trimmingCharacters(in: .whitespacesAndNewlines)

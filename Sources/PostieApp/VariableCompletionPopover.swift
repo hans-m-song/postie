@@ -35,7 +35,8 @@ final class VariableCompletionPopover {
     ) {
         update(suggestions: suggestions, selectedIndex: selectedIndex)
         guard let window = view.window,
-              window.isVisible else {
+            window.isVisible
+        else {
             return
         }
         if popover.isShown {
@@ -138,21 +139,23 @@ private final class VariableCompletionListView: NSView {
             let nameAttributes: [NSAttributedString.Key: Any] = [
                 .font: NSFont.monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular),
                 .foregroundColor: textColor,
-                .paragraphStyle: singleLineParagraphStyle()
+                .paragraphStyle: singleLineParagraphStyle(),
             ]
             let detailColor = isSelected ? textColor : NSColor.secondaryLabelColor
             let detailAttributes: [NSAttributedString.Key: Any] = [
                 .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize),
                 .foregroundColor: detailColor,
-                .paragraphStyle: singleLineParagraphStyle()
+                .paragraphStyle: singleLineParagraphStyle(),
             ]
-            let metadata = suggestion.isSecret
+            let metadata =
+                suggestion.isSecret
                 ? "\(scopeLabel(suggestion.scope)) · 🔒 Secret"
                 : scopeLabel(suggestion.scope)
             let metadataSize = (metadata as NSString).size(withAttributes: detailAttributes)
             let metadataWidth = min(metadataSize.width, bounds.width * 0.52)
             let detailY = rowRect.minY + 24
-            let metadataRect = NSRect(x: bounds.width - metadataWidth - 10, y: detailY, width: metadataWidth, height: 15)
+            let metadataRect = NSRect(
+                x: bounds.width - metadataWidth - 10, y: detailY, width: metadataWidth, height: 15)
             let nameRect = NSRect(x: 10, y: rowRect.minY + 4, width: bounds.width - 20, height: 17)
             let previewRect = NSRect(x: 10, y: detailY, width: max(0, metadataRect.minX - 18), height: 15)
             (suggestion.name as NSString).draw(in: nameRect, withAttributes: nameAttributes)

@@ -8,17 +8,22 @@ struct RequestSearchResult: Identifiable, Equatable {
     let method: String
     let url: String
 
-    static func matching(_ query: String, collections: [RequestCollection], drafts: [RequestIdentity: HTTPRequestConfiguration]) -> [Self] {
+    static func matching(
+        _ query: String, collections: [RequestCollection], drafts: [RequestIdentity: HTTPRequestConfiguration]
+    ) -> [Self] {
         let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
         return collections.flatMap { collection in
             collection.requests.compactMap { saved in
                 let identity = RequestIdentity(collectionID: collection.id, requestID: saved.id)
                 let request = drafts[identity] ?? saved
                 let displayURL = QueryParameters.render(baseURL: request.url, fields: request.query)
-                guard query.isEmpty || request.name.localizedCaseInsensitiveContains(query) ||
-                        displayURL.localizedCaseInsensitiveContains(query) else { return nil }
-                return Self(id: identity, name: request.name, collectionName: collection.name,
-                            method: request.method, url: displayURL)
+                guard
+                    query.isEmpty || request.name.localizedCaseInsensitiveContains(query)
+                        || displayURL.localizedCaseInsensitiveContains(query)
+                else { return nil }
+                return Self(
+                    id: identity, name: request.name, collectionName: collection.name,
+                    method: request.method, url: displayURL)
             }
         }
     }
@@ -50,15 +55,19 @@ struct RequestSearchPalette: View {
             .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
 
             if results.isEmpty {
-                ContentUnavailableView(query.isEmpty ? "No saved requests" : "No matching requests",
-                                       systemImage: "magnifyingglass")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                ContentUnavailableView(
+                    query.isEmpty ? "No saved requests" : "No matching requests",
+                    systemImage: "magnifyingglass"
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollViewReader { proxy in
                     ScrollView {
                         LazyVStack(spacing: 3) {
                             ForEach(results) { result in
-                                Button { open(result.id) } label: {
+                                Button {
+                                    open(result.id)
+                                } label: {
                                     VStack(alignment: .leading, spacing: 4) {
                                         HStack {
                                             Text(result.method.uppercased())
@@ -78,8 +87,10 @@ struct RequestSearchPalette: View {
                                     }
                                     .padding(10)
                                     .frame(maxWidth: .infinity, alignment: .leading)
-                                    .background(selected == result.id ? Color.accentColor.opacity(0.16) : .clear,
-                                                in: RoundedRectangle(cornerRadius: 7))
+                                    .background(
+                                        selected == result.id ? Color.accentColor.opacity(0.16) : .clear,
+                                        in: RoundedRectangle(cornerRadius: 7)
+                                    )
                                     .contentShape(Rectangle())
                                 }
                                 .buttonStyle(.plain)
@@ -101,12 +112,18 @@ struct RequestSearchPalette: View {
         }
         .padding(16)
         .frame(width: 620, height: 420)
-        .onAppear { selected = results.first?.id; isSearchFocused = true }
+        .onAppear {
+            selected = results.first?.id; isSearchFocused = true
+        }
         .onChange(of: results.map(\.id)) { _, ids in
             if !ids.contains(where: { $0 == selected }) { selected = ids.first }
         }
-        .onKeyPress(.downArrow) { move(1); return .handled }
-        .onKeyPress(.upArrow) { move(-1); return .handled }
+        .onKeyPress(.downArrow) {
+            move(1); return .handled
+        }
+        .onKeyPress(.upArrow) {
+            move(-1); return .handled
+        }
     }
 
     private func move(_ offset: Int) {
@@ -117,9 +134,11 @@ struct RequestSearchPalette: View {
 
     private func disambiguator(for identity: RequestIdentity) -> String {
         let prefix = String(identity.requestID.uuidString.prefix(8))
-        guard results.contains(where: {
-            $0.id != identity && $0.id.requestID.uuidString.hasPrefix(prefix)
-        }) else { return prefix }
+        guard
+            results.contains(where: {
+                $0.id != identity && $0.id.requestID.uuidString.hasPrefix(prefix)
+            })
+        else { return prefix }
         return "\(identity.collectionID.uuidString) / \(identity.requestID.uuidString)"
     }
 

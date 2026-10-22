@@ -29,16 +29,18 @@ struct VariableInspection: Equatable {
 }
 
 enum VariableInspectionMatcher {
-    static func reference(in value: String, selection: NSRange, definedNames: Set<String>? = nil) -> TemplateReference? {
-        guard value.utf16.prefix(VariableCompletionMatcher.maximumInputLength + 1).count <= VariableCompletionMatcher.maximumInputLength,
-              selection.location >= 0, selection.length >= 0,
-              selection.location <= value.utf16.count,
-              selection.length <= value.utf16.count - selection.location else { return nil }
+    static func reference(in value: String, selection: NSRange, definedNames: Set<String>? = nil) -> TemplateReference?
+    {
+        guard
+            value.utf16.prefix(VariableCompletionMatcher.maximumInputLength + 1).count
+                <= VariableCompletionMatcher.maximumInputLength,
+            selection.location >= 0, selection.length >= 0,
+            selection.location <= value.utf16.count,
+            selection.length <= value.utf16.count - selection.location
+        else { return nil }
         return TemplateEngine.scan(value).references.first {
-            (definedNames?.contains($0.name) ?? true) &&
-                selection.location >= $0.range.location &&
-                selection.location < NSMaxRange($0.range) &&
-                NSMaxRange(selection) <= NSMaxRange($0.range)
+            (definedNames?.contains($0.name) ?? true) && selection.location >= $0.range.location
+                && selection.location < NSMaxRange($0.range) && NSMaxRange(selection) <= NSMaxRange($0.range)
         }
     }
 }
@@ -74,16 +76,17 @@ final class VariableInspectionPopover: NSObject, NSPopoverDelegate {
         if target != inspection || !popover.isShown {
             target = inspection
             let controller = NSViewController()
-            let hostingView = VariableInspectionHostingView(rootView: VariableInspectionView(
-                model: model,
-                inspection: inspection,
-                isCurrent: isCurrent,
-                dismiss: { [weak self] in self?.dismiss() },
-                onContentSizeChange: { [weak self] size in
-                    guard let self, self.target == inspection else { return }
-                    self.updateContentSize(size)
-                }
-            ))
+            let hostingView = VariableInspectionHostingView(
+                rootView: VariableInspectionView(
+                    model: model,
+                    inspection: inspection,
+                    isCurrent: isCurrent,
+                    dismiss: { [weak self] in self?.dismiss() },
+                    onContentSizeChange: { [weak self] size in
+                        guard let self, self.target == inspection else { return }
+                        self.updateContentSize(size)
+                    }
+                ))
             hostingView.sizingOptions = [.intrinsicContentSize]
             hostingView.layoutSubtreeIfNeeded()
             let fittingSize = hostingView.fittingSize
@@ -114,8 +117,10 @@ final class VariableInspectionPopover: NSObject, NSPopoverDelegate {
     private func updateContentSize(_ size: CGSize) {
         guard size.width > 0, size.height > 0 else { return }
         let contentSize = NSSize(width: size.width, height: size.height)
-        guard abs(popover.contentSize.width - contentSize.width) > 0.5 ||
-                abs(popover.contentSize.height - contentSize.height) > 0.5 else { return }
+        guard
+            abs(popover.contentSize.width - contentSize.width) > 0.5
+                || abs(popover.contentSize.height - contentSize.height) > 0.5
+        else { return }
         popover.contentSize = contentSize
     }
 }
@@ -262,13 +267,15 @@ private struct VariableInspectionView: View {
             do {
                 let value = try await model.revealVariable(named: inspection.name, owner: inspection.owner)
                 guard !Task.isCancelled, operationID == id,
-                      isCurrent(), model.isCurrent(inspection) else { return }
+                    isCurrent(), model.isCurrent(inspection)
+                else { return }
                 revealedValue = value
                 isBusy = false
                 revealTask = nil
             } catch {
                 guard !Task.isCancelled, operationID == id,
-                      isCurrent(), model.isCurrent(inspection) else { return }
+                    isCurrent(), model.isCurrent(inspection)
+                else { return }
                 errorMessage = error.localizedDescription
                 isBusy = false
                 revealTask = nil

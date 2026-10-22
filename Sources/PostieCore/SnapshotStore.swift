@@ -61,8 +61,9 @@ private struct SnapshotDocument: Codable {
     let response: SnapshotResponseMetadata
 
     func summary(id: UUID) -> SavedSnapshot {
-        SavedSnapshot(id: id, name: name, capturedAt: capturedAt, source: source,
-                      statusCode: response.statusCode, bodyByteCount: response.bodyByteCount)
+        SavedSnapshot(
+            id: id, name: name, capturedAt: capturedAt, source: source,
+            statusCode: response.statusCode, bodyByteCount: response.bodyByteCount)
     }
 }
 
@@ -107,7 +108,8 @@ public actor SnapshotStore {
             }
             containsEncryptedData = true
             guard let id = UUID(uuidString: entry.lastPathComponent),
-                  id.uuidString == entry.lastPathComponent else {
+                id.uuidString == entry.lastPathComponent
+            else {
                 issues.append(issue(for: entry, message: "An unrecognized snapshot entry was preserved."))
                 continue
             }
@@ -115,8 +117,11 @@ public actor SnapshotStore {
                 let document = try readDocument(id: id)
                 snapshots.append(document.summary(id: id))
             } catch {
-                issues.append(issue(for: entry, message: (error as? LocalizedError)?.errorDescription
-                                    ?? "An unreadable snapshot was preserved."))
+                issues.append(
+                    issue(
+                        for: entry,
+                        message: (error as? LocalizedError)?.errorDescription
+                            ?? "An unreadable snapshot was preserved."))
             }
         }
         snapshots.sort { $0.capturedAt > $1.capturedAt }
@@ -138,7 +143,8 @@ public actor SnapshotStore {
                 continue
             }
             guard let id = UUID(uuidString: entry.lastPathComponent),
-                  id.uuidString == entry.lastPathComponent else {
+                id.uuidString == entry.lastPathComponent
+            else {
                 throw SnapshotStoreError.invalidPath
             }
 
@@ -149,14 +155,17 @@ public actor SnapshotStore {
         return envelopes
     }
 
-    public func save(response: HTTPResponseRecord, source: SnapshotSource, name: String,
-                     bodyLease: HTTPBodyLease) async throws -> SavedSnapshot {
+    public func save(
+        response: HTTPResponseRecord, source: SnapshotSource, name: String,
+        bodyLease: HTTPBodyLease
+    ) async throws -> SavedSnapshot {
         try validateName(name)
         guard let capture = response.snapshotCapture, capture.preparationVersion == 1,
-              bodyLease.runID == response.runID,
-              bodyLease.bodyURL == response.bodyFileURL.standardizedFileURL,
-              response.bodyByteCount >= 0,
-              response.duration.isFinite, response.duration >= 0 else {
+            bodyLease.runID == response.runID,
+            bodyLease.bodyURL == response.bodyFileURL.standardizedFileURL,
+            response.bodyByteCount >= 0,
+            response.duration.isFinite, response.duration >= 0
+        else {
             throw SnapshotStoreError.ineligibleResponse
         }
         let context = EncryptedSnapshotContext(
@@ -194,8 +203,9 @@ public actor SnapshotStore {
             )
         )
         do {
-            try fileManager.createDirectory(at: staging, withIntermediateDirectories: false,
-                                            attributes: [.posixPermissions: 0o700])
+            try fileManager.createDirectory(
+                at: staging, withIntermediateDirectories: false,
+                attributes: [.posixPermissions: 0o700])
             defer { try? fileManager.removeItem(at: staging) }
             try Self.stagingMarker.write(to: staging.appendingPathComponent(".postie-snapshot-stage"))
             let body = staging.appendingPathComponent("response.body")
@@ -236,17 +246,22 @@ public actor SnapshotStore {
                 observedTransport: decoded.observedTransport, redirects: decoded.redirects
             )
         } catch {
-            contextError = "Captured request context is unavailable. "
+            contextError =
+                "Captured request context is unavailable. "
                 + ((error as? LocalizedError)?.errorDescription ?? "The encrypted context could not be read.")
         }
         // Revalidate after unlocking, which yields actor isolation to deletion and rename.
         let current = try readDocument(id: id)
         let observed = context?.observedTransport
         let unavailableURL = URL(string: "about:blank")!
-        let redirects = context?.redirects ?? document.response.redirects.map {
-            HTTPRedirect(id: $0.id, statusCode: $0.statusCode, url: unavailableURL, nextURL: unavailableURL,
-                         method: $0.method, nextMethod: $0.nextMethod, requestHeaders: [], responseHeaders: $0.responseHeaders)
-        }
+        let redirects =
+            context?.redirects
+            ?? document.response.redirects.map {
+                HTTPRedirect(
+                    id: $0.id, statusCode: $0.statusCode, url: unavailableURL, nextURL: unavailableURL,
+                    method: $0.method, nextMethod: $0.nextMethod, requestHeaders: [],
+                    responseHeaders: $0.responseHeaders)
+            }
         let response = HTTPResponseRecord(
             runID: document.originalRunID, request: document.template.configuration,
             finalURL: observed?.url ?? unavailableURL,
@@ -261,8 +276,9 @@ public actor SnapshotStore {
             requestHeaderSources: observed?.headerSources ?? [:],
             snapshotCapture: context?.preparation, completedAt: document.capturedAt
         )
-        return OpenedSnapshot(summary: current.summary(id: id), template: document.template, context: context,
-                              contextError: contextError, response: response)
+        return OpenedSnapshot(
+            summary: current.summary(id: id), template: document.template, context: context,
+            contextError: contextError, response: response)
     }
 
     public func rename(id: UUID, name: String) throws -> SavedSnapshot {
@@ -273,10 +289,12 @@ public actor SnapshotStore {
             throw SnapshotStoreError.malformedSnapshot
         }
         json["name"] = name
-        let data = try JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
+        let data = try JSONSerialization.data(
+            withJSONObject: json, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
         try data.write(to: url, options: .atomic)
-        return SavedSnapshot(id: id, name: name, capturedAt: document.capturedAt, source: document.source,
-                             statusCode: document.response.statusCode, bodyByteCount: document.response.bodyByteCount)
+        return SavedSnapshot(
+            id: id, name: name, capturedAt: document.capturedAt, source: document.source,
+            statusCode: document.response.statusCode, bodyByteCount: document.response.bodyByteCount)
     }
 
     public func delete(id: UUID) throws {
@@ -296,7 +314,8 @@ public actor SnapshotStore {
         try requireRegularFile(metadata)
         let data = try Data(contentsOf: metadata)
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let version = json["version"] as? Int else {
+            let version = json["version"] as? Int
+        else {
             throw SnapshotStoreError.malformedSnapshot
         }
         guard version == 1 else { throw SnapshotStoreError.unsupportedVersion }
@@ -305,8 +324,9 @@ public actor SnapshotStore {
             throw SnapshotStoreError.unsupportedVersion
         }
         guard !document.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              document.response.bodyByteCount >= 0, document.response.duration.isFinite,
-              document.response.duration >= 0, document.capturedAt.timeIntervalSinceReferenceDate.isFinite else {
+            document.response.bodyByteCount >= 0, document.response.duration.isFinite,
+            document.response.duration >= 0, document.capturedAt.timeIntervalSinceReferenceDate.isFinite
+        else {
             throw SnapshotStoreError.malformedSnapshot
         }
         try requireBody(entry.appendingPathComponent("response.body"), byteCount: document.response.bodyByteCount)
@@ -316,8 +336,9 @@ public actor SnapshotStore {
     private func validate(_ envelope: SecretEnvelope) throws {
         guard envelope.version == 1 else { throw SnapshotStoreError.unsupportedVersion }
         guard let combined = Data(base64Encoded: envelope.combined),
-              combined.base64EncodedString() == envelope.combined,
-              combined.count >= 12 + 16 else {
+            combined.base64EncodedString() == envelope.combined,
+            combined.count >= 12 + 16
+        else {
             throw SnapshotStoreError.malformedSnapshot
         }
     }
@@ -326,14 +347,16 @@ public actor SnapshotStore {
         if try pathExists(rootURL) {
             try requireDirectory(rootURL)
         } else {
-            try fileManager.createDirectory(at: rootURL, withIntermediateDirectories: true,
-                                            attributes: [.posixPermissions: 0o700])
+            try fileManager.createDirectory(
+                at: rootURL, withIntermediateDirectories: true,
+                attributes: [.posixPermissions: 0o700])
             try requireDirectory(rootURL)
         }
         let staging = rootURL.appendingPathComponent(".staging", isDirectory: true)
         if try !pathExists(staging) {
-            try fileManager.createDirectory(at: staging, withIntermediateDirectories: false,
-                                            attributes: [.posixPermissions: 0o700])
+            try fileManager.createDirectory(
+                at: staging, withIntermediateDirectories: false,
+                attributes: [.posixPermissions: 0o700])
         }
         try requireDirectory(staging)
     }

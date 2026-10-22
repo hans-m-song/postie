@@ -50,8 +50,10 @@ public struct SnapshotAuthenticationInput: Codable, Equatable, Sendable {
     public let resolvedSecret: String?
     public let apiKeyHeaderName: String?
 
-    public init(kind: AuthenticationKind, username: String = "", secretTemplate: String? = nil,
-                resolvedSecret: String? = nil, apiKeyHeaderName: String? = nil) {
+    public init(
+        kind: AuthenticationKind, username: String = "", secretTemplate: String? = nil,
+        resolvedSecret: String? = nil, apiKeyHeaderName: String? = nil
+    ) {
         self.kind = kind
         self.username = username
         self.secretTemplate = secretTemplate
@@ -69,9 +71,11 @@ public struct SnapshotTransportRequest: Codable, Equatable, Sendable {
     public let sensitiveNames: Set<String>
     public let secretNames: Set<String>
 
-    public init(method: String, url: URL, headers: [HTTPField], body: String? = nil,
-                headerSources: [String: HTTPHeaderSource] = [:], sensitiveNames: Set<String> = [],
-                secretNames: Set<String> = []) {
+    public init(
+        method: String, url: URL, headers: [HTTPField], body: String? = nil,
+        headerSources: [String: HTTPHeaderSource] = [:], sensitiveNames: Set<String> = [],
+        secretNames: Set<String> = []
+    ) {
         self.method = method
         self.url = url
         self.headers = headers
@@ -100,9 +104,11 @@ public struct SnapshotPreparationCapture: Codable, Equatable, Sendable {
     public let submitted: SnapshotTransportRequest
     public let redactionInputs: SnapshotRedactionCapture?
 
-    public init(preparationVersion: Int = 1, template: SnapshotRequestTemplate,
-                referencedInputs: [String: SnapshotInput], authentication: SnapshotAuthenticationInput,
-                submitted: SnapshotTransportRequest, redactionInputs: SnapshotRedactionCapture? = nil) {
+    public init(
+        preparationVersion: Int = 1, template: SnapshotRequestTemplate,
+        referencedInputs: [String: SnapshotInput], authentication: SnapshotAuthenticationInput,
+        submitted: SnapshotTransportRequest, redactionInputs: SnapshotRedactionCapture? = nil
+    ) {
         self.preparationVersion = preparationVersion
         self.template = template
         self.referencedInputs = referencedInputs
@@ -132,8 +138,10 @@ public struct SavedSnapshot: Identifiable, Equatable, Sendable {
     public let statusCode: Int
     public let bodyByteCount: Int64
 
-    public init(id: UUID, name: String, capturedAt: Date, source: SnapshotSource,
-                statusCode: Int, bodyByteCount: Int64) {
+    public init(
+        id: UUID, name: String, capturedAt: Date, source: SnapshotSource,
+        statusCode: Int, bodyByteCount: Int64
+    ) {
         self.id = id
         self.name = name
         self.capturedAt = capturedAt
@@ -160,8 +168,10 @@ public struct FrozenSnapshotContext: Codable, Sendable {
     public let observedTransport: SnapshotTransportRequest
     public let redirects: [HTTPRedirect]
 
-    public init(preparation: SnapshotPreparationCapture, observedTransport: SnapshotTransportRequest,
-                redirects: [HTTPRedirect]) {
+    public init(
+        preparation: SnapshotPreparationCapture, observedTransport: SnapshotTransportRequest,
+        redirects: [HTTPRedirect]
+    ) {
         self.preparation = preparation
         self.observedTransport = observedTransport
         self.redirects = redirects
@@ -175,8 +185,10 @@ public struct OpenedSnapshot: Sendable {
     public let contextError: String?
     public let response: HTTPResponseRecord
 
-    public init(summary: SavedSnapshot, template: SnapshotRequestTemplate, context: FrozenSnapshotContext?,
-                contextError: String?, response: HTTPResponseRecord) {
+    public init(
+        summary: SavedSnapshot, template: SnapshotRequestTemplate, context: FrozenSnapshotContext?,
+        contextError: String?, response: HTTPResponseRecord
+    ) {
         self.summary = summary
         self.template = template
         self.context = context
