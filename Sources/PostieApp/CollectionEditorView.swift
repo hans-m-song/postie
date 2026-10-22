@@ -16,7 +16,7 @@ struct CollectionEditorView: View {
             if let collection = model.collection(id: collectionID) {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(collection.name).font(.title2.weight(.semibold))
-                    Text("Shared variables, headers, authentication and MCP access for this collection.")
+                    Text("Browse requests and configure shared variables, headers, authentication, and MCP access.")
                         .font(.callout).foregroundStyle(.secondary)
                     Picker(
                         "Collection section",
@@ -25,6 +25,7 @@ struct CollectionEditorView: View {
                             set: { model.setCollectionEditorSection($0) }
                         )
                     ) {
+                        Text("Requests").tag(CollectionEditorSection.requests)
                         Text("Variables").tag(CollectionEditorSection.variables)
                         Text("Headers").tag(CollectionEditorSection.headers)
                         Text("Auth").tag(CollectionEditorSection.authentication)
@@ -41,6 +42,11 @@ struct CollectionEditorView: View {
                                 .font(.caption).foregroundStyle(.orange)
                         }
                         ZStack(alignment: .topLeading) {
+                            retained(
+                                CollectionRequestsView(collectionID: collectionID),
+                                active: section == .requests,
+                                requiresEditableOwner: false
+                            )
                             retained(
                                 VariableEditorView(owner: owner, isActive: section == .variables),
                                 active: section == .variables)

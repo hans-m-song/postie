@@ -237,10 +237,107 @@ final class SnapshotTests: XCTestCase {
             await Task.yield()
         }
         XCTAssertTrue(shutdownStarted)
+        await assertLeaseRejected(
+            manager: manager, response: response,
+            expectedDescription: "The HTTP execution manager has shut down.", sharing: shutdownLease)
         XCTAssertTrue(FileManager.default.fileExists(atPath: bodyURL.path))
         await manager.releaseBodyLease(shutdownLease)
         await shutdown.value
         XCTAssertFalse(FileManager.default.fileExists(atPath: session.path))
+    }
+
+    func testSharedBodyLeaseExtendsPendingDiscardUntilFinalRelease() async throws {
+        let root = try temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let bodyRoot = root.appendingPathComponent("bodies")
+        let manager = try HTTPExecutionManager(bodyDirectory: bodyRoot)
+        let session = try XCTUnwrap(
+            FileManager.default.contentsOfDirectory(at: bodyRoot, includingPropertiesForKeys: nil)
+                .first { $0.lastPathComponent.hasPrefix(".postie-http-session-") }
+        ).resolvingSymlinksInPath()
+        let bodyURL = session.appendingPathComponent("synthetic.body")
+        try Data([1, 2]).write(to: bodyURL)
+        let request = HTTPRequestConfiguration(url: "https://example.invalid")
+        let response = syntheticResponse(request: request, bodyURL: bodyURL, bodyByteCount: 2)
+        let identity = RequestIdentity(collectionID: UUID(), requestID: request.id)
+        try await manager.retainCompletedResponse(response, identity: identity)
+        let runLease = try await manager.acquireBodyLease(for: response)
+
+        try await manager.discardBody(at: bodyURL)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: bodyURL.path))
+        await assertLeaseRejected(
+            manager: manager, response: response,
+            expectedDescription: "The selected file is not a retained response body.")
+        let forgedParent = HTTPBodyLease(token: UUID(), runID: runLease.runID, bodyURL: runLease.bodyURL)
+        await assertLeaseRejected(
+            manager: manager, response: response,
+            expectedDescription: "The selected file is not a retained response body.", sharing: forgedParent)
+
+        let historyLease = try await manager.acquireBodyLease(for: response, sharing: runLease)
+        await manager.releaseBodyLease(runLease)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: bodyURL.path))
+        await manager.releaseBodyLease(historyLease)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: bodyURL.path))
+    }
+
+    func testSharedBodyLeaseRequiresExactRegisteredParentAndRetainedBody() async throws {
+        let root = try temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let bodyRoot = root.appendingPathComponent("bodies")
+        let manager = try HTTPExecutionManager(bodyDirectory: bodyRoot)
+        let session = try XCTUnwrap(
+            FileManager.default.contentsOfDirectory(at: bodyRoot, includingPropertiesForKeys: nil)
+                .first { $0.lastPathComponent.hasPrefix(".postie-http-session-") }
+        ).resolvingSymlinksInPath()
+        let bodyURL = session.appendingPathComponent("synthetic.body")
+        try Data([1, 2]).write(to: bodyURL)
+        let request = HTTPRequestConfiguration(url: "https://example.invalid")
+        let response = syntheticResponse(request: request, bodyURL: bodyURL, bodyByteCount: 2)
+        let identity = RequestIdentity(collectionID: UUID(), requestID: request.id)
+        try await manager.retainCompletedResponse(response, identity: identity)
+        let parent = try await manager.acquireBodyLease(for: response)
+
+        let invalidParents = [
+            HTTPBodyLease(token: UUID(), runID: parent.runID, bodyURL: parent.bodyURL),
+            HTTPBodyLease(token: parent.token, runID: UUID(), bodyURL: parent.bodyURL),
+            HTTPBodyLease(
+                token: parent.token, runID: parent.runID,
+                bodyURL: session.appendingPathComponent("other.body")),
+        ]
+        for invalidParent in invalidParents {
+            await assertLeaseRejected(
+                manager: manager, response: response,
+                expectedDescription: "The selected file is not a retained response body.", sharing: invalidParent)
+        }
+
+        let mismatchedResponse = syntheticResponse(
+            request: request, bodyURL: bodyURL, bodyByteCount: 2, runID: UUID())
+        let mismatchedBody = syntheticResponse(
+            request: request, bodyURL: session.appendingPathComponent("other.body"), bodyByteCount: 2,
+            runID: response.runID)
+        let mismatchedSize = syntheticResponse(
+            request: request, bodyURL: bodyURL, bodyByteCount: 3, runID: response.runID)
+        for invalidResponse in [mismatchedResponse, mismatchedBody] {
+            await assertLeaseRejected(
+                manager: manager, response: invalidResponse,
+                expectedDescription: "The selected file is not a retained response body.", sharing: parent)
+        }
+        await assertLeaseRejected(
+            manager: manager, response: mismatchedSize,
+            expectedDescription: "The retained response body is no longer available.", sharing: parent)
+
+        let targetURL = root.appendingPathComponent("target.body")
+        try Data([1, 2]).write(to: targetURL)
+        try FileManager.default.removeItem(at: bodyURL)
+        try FileManager.default.createSymbolicLink(atPath: bodyURL.path, withDestinationPath: targetURL.path)
+        await assertLeaseRejected(
+            manager: manager, response: response,
+            expectedDescription: "The retained response body is no longer available.", sharing: parent)
+
+        await manager.releaseBodyLease(parent)
+        await assertLeaseRejected(
+            manager: manager, response: response,
+            expectedDescription: "The selected file is not a retained response body.", sharing: parent)
     }
 
     private func temporaryRoot() throws -> URL {
@@ -248,6 +345,43 @@ final class SnapshotTests: XCTestCase {
             "postie-snapshot-tests-" + UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         return root
+    }
+
+    private func syntheticResponse(
+        request: HTTPRequestConfiguration,
+        bodyURL: URL,
+        bodyByteCount: Int64,
+        runID: UUID = UUID()
+    ) -> HTTPResponseRecord {
+        HTTPResponseRecord(
+            runID: runID, request: request, finalURL: URL(string: request.url)!, statusCode: 200,
+            requestHeaders: [], responseHeaders: [], redirects: [], bodyFileURL: bodyURL,
+            bodyByteCount: bodyByteCount, duration: 0
+        )
+    }
+
+    private func assertLeaseRejected(
+        manager: HTTPExecutionManager,
+        response: HTTPResponseRecord,
+        expectedDescription: String,
+        sharing parent: HTTPBodyLease? = nil,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async {
+        do {
+            let lease: HTTPBodyLease
+            if let parent {
+                lease = try await manager.acquireBodyLease(for: response, sharing: parent)
+            } else {
+                lease = try await manager.acquireBodyLease(for: response)
+            }
+            await manager.releaseBodyLease(lease)
+            XCTFail("Expected body lease rejection", file: file, line: line)
+        } catch let error as LocalizedError {
+            XCTAssertEqual(error.errorDescription, expectedDescription, file: file, line: line)
+        } catch {
+            XCTFail("Unexpected error: \(error)", file: file, line: line)
+        }
     }
 
     private func fixture(root: URL, body: Data, vault: SecretVault) async throws -> (

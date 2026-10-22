@@ -2,7 +2,7 @@
 
 The [2026-10-21 module and blind test review](review-2026-10-21.md) maps current responsibilities and specific boundary issues. [Linux CI](ci.md) describes formatting/parser/workflow checks; macOS remains required for application builds and functional execution.
 
-Updated 2026-10-21. One SwiftPM package; PostieCore remains dependency-free. Layout/snapshots and manual key transfer are user-verified in local commits b066227 and 661e149. Ordering/MCP/CLI passed selected checks; user-verified operations and remaining checks are recorded in [automation](automation.md). OTA/distribution tooling remains deferred and outside the committed app/automation scope.
+Updated 2026-10-22. One SwiftPM package; PostieCore remains dependency-free. Layout/snapshots and manual key transfer are user-verified in local commits b066227 and 661e149. Ordering/MCP/CLI passed selected checks; user-verified operations and remaining checks are recorded in [automation](automation.md). OTA/distribution tooling is isolated on deferred/ota-updates, outside main.
 
 Automation boundaries: `PostieAutomation` owns command schemas, strict request patches and output projection. `PostieControl` owns the MCP SDK/NIO HTTP adapter and private local IPC. `PostieCLI` connects to the existing app. AppModel remains the sole workspace writer and request executor. `WorkspaceIndex.swift` holds order, snapshot grouping and access tombstones; CollectionStore owns its persistence and move recovery. See [automation.md](automation.md) and [implementation checklist](automation-implementation.md).
 
@@ -84,7 +84,11 @@ Sources/PostieApp/
   AuthenticationEditor.swift    Explicit transient secret editing
   VariableEditorView.swift      Scoped plain/secret variable editing
   VariableOwner.swift           App scope identity
-  RequestSearchPalette.swift    Literal draft/stored name and URL search
+  WorkspaceSearch.swift         Typed collection/request/snapshot metadata matching
+  WorkspacePalette.swift        Command catalog and name-only variable lookup, without decryption
+  WorkspacePaletteSearchField.swift Native query field, explicit focus/caret and key dispatch
+  WorkspaceSwitcherView.swift   Searchable collection browsing and destination navigation
+  CollectionRequestsView.swift  Collection request list, opening without execution
   PaddedDisclosureGroupStyle.swift Whole-heading accessible disclosure control
   ResponseView.swift            Redirect/final exchanges and preview
   SnapshotModels.swift          Frozen snapshot capture, metadata and opened-view models
@@ -92,7 +96,10 @@ Sources/PostieApp/
   SnapshotSidebar.swift         Snapshot grouping and historical source placeholders
   SnapshotDetailView.swift      Read-only captured request/response presentation
   SnapshotJSON.swift            Resolved-value clipboard export with bounded body preview
-  OngoingRequestsView.swift     Active runs, Cancel and Open Request
+  SessionExecutionStore.swift   Session-only per-run capture retention and body leases
+  SessionHistoryView.swift      Stable execution list and selected inspector
+  SessionHistoryDetailView.swift Frozen request/response presentation
+  SessionHistoryResponseBodyView.swift Lease-scoped bounded preview and JSON Pretty
 Tests/PostieCoreTests/          HTTP, preparation, bodies and storage
 Tests/PostieAppTests/           AppModel save, CRUD and recovery
 Sources/PostieHTTPFixture/      Synthetic Swift loopback fixture executable

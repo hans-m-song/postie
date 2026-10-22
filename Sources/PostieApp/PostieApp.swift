@@ -50,11 +50,13 @@ struct PostieApp: App {
                     .keyboardShortcut("]", modifiers: [.command])
                     .disabled(!model.canNavigateForward)
                 Divider()
-                Button("Search Requests…") { model.showRequestSearch() }
-                    .keyboardShortcut("k", modifiers: [.command])
+                Button("Search Workspace…") { model.showRequestSearch() }
+                    .keyboardShortcut("p", modifiers: [.command])
+                Button("Search Requests…") { model.showRequestSearch(query: "@") }
+                    .keyboardShortcut("f", modifiers: [.command])
                 Button("Requests") { model.showRequests() }
                     .keyboardShortcut("1", modifiers: [.command])
-                Button("Ongoing Requests") { model.showOngoingRequests() }
+                Button("Request History") { model.showOngoingRequests() }
                     .keyboardShortcut("2", modifiers: [.command])
                 Button("Global Variables") { model.showGlobalVariables() }
                     .keyboardShortcut("3", modifiers: [.command])

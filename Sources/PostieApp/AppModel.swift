@@ -4,7 +4,7 @@ import PostieCore
 import PostieAutomation
 
 enum CollectionEditorSection: Hashable {
-    case variables, headers, authentication, settings
+    case requests, variables, headers, authentication, settings
 }
 
 @MainActor
@@ -1140,6 +1140,7 @@ private enum EncryptionKeyTransferError: LocalizedError {
 @MainActor
 final class AppModel: ObservableObject {
     static let shared = AppModel()
+    let sessionHistory = SessionExecutionStore()
 
     struct ActiveRun {
         enum Phase: Equatable {
@@ -1193,6 +1194,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var variableSaveErrors: [VariableOwner: String] = [:]
     @Published private(set) var showsGlobalVariables = false
     @Published var showsRequestSearch = false
+    @Published var workspaceSearchQuery = ""
+    @Published private(set) var workspaceSearchFocusRequestID = UUID()
     @Published private(set) var collections: [RequestCollection] = []
     @Published private(set) var drafts: [RequestIdentity: HTTPRequestConfiguration] = [:]
     @Published private(set) var activeRuns: [RequestIdentity: ActiveRun] = [:]
@@ -1211,7 +1214,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var selectedIdentity: RequestIdentity?
     @Published private(set) var selectedSnapshotID: UUID?
     @Published private(set) var selectedCollectionID: UUID?
-    @Published private(set) var collectionEditorSection: CollectionEditorSection = .variables
+    @Published private(set) var collectionEditorSection: CollectionEditorSection = .requests
     @Published private(set) var requestEditorSections: [RequestIdentity: RequestEditorSection] = [:]
     @Published private(set) var requestEditorExpansionStates: [RequestIdentity: RequestEditorExpansionState] = [:]
     @Published private(set) var variableDefinitionRequest: VariableDefinitionRequest?
@@ -1298,6 +1301,7 @@ final class AppModel: ObservableObject {
                 vault: self.secretVault
             )
             executionManager = try HTTPExecutionManager(bodyDirectory: directories.body)
+            if let executionManager { sessionHistory.connect(to: executionManager) }
             initialWorkspaceLoadTask = Task { [weak self] in
                 await self?.loadWorkspace()
             }
@@ -1527,9 +1531,30 @@ final class AppModel: ObservableObject {
         recordNavigation(.globalVariables)
     }
 
-    func showRequestSearch() {
+    func showRequestSearch(query: String = "") {
         guard !isTerminating else { return }
+        workspaceSearchQuery = query
+        workspaceSearchFocusRequestID = UUID()
         showsRequestSearch = true
+    }
+
+    func showWorkspaceVariable(owner: VariableOwner, name: String) {
+        guard !isTerminating else { return }
+        switch owner {
+        case .global:
+            guard globalVariables[name] != nil else { return }
+            showGlobalVariables()
+        case let .collection(id):
+            guard collection(id: id)?.variables[name] != nil else { return }
+            showCollection(id, section: .variables)
+        case let .request(identity):
+            let location = NavigationLocation.requestVariableDefinition(identity, name: name)
+            guard isAvailableNavigationLocation(location) else { return }
+            showRequest(identity)
+            requestEditorSections[identity] = .variables
+            variableDefinitionRequest = VariableDefinitionRequest(owner: owner, name: name)
+            recordNavigation(location)
+        }
     }
 
     func showGlobalSettings() {
@@ -1575,7 +1600,7 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func showCollection(_ id: UUID, section: CollectionEditorSection = .variables) {
+    func showCollection(_ id: UUID, section: CollectionEditorSection = .requests) {
         showsGlobalSettings = false
         guard collections.contains(where: { $0.id == id }) else { return }
         variableDefinitionRequest = nil
@@ -1823,7 +1848,7 @@ final class AppModel: ObservableObject {
         guard isCurrent(inspection) else { return }
         switch inspection.owner {
         case .global: showGlobalVariables()
-        case let .collection(id): showCollection(id)
+        case let .collection(id): showCollection(id, section: .variables)
         case let .request(identity):
             guard isAvailableNavigationLocation(.requestVariableDefinition(identity, name: inspection.name)) else {
                 return
@@ -2534,6 +2559,7 @@ final class AppModel: ObservableObject {
                 cancelRequest(identity)
             }
             await waitForSnapshotSaves()
+            await sessionHistory.clear()
             await executionManager?.shutdown()
             return true
         } catch {
@@ -2576,6 +2602,7 @@ final class AppModel: ObservableObject {
             redirects: [],
             cancelRequested: false
         )
+        if let active = activeRuns[identity] { sessionHistory.begin(identity: identity, active: active) }
         runErrors.removeValue(forKey: identity)
         cancelledRequests.remove(identity)
 
@@ -2589,6 +2616,7 @@ final class AppModel: ObservableObject {
                 guard let self, var active = self.activeRuns[identity], active.token == token else { return }
                 active.snapshotCapture = prepared.snapshotCapture
                 self.activeRuns[identity] = active
+                self.sessionHistory.update(active)
                 guard self.canEdit(identity), self.activeRuns[identity]?.cancelRequested == false else {
                     self.cancelledRequests.insert(identity)
                     self.settleRun(identity, token: token, terminal: .cancelled)
@@ -2632,6 +2660,7 @@ final class AppModel: ObservableObject {
             redirects: response.redirects,
             cancelRequested: false
         )
+        if let active = activeRuns[identity] { sessionHistory.begin(identity: identity, active: active) }
         runErrors.removeValue(forKey: identity)
         cancelledRequests.remove(identity)
 
@@ -2670,6 +2699,7 @@ final class AppModel: ObservableObject {
         active.runID = run.id
         active.phase = active.cancelRequested ? .cancelling : .running
         activeRuns[identity] = active
+        sessionHistory.update(active)
         if active.cancelRequested {
             await executionManager.cancel(identity: identity, runID: run.id)
         }
@@ -2679,7 +2709,7 @@ final class AppModel: ObservableObject {
             guard activeRuns[identity]?.token == token,
                 activeRuns[identity]?.runID == run.id
             else { break }
-            if receive(event, for: identity, token: token, runID: run.id) {
+            if await receive(event, for: identity, token: token, runID: run.id) {
                 receivedTerminalEvent = true
                 break
             }
@@ -2700,6 +2730,7 @@ final class AppModel: ObservableObject {
         active.cancelRequested = true
         active.phase = .cancelling
         activeRuns[identity] = active
+        sessionHistory.update(active)
         guard active.runID != nil else {
             preparationTasks.removeValue(forKey: identity)?.cancel()
             cancelledRequests.insert(identity)
@@ -2719,6 +2750,27 @@ final class AppModel: ObservableObject {
         await withCheckedContinuation { continuation in
             settlementWaiters[identity, default: []].append(continuation)
         }
+    }
+
+    func cancelHistoryRun(token: UUID) {
+        guard let identity = sessionHistory.entry(for: token)?.liveSourceIdentity,
+            activeRuns[identity]?.token == token
+        else { return }
+        cancelRequest(identity)
+    }
+
+    func openHistorySource(token: UUID) {
+        guard let identity = sessionHistory.entry(for: token)?.liveSourceIdentity,
+            request(for: identity) != nil
+        else { return }
+        select(identity)
+    }
+
+    func withRetainedResponse<Value>(
+        for token: UUID,
+        operation: @MainActor (HTTPResponseRecord, URL) async throws -> Value
+    ) async throws -> Value {
+        try await sessionHistory.withRetainedResponse(for: token, operation: operation)
     }
 
     func loadPreview(for identity: RequestIdentity) {
@@ -3392,21 +3444,27 @@ final class AppModel: ObservableObject {
         saveChains.removeValue(forKey: identity)
     }
 
-    private func receive(_ event: HTTPExecutionEvent, for identity: RequestIdentity, token: UUID, runID: UUID) -> Bool {
+    private func receive(_ event: HTTPExecutionEvent, for identity: RequestIdentity, token: UUID, runID: UUID) async
+        -> Bool
+    {
         guard var active = activeRuns[identity], active.token == token, active.runID == runID else { return true }
         switch event {
         case let .progress(progress):
             active.progress = progress
             activeRuns[identity] = active
+            sessionHistory.update(active)
             return false
         case let .redirect(redirect):
             if !active.redirects.contains(where: { $0.id == redirect.id }) {
                 active.redirects.append(redirect)
             }
             activeRuns[identity] = active
+            sessionHistory.update(active)
             return false
         case let .completed(response):
             guard response.runID == runID else { return false }
+            if !isTerminating { await sessionHistory.retainResponse(response, for: token) }
+            guard activeRuns[identity]?.token == token, activeRuns[identity]?.runID == runID else { return true }
             replaceLatestResponse(response, for: identity, source: active.snapshotSource)
             activeRuns[identity]?.redirects = response.redirects
             settleRun(identity, token: token, terminal: .completed(response, active.snapshotSource))
@@ -3434,6 +3492,14 @@ final class AppModel: ObservableObject {
         guard let active = activeRuns[identity], active.token == token else { return }
         let result = terminal ?? (cancelledRequests.contains(identity) ? .cancelled : nil)
         if let result {
+            switch result {
+            case let .completed(response, _):
+                sessionHistory.finish(token: token, phase: .completed, response: response)
+            case let .failed(message):
+                sessionHistory.finish(token: token, phase: .failed, error: message)
+            case .cancelled:
+                sessionHistory.finish(token: token, phase: .cancelled)
+            }
             retainAutomationRunOutcome(
                 AutomationRunOutcome(
                     token: token,
@@ -3827,6 +3893,7 @@ final class AppModel: ObservableObject {
 
     private func remapRequestState(from oldIdentity: RequestIdentity, to newIdentity: RequestIdentity) {
         guard oldIdentity != newIdentity else { return }
+        sessionHistory.remapSource(from: oldIdentity, to: newIdentity)
         removeVariableOwnerState(.request(oldIdentity))
         moveValue(in: &drafts, from: oldIdentity, to: newIdentity)
         moveValue(in: &editVersions, from: oldIdentity, to: newIdentity)
@@ -4009,6 +4076,7 @@ final class AppModel: ObservableObject {
     }
 
     private func removeLocalRequestState(for identity: RequestIdentity) {
+        sessionHistory.removeSource(identity)
         removeVariableOwnerState(.request(identity))
         automationRunOutcomes.removeValue(forKey: identity)
         automationRunOutcomeOrder.removeAll { $0 == identity }

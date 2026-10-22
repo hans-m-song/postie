@@ -6,6 +6,16 @@ Local check-ins on 2026-10-22: 9fb17f6 formatting/Linux CI, 5973276 ordering/MCP
 
 ## Selected next work
 
+User accepted the current integrated T115–T117 build on 2026-10-22 (“seems to work well”); this supersedes the historical pending-acceptance notes below. Local check-in is being completed, without push. Proposed small follow-up: Command-Shift-P prefills `>` command mode, preserving Command-P unified search and Command-F @ requests; not implemented yet.
+
+T117 refinement implemented locally: unprefixed palette includes every navigation, command and variable result; `@` narrows to requests, `#` to collections, `>` to commands and `$` to variable names. Command-P opens blank, Command-F prefills `@`. Native field-editor caret placement leaves prefixes unselected after opening/mode switching and preserves ordinary editing. All 23 focused refinement tests, lint and syntax passed; whole-app native/user acceptance and commit remain pending.
+
+Earlier T117 baseline (superseded shortcuts/modes above): page/creation commands and `$` name-only variable lookup, breadcrumb padding and history-row selection fix. That baseline passed all 311 tests, lint and syntax checks; independent source and test reviews were clear. No secret decryption/value search or request execution was added. Native/user acceptance and check-in remain pending.
+
+T-115 navigation chrome is implemented locally, selected by the user's subsequent UI feedback: sidebar retained but hidden initially with remembered visibility; icon-only toolbar actions; request/response layout moves to global Settings; a single searchable collection/request/snapshot switcher replaces standalone search. Snapshots match only their own names, with request/collection context displayed. Eight focused tests, formatting/syntax, release build and strict signatures passed; source/test review clear. User/native verification and check-in pending. This slice precedes the pending HTML/XML implementation; no rendered HTML/PDF/upload work is included.
+
+T-115 refinements and [T-116 session request history](session-history-plan.md) are implemented locally: centered full breadcrumb, all collection/request rows without drill-in, Requests as the initial collection tab, and per-execution history with a side-by-side inspector. Explicit definition/configuration jumps retain their target tab. History retains at most 10 completed runs or 100 MB combined additional logical capture/body cache, oldest completed first; active runs remain visible. All 301 package tests, strict formatting and syntax checks passed. Native/user acceptance and check-in remain pending.
+
 User selected T-111 HTML/XML Pretty source views and syntax highlighting next, including CSS/JS/JSON blocks in HTML. Native PDF preview T-112, rendered HTML T-113 (external requests off by default, opt-in resources; JavaScript execution out of scope), and arbitrary uploads T-114 are separate slices in the [body-format plan](body-format-plan.md). No new format implementation yet; plan confirmation pending. This user selection supersedes the previous next-task order; review fixes remain queued.
 
 ## Immediate follow-ups

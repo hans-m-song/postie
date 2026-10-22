@@ -2,6 +2,48 @@
 
 ## Latest checkpoint — 2026-10-22
 
+User accepted the current rebuilt navigation/history/palette on 2026-10-22 (“seems to work well”). Checking in this integrated scope under the standing instruction to commit user-verified changes. This acceptance is not a claim of independent VoiceOver or exhaustive native validation. Proposed follow-up: Command-Shift-P opens `>` commands with the caret after the prefix; Command-P remains unprefixed and Command-F remains @. New shortcut is not implemented, pending confirmation under the user's plan-before-code rule.
+
+T117 refinement implemented locally: no-prefix unified ALL result kinds, @requests/#collections/>commands/$variables, CmdP blank/CmdF@. Native field places caret after prefill with zero selection even on an already-open focus revision. Parent integrated focus-revision model/menu/docs; both workers completed. All prior dirty work preserved; no commit.
+
+- [x] Refinement scope clarified and approved.
+- [x] Unified categories/type-exclusive filtered modes with visual/keyboard typed ID order preserved.
+- [x] Native prefix caret and focused synthetic checks: actual field editor automatic focus/insertion, repeated focus revisions, selection preservation, emoji offsets, modifier flags and IME keys.
+- [x] Source/test review complete; 23 focused tests passed without warnings, lint/syntax passed. /Volumes/Data/tmp/postie-palette-revision-tests.log. No full-suite rerun for this refinement (previous baseline311).
+- [x] Clean release build and strict signatures passed; dist/Postie.app refreshed. Previous generated bundle /Volumes/Data/tmp/postie-before-unified.4TjMqi/Postie.app. Build log /Volumes/Data/tmp/postie-palette-revision-build.log.
+- [ ] User verification before commit.
+
+Earlier T117 baseline (shortcuts superseded above): page/creation commands, name-only variable previews/secret metadata, breadcrumb padding and history-row hit-test fix. Existing T115/T116 uncommitted work preserved. No runtime config, Keychain or real endpoint reads performed.
+
+- [x] Scope approved, no existing explicit Command-F binding found.
+- [x] Palette catalog/view and route integration; action queues creation intent before closing.
+- [x] All 311 tests passed without warnings, including 10 palette/model tests; lint/syntax passed. Independent source/blind-test reviews clear. Logs /Volumes/Data/tmp/postie-palette-tests.log, postie-palette-lint.log, postie-palette-syntax.log.
+- [x] Clean release build and strict signatures passed; dist/Postie.app refreshed. Previous generated bundle: /Volumes/Data/tmp/postie-before-palette.kD1MDk/Postie.app. Build log /Volumes/Data/tmp/postie-palette-build.log.
+- [ ] User verification before commit.
+
+T115/T116 implemented and locally verified: centered breadcrumb, all collection/request rows, collection Requests initial tab, and session-only per-execution history beside frozen details. Explicit variable/Auth/Header jumps preserved. User chose 10 completed runs or 100 MB combined additional logical capture/body retention, oldest completed eviction, active visible. Workers completed; parent integrated docs/build/signatures. Changes uncommitted, native/user acceptance pending.
+
+- [x] Retention policy and exact-run lease approach agreed.
+- [x] Core shared lease capability and tests; independent static review clear.
+- [x] Session store/lifecycle/eviction and tests; exact rerun body, stale cancel, source remap/deletion, combined budget and shutdown checked.
+- [x] Split history UI and metadata/body inspection; adaptive narrow controls and separate body-view module.
+- [x] All 301 tests passed without warnings (Core140, Control19, Automation28, App114), including 10 new history tests; lint/syntax passed. /Volumes/Data/tmp/postie-session-history-full-tests.log.
+- [x] Clean release app build and strict signatures passed, dist/Postie.app refreshed. Prior generated bundle: /Volumes/Data/tmp/postie-before-history.TOrRgm/Postie.app. Build log: /Volumes/Data/tmp/postie-session-history-build.log.
+- [ ] User/native verification before check-in.
+
+Final history source review found no actionable ownership/lifecycle defect. Blind test audit strengthened payload retention controls, cancellation assertions and bounded fixture/inspection waits. One test-only timeout was caused by retaining the original CollectionStore owner during restart; the test now releases it before reopening. UI review fixed narrow picker overflow and matched Pretty's existing 5 MiB bound/message. Raw/body display previews are1MiB. No user runtime config, Keychain or real endpoint access; one synthetic loopback fixture exercises actual AppModel completion/rerun. Internal ongoing navigation aliases remain; visible route is Request History/Command-2. Current history changes uncommitted pending user verification.
+
+Earlier T115 baseline (superseded by refinements above): sidebar hidden initially with remembered visibility; icon-only toolbar controls; layout in global Appearance; one collection/request/snapshot switcher, Command-K. The final unfiltered list now shows every collection/request; AppModel has collection-tab and execution-history lifecycle integration. T111 remains next after acceptance of this slice; no HTML/XML implementation.
+
+- [x] Toolbar/settings and shared metadata switcher implemented in separate bounded workers; unused old palette removed.
+- [x] Eight focused search/history/snapshot-navigation tests passed without warnings; make lint and make syntax passed.
+- [x] Independent source review clear after duplicate/accessible-label fixes; test-only audit checked moved/orphan snapshot assertions; final scope audit confirmed no cross-scope source changes.
+- [x] Clean release app build and strict signatures passed; fresh bundle copied to dist/Postie.app, prior generated bundle retained at /Volumes/Data/tmp/postie-before-t115.jUHv3a/Postie.app to avoid carrying old Sparkle contents forward.
+- [ ] User/native checks: CmdK, keyboard/mouse navigation, Escape/focus restoration, current destination marks, duplicate result labels, sidebar toggle/restart persistence, appearance/layout setting and VoiceOver. No native runtime validation claimed.
+- [ ] Local check-in after user confirms; no push.
+
+Logs: /Volumes/Data/tmp/postie-workspace-navigation-tests-final.log and postie-workspace-navigation-build.log. No real requests/runtime data/Keychain or credentials read. Parent owns docs/build lock; workers finished. Local OTA branch remains deferred/ota-updates.
+
 OTA relocation complete: user requested its own branch and a clean working branch. deferred/ota-updates contains preservation commit88ebb7a (28 files), based on db42d35. Returned to main; source worktree clean. Local .codex/.vscode and existing Terraform cache/state/settings are preserved and ignored only through .git/info/exclude; contents never inspected or committed. Distribution remains unaccepted/undeployed. No stash or worktree created. Earlier uncommitted-OTA references below are superseded.
 
 Next user-selected slice is T-111 HTML/XML Pretty source views and syntax highlighting, including embedded CSS/JS/JSON. docs/body-format-plan.md records the proposed contract/gates, pending implementation-plan confirmation. T-112 native PDFKit preview approach accepted, T-113 rendered HTML (external requests off by default with opt-in resources; JavaScript execution explicitly excluded), and T-114 arbitrary uploads are separate future slices. No feature code written. T-104–T-110 remain queued; next-T104 recommendation superseded by user priority.

@@ -5,6 +5,8 @@ import PostieCore
 struct GlobalSettingsPage: View {
     @EnvironmentObject private var model: AppModel
     @AppStorage(AppTheme.preferenceKey) private var theme = AppTheme.system
+    @AppStorage(RequestResponseLayout.preferenceKey) private var requestResponseLayout = RequestResponseLayout
+        .sideBySide
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -22,6 +24,13 @@ struct GlobalSettingsPage: View {
                         Picker("Theme", selection: $theme) {
                             ForEach(AppTheme.allCases, id: \.self) { theme in
                                 Text(theme.title).tag(theme)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+
+                        Picker("Request and response layout", selection: $requestResponseLayout) {
+                            ForEach(RequestResponseLayout.allCases) { layout in
+                                Text(layout.title).tag(layout)
                             }
                         }
                         .pickerStyle(.segmented)

@@ -1,5 +1,11 @@
 # Postie overview
 
+User accepted the current integrated navigation/history/palette build on 2026-10-22 (“seems to work well”); supersedes pending-acceptance checkpoints below. Command-Shift-P for command mode is a proposed follow-up, not yet implemented.
+
+Workspace palette (T117, 2026-10-22): Command-P opens unified search across requests, collections, snapshots, commands and variables. Command-F prefills `@` for requests; `#` narrows to collections, `>` to page/creation commands, and `$` to variable names. Prefilled text leaves the caret at the end with no selection. Plain values have bounded previews; secrets remain masked without decryption. The initial 311-test baseline and subsequent 23 focused refinement tests passed, with lint/syntax; whole-app native/user acceptance remains pending. See [navigation](navigation.md).
+
+Added locally on 2026-10-22: centered collection/request/snapshot breadcrumb switcher with direct snapshot-name search and a complete unfiltered request list; collection Requests initial tab; sidebar hidden initially with remembered visibility; icon-only auxiliary actions; request/response layout in global Appearance settings. Session Request History retains individual runs beside a frozen inspector, bounded to 10 completed runs or 100 MB additional logical capture/body data, with active runs exempt. All 301 tests, lint/syntax and clean release/signature checks passed; native/user acceptance remains pending. See [navigation](navigation.md) and [history](session-history-plan.md). HTML/XML and file previews/uploads remain separate planned slices.
+
 Status on 2026-10-21: layout/snapshots and manual key transfer are user-verified in local commits b066227 and 661e149. Drag ordering, MCP and CLI have passed selected checks; basic ordering, cross-collection moves, and the real Codex connection for MCP list/start/get, response-view modes and cached-ID exclusion are user-verified. The inherited redaction flow was accepted. Intermittent insertion ordering remains unreproduced; MCP mutation coverage, collection-level parent exclusion, restart/persistence and live verification of new snapshot redaction remain pending. Data sync, cURL features, HAR and multi-tab editing remain deferred. See [automation](automation.md), [implementation checklist](automation-implementation.md), and [roadmap](roadmap.md).
 
 ## Goal
@@ -11,7 +17,7 @@ A lightweight native macOS HTTP client for personal use. Make requests, save the
 - HTTP and HTTPS requests: method, URL, ordered query parameters and headers, literal :name path-segment parameters, text and JSON bodies.
 - Flat collections containing named requests; create, rename, duplicate requests, and delete.
 - Global, collection, and request variables. Precedence: request overrides collection, which overrides global.
-- Collection settings page for Variables/Headers/Auth, opened from the collection name or right-click menu. Shared headers use request overrides/disabled-row suppression; new requests inherit collection auth, existing explicit auth is preserved. Current follow-up verification: collection-settings.md.
+- Collection page starts with Requests, followed by Variables/Headers/Auth/Settings; definition/configuration actions select their explicit destination. Shared headers use request overrides/disabled-row suppression; new requests inherit collection auth, existing explicit auth is preserved. See collection-settings.md.
 - Literal `{{variable}}` substitution in URLs, query values, header values, authentication fields, and text bodies. Values are not recursively expanded. Missing references prevent sending; deferred cURL export would also require resolution.
 - None, Basic, Bearer and header-based API Key authentication. API keys use an editable header name and encrypted template-capable value. Enabled manual request headers take precedence over selected authentication; explicit None and collection Inherit remain distinct. See api-key-authentication.md.
 - Response status, elapsed time, headers, raw body, and formatted JSON where valid.
@@ -37,7 +43,7 @@ Shared variables means reuse within the app, not live collaboration. Collections
 
 Current grouped inventory: [deferred-features.md](deferred-features.md). Layout switching and native snapshots are user-verified. Drag ordering and local MCP/CLI are implemented with the evidence and remaining checks recorded above. Copy as cURL, Paste cURL, request tabs, HAR export and data sync remain deferred. Historical initial-scope lists below do not override that status.
 
-gRPC, WebSockets, OpenAPI import, existing collection specifications, Git integration, named environments, live collaboration, scripts, recursive templates, dynamic values including UUIDs/timestamps, OAuth flows, automatic request history, additional syntax languages, and cross-platform support. Manual saved snapshots are in scope; automatic response persistence is not.
+gRPC, WebSockets, OpenAPI import, existing collection specifications, Git integration, named environments, live collaboration, scripts, recursive templates, dynamic values including UUIDs/timestamps, OAuth flows, durable automatic request history, additional syntax languages, and cross-platform support. Manual saved snapshots and bounded session-only history are implemented; automatic durable response persistence is not.
 
 iCloud sync is deferred for later exploration. The proposed local layout uses one collection directory containing collection metadata with an ordered request-ID index and one JSON file per request; globals are separate. See storage.md for identity, writes and recovery boundaries.
 

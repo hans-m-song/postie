@@ -7,33 +7,22 @@ struct ContentView: View {
     @EnvironmentObject private var model: AppModel
     @AppStorage(RequestResponseLayout.preferenceKey) private var requestResponseLayout = RequestResponseLayout
         .sideBySide
+    @AppStorage("sidebarVisibility") private var sidebarIsVisible = false
     @State private var namePrompt: NamePrompt?
     @State private var deletionTarget: DeletionTarget?
     @State private var searchResponder: NSResponder?
     @State private var searchWindow: NSWindow?
     @State private var searchOpenedRequest = false
+    @State private var pendingWorkspaceCreation: WorkspaceCreation?
 
     var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: sidebarColumnVisibility) {
             SidebarView(namePrompt: $namePrompt, deletionTarget: $deletionTarget)
                 .navigationSplitViewColumnWidth(min: 220, ideal: 250, max: 320)
         } detail: {
             detail
         }
         .toolbar {
-            ToolbarItem {
-                Menu {
-                    Picker("Request and response layout", selection: $requestResponseLayout) {
-                        ForEach(RequestResponseLayout.allCases) { layout in
-                            Label(layout.title, systemImage: layout.symbolName).tag(layout)
-                        }
-                    }
-                } label: {
-                    Image(systemName: requestResponseLayout.symbolName)
-                }
-                .help("Request and response layout")
-                .accessibilityLabel("Request and response layout")
-            }
             ToolbarItemGroup(placement: .navigation) {
                 Button {
                     model.navigateBack()
@@ -53,6 +42,71 @@ struct ContentView: View {
                 .accessibilityLabel("Forward")
                 .disabled(!model.canNavigateForward)
             }
+            ToolbarItem(placement: .principal) {
+                Button {
+                    model.showRequestSearch()
+                } label: {
+                    HStack(spacing: 6) {
+                        Text(breadcrumbTitle)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Image(systemName: "chevron.down")
+                            .font(.caption2)
+                    }
+                    .padding(.horizontal, 10)
+                    .frame(maxWidth: 420)
+                }
+                .help(breadcrumbTitle)
+                .accessibilityLabel(breadcrumbTitle)
+                .popover(isPresented: $model.showsRequestSearch) {
+                    WorkspaceSwitcherView(
+                        opened: { searchOpenedRequest = true },
+                        createCollection: { pendingWorkspaceCreation = .collection },
+                        createRequest: { pendingWorkspaceCreation = .request($0) }
+                    )
+                    .onDisappear { presentWorkspaceCreation() }
+                }
+            }
+            if !sidebarIsVisible {
+                ToolbarItemGroup(placement: .primaryAction) {
+                    Button {
+                        model.showOngoingRequests()
+                    } label: {
+                        ZStack(alignment: .topTrailing) {
+                            Image(systemName: "clock.arrow.circlepath")
+                            if model.activeRunCount > 0 {
+                                Text(model.activeRunCount > 99 ? "99+" : "\(model.activeRunCount)")
+                                    .font(.system(size: 9, weight: .bold, design: .rounded))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 3)
+                                    .frame(minWidth: 14, minHeight: 14)
+                                    .background(Color.accentColor, in: Capsule())
+                                    .offset(x: 9, y: -8)
+                            }
+                        }
+                        .frame(width: 22, height: 22)
+                    }
+                    .help("Request History (\(model.activeRunCount) active)")
+                    .accessibilityLabel("Request History")
+                    .accessibilityValue("\(model.activeRunCount) active")
+
+                    Button {
+                        model.showGlobalVariables()
+                    } label: {
+                        Image(systemName: "curlybraces")
+                    }
+                    .help("Global Variables")
+                    .accessibilityLabel("Global Variables")
+
+                    Button {
+                        model.showGlobalSettings()
+                    } label: {
+                        Image(systemName: "gearshape")
+                    }
+                    .help("Settings")
+                    .accessibilityLabel("Settings")
+                }
+            }
         }
         .disabled(model.isTerminating)
         .sheet(item: $namePrompt) { prompt in
@@ -63,19 +117,9 @@ struct ContentView: View {
                 searchWindow = NSApp.keyWindow
                 searchResponder = searchWindow?.firstResponder
                 searchOpenedRequest = false
+            } else {
+                restoreSearchFocusIfNeeded()
             }
-        }
-        .sheet(
-            isPresented: $model.showsRequestSearch,
-            onDismiss: {
-                if !searchOpenedRequest, let searchResponder {
-                    searchWindow?.makeFirstResponder(searchResponder)
-                }
-                searchResponder = nil
-                searchWindow = nil
-            }
-        ) {
-            RequestSearchPalette { searchOpenedRequest = true }
         }
         .confirmationDialog(
             deletionTarget?.title ?? "Delete item?",
@@ -112,6 +156,69 @@ struct ContentView: View {
         }
     }
 
+    private var sidebarColumnVisibility: Binding<NavigationSplitViewVisibility> {
+        Binding(
+            get: { sidebarIsVisible ? .all : .detailOnly },
+            set: { sidebarIsVisible = $0 != .detailOnly }
+        )
+    }
+
+    private func presentWorkspaceCreation() {
+        guard let creation = pendingWorkspaceCreation else { return }
+        pendingWorkspaceCreation = nil
+        guard !model.isTerminating else { return }
+        switch creation {
+        case .collection:
+            guard !model.workspaceIndexIsReadOnly else { return }
+            namePrompt = NamePrompt(
+                title: "New Collection", initialValue: "", placeholder: "Collection name", submitTitle: "Create"
+            ) { name in
+                Task { await model.createCollection(name: name) }
+            }
+        case let .request(id):
+            guard let collection = model.collection(id: id), !collection.isReadOnly else { return }
+            namePrompt = NamePrompt(
+                title: "New Request", initialValue: "New request", placeholder: "Request name", submitTitle: "Create"
+            ) { name in
+                Task { await model.createRequest(in: id, name: name) }
+            }
+        }
+    }
+
+    private func restoreSearchFocusIfNeeded() {
+        if !searchOpenedRequest, let searchResponder {
+            searchWindow?.makeFirstResponder(searchResponder)
+        }
+        searchResponder = nil
+        searchWindow = nil
+    }
+
+    private var breadcrumbTitle: String {
+        if model.startupError != nil { return "Workspace" }
+        if model.showsOngoingRequests { return "Request History" }
+        if let snapshotID = model.selectedSnapshotID {
+            guard let snapshot = model.snapshots.first(where: { $0.id == snapshotID }) else {
+                return "Snapshot"
+            }
+            let grouping = model.snapshotGrouping(for: snapshot)
+            return "\(grouping.collectionName) › \(grouping.requestName) › \(snapshot.name)"
+        }
+        if model.showsGlobalVariables { return "Global Variables" }
+        if model.showsGlobalSettings { return "Settings" }
+        if let collectionID = model.selectedCollectionID,
+            let collection = model.collections.first(where: { $0.id == collectionID })
+        {
+            return collection.name
+        }
+        if let identity = model.selectedIdentity,
+            let collection = model.collections.first(where: { $0.id == identity.collectionID }),
+            let request = model.request(for: identity)
+        {
+            return "\(collection.name) › \(request.name)"
+        }
+        return "Requests"
+    }
+
     @ViewBuilder
     private var detail: some View {
         if let error = model.startupError {
@@ -121,7 +228,7 @@ struct ContentView: View {
                 description: Text(error)
             )
         } else if model.showsOngoingRequests {
-            OngoingRequestsView()
+            SessionHistoryView(history: model.sessionHistory)
         } else if let snapshotID = model.selectedSnapshotID {
             SnapshotDetailView(snapshotID: snapshotID, layout: requestResponseLayout)
                 .id(snapshotID)
@@ -180,25 +287,10 @@ private struct SidebarView: View {
             .padding(.bottom, 12)
 
             Button {
-                model.showRequestSearch()
-            } label: {
-                HStack {
-                    Label("Search Requests", systemImage: "magnifyingglass")
-                    Spacer()
-                    Text("⌘K").foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 7)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-
-            Button {
                 model.showOngoingRequests()
             } label: {
                 HStack {
-                    Label("Ongoing Requests", systemImage: "clock.arrow.circlepath")
+                    Label("Request History", systemImage: "clock.arrow.circlepath")
                     Spacer()
                     if model.activeRunCount > 0 {
                         Text("\(model.activeRunCount)")
@@ -466,7 +558,7 @@ private struct CollectionSidebarSection: View {
 
     @ViewBuilder
     private var collectionActions: some View {
-        Button("Collection settings") { model.showCollection(collection.id) }
+        Button("Collection settings") { model.showCollection(collection.id, section: .settings) }
         Button("New request") {
             namePrompt = NamePrompt(
                 title: "New Request", initialValue: "New request",
@@ -813,6 +905,11 @@ private struct CollectionSidebarDropDelegate: DropDelegate {
     private func edge(at y: CGFloat) -> SidebarDropEdge {
         y < targetHeight / 2 ? .before : .after
     }
+}
+
+private enum WorkspaceCreation {
+    case collection
+    case request(UUID)
 }
 
 private struct NamePrompt: Identifiable {

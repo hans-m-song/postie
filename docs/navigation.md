@@ -1,4 +1,36 @@
-# Request search palette
+# Workspace navigation
+
+User accepted the current integrated navigation/history/palette build on 2026-10-22 (“seems to work well”). Earlier pending native/user-verification statements describe their checkpoint; no exhaustive native/VoiceOver check is implied. A proposed Command-Shift-P shortcut for `>` commands is not implemented yet.
+
+## T-115 — Workspace switcher (implemented locally, 2026-10-22)
+
+User selected one searchable collection/request/snapshot switcher in place of standalone request search. The centered control shows the current destination's breadcrumb; its unfiltered list includes every collection and request in saved order. Collections open their initial Requests tab; explicit variable/header/auth/settings links retain their target tab. Snapshot matching uses only the snapshot name, including retained captures with deleted sources. Collection/request labels remain display context for snapshots, not search fields. Results retain stable identities. No body, secret-value resolution or network search is involved. Command-P opens the toolbar palette; Command-F opens its requests-only mode. Request/snapshot selection navigates without sending; collection settings remain an explicit action.
+
+## T-117 — Palette commands and variables
+
+Implemented locally on 2026-10-22; native/user acceptance pending. Command-P opens without a prefix, searching every supported kind: requests, collections, snapshots, commands and variables. Command-F prefills `@` for requests only. `#` filters collections, `>` commands and `$` variable names; all prefixed options are also available unprefixed. Each explicit opening/mode switch places the caret after the prefill without selecting it; ordinary editing preserves selection. A native AppKit field implements focus and UTF-16 caret placement, arrow/Return/Escape handling, and input-method deferral.
+
+`>` lists Settings, Request History, Global Variables, Create Collection, and each collection's Settings/Create Request commands. Space-separated command terms match across collection and action names. Creation uses the existing naming sheet after the popover closes; readonly/stale destinations are guarded. The centered breadcrumb has additional horizontal padding.
+
+`$` searches variable names by case-insensitive substring across global, collection and request scopes. Each definition remains a separate result, including shadowed names; request drafts take precedence over saved request variables. Plain values get bounded single-line previews. Encrypted values expose only names, scope and a Secret marker; they are neither decrypted nor matched by value. Selecting a result opens its exact owner's Variables page/tab. Duplicate collection/request names get identity suffixes where needed.
+
+History list rows use normal row selection throughout their method/URL text. Read-only inspector fields remain selectable. Native row hit-testing, keyboard focus, and popover-to-naming-sheet interaction await user verification.
+
+Local verification: all 311 package tests passed without warnings (Core 140, Control 19, Automation 28, App 124), including eight palette catalog tests and two model-navigation tests. Strict formatting/whitespace and syntax checks passed. Independent source and blind-test reviews closed their scoped findings. Log: /Volumes/Data/tmp/postie-palette-tests.log. No automated native shortcut or pointer interaction is claimed.
+
+Refinement verification: 23 focused tests passed without warnings, including unified/type-exclusive result composition, bare prefixes, actual AppKit automatic focus/caret and inserted text, already-open query replacement, selection preservation, UTF-16 offsets, key modifiers and marked-text deferral. Lint/syntax passed. Log: /Volumes/Data/tmp/postie-palette-revision-tests.log. This refinement did not rerun the full 311-test baseline. Whole-app shortcut/menu/popover interaction remains user verification.
+
+The refinement's clean release build and strict signatures passed; dist/Postie.app contains the unified palette/caret changes. Build log: /Volumes/Data/tmp/postie-palette-revision-build.log. Reopen this bundle for user verification.
+
+Clean release build and strict signatures passed; dist/Postie.app refreshed. Build log: /Volumes/Data/tmp/postie-palette-build.log. Quit and reopen the rebuilt app for native verification; changes remain uncommitted until user acceptance.
+
+The sidebar stays available for ordering and management, starts hidden, and remembers visibility. While hidden, history/global-variable/settings actions appear as toolbar icons with tooltips. All toolbar action buttons use icons. Request/response layout moves to global Settings → Appearance, retaining its existing preference. Typing searches the entire workspace; an empty query lists every collection and its requests. Duplicate visible labels gain collision-aware identity suffixes, also exposed to accessibility. Original request-search behavior below is a historical baseline.
+
+Focused gates: draft-name/literal-URL matching; collection/snapshot-name-only matching; retained/moved snapshot context; duplicate identities/order; complete unfiltered listing and no-result states; collection initial/explicit-tab navigation; keyboard opening/dismissal, current-destination state, stale-result guards, restored focus and sidebar preference. Native look/focus and restart visibility need user verification; automated matching tests do not establish these interactions.
+
+Verification on 2026-10-22: ten focused search/collection/navigation tests passed after the refinements. The final combined suite passed all 301 tests, strict formatting/whitespace and syntax checks; clean release build and strict signatures passed, refreshing dist/Postie.app. Independent reviews closed duplicate-label, accessibility, narrow-control and test-reliability findings. Logs: `/Volumes/Data/tmp/postie-session-history-full-tests.log` and `postie-session-history-build.log`. Native interaction/user acceptance remains pending. No real endpoint access, runtime secret reads or new persisted search index.
+
+## Historical request search palette
 
 Recorded 2026-10-17. M4 implementation adds native Command-K/menu/sidebar search by draft or saved name and literal URL/path. Current verification is tracked in implementation-m3-m4.md.
 
@@ -39,6 +71,8 @@ Maintain selection by identity, not result row number. Opening a request must pr
 Implementation stays within native SwiftUI/AppKit. No external search service or generic command registry is needed. Detailed palette appearance remains a UI design choice.
 
 ## Ongoing requests navigation
+
+Superseded locally on 2026-10-22 by Request History (Command-2): one row per execution, selected frozen request/response details beside the list, active cancellation and a separate Open Request action. No history is saved across app restarts. Retention is 10 completed runs or 100 MB additional logical capture/body data, active runs exempt. See [session-history-plan.md](session-history-plan.md) for ownership, limits and verification. The paragraphs below describe the earlier navigation baseline.
 
 Collection navigation: click its name to open the collection Variables/Headers/Auth page, use the disclosure arrow to expand/collapse requests, and right-click for settings/new request/rename/delete actions. There is no collection ellipsis control. Selecting a request or a search result leaves collection settings and opens that exact request without sending.
 

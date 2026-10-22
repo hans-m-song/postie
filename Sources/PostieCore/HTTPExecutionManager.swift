@@ -527,17 +527,45 @@ public actor HTTPExecutionManager {
     }
 
     public func acquireBodyLease(for response: HTTPResponseRecord) throws -> HTTPBodyLease {
+        try createBodyLease(for: response, sharingParent: nil)
+    }
+
+    public func acquireBodyLease(
+        for response: HTTPResponseRecord,
+        sharing parent: HTTPBodyLease
+    ) throws -> HTTPBodyLease {
+        try createBodyLease(for: response, sharingParent: parent)
+    }
+
+    private func createBodyLease(
+        for response: HTTPResponseRecord,
+        sharingParent parent: HTTPBodyLease?
+    ) throws -> HTTPBodyLease {
         guard !isShutDown else {
             throw HTTPExecutionError.shutDown
         }
         let bodyURL = response.bodyFileURL.standardizedFileURL
         guard let retained = retainedResponses[response.runID],
             retained.bodyURL == bodyURL,
-            retainedBodies.contains(bodyURL),
-            !pendingBodyDiscards.contains(bodyURL)
+            retainedBodies.contains(bodyURL)
         else {
             throw HTTPExecutionError.bodyNotOwned
         }
+
+        if let parent {
+            guard let registeredParent = bodyLeases[parent.token],
+                registeredParent.token == parent.token,
+                registeredParent.runID == parent.runID,
+                registeredParent.bodyURL == parent.bodyURL,
+                registeredParent.runID == response.runID,
+                registeredParent.bodyURL == bodyURL
+            else {
+                throw HTTPExecutionError.bodyNotOwned
+            }
+        } else if pendingBodyDiscards.contains(bodyURL) {
+            throw HTTPExecutionError.bodyNotOwned
+        }
+
         let values = try bodyURL.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
         guard values.isRegularFile == true, values.isSymbolicLink != true,
             values.fileSize.map(Int64.init) == response.bodyByteCount
