@@ -2,7 +2,9 @@
 
 ## Latest checkpoint — 2026-10-22
 
-User accepted the current rebuilt navigation/history/palette on 2026-10-22 (“seems to work well”). Checking in this integrated scope under the standing instruction to commit user-verified changes. This acceptance is not a claim of independent VoiceOver or exhaustive native validation. Proposed follow-up: Command-Shift-P opens `>` commands with the caret after the prefix; Command-P remains unprefixed and Command-F remains @. New shortcut is not implemented, pending confirmation under the user's plan-before-code rule.
+User explicitly confirmed Command-Shift-P works on 2026-10-22. Shortcut and its documentation are being checked in locally; no push. All earlier pending verification/check-in notes below are historical. No outstanding implementation remains for T115–T117; T111 HTML/XML is the next selected feature.
+
+User accepted the rebuilt navigation/history/palette on 2026-10-22 (“seems to work well”); checked in integrated scope locally as 0476bf1. Earlier uncommitted/pending-acceptance notes below are historical; this is not a claim of independent exhaustive native/VoiceOver validation. User then approved Command-Shift-P to open `>` commands with the caret after the prefix. Added only the menu shortcut using existing showRequestSearch(query:) and caret behavior; Command-P blank and Command-F @ remain. Strict lint, release build and signature checks passed, dist/Postie.app refreshed. Logs /Volumes/Data/tmp/postie-command-shortcut-lint.log and postie-command-shortcut-build.log. No new/repeated tests for this two-line binding change. New shortcut stays uncommitted until user verification.
 
 T117 refinement implemented locally: no-prefix unified ALL result kinds, @requests/#collections/>commands/$variables, CmdP blank/CmdF@. Native field places caret after prefill with zero selection even on an already-open focus revision. Parent integrated focus-revision model/menu/docs; both workers completed. All prior dirty work preserved; no commit.
 

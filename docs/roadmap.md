@@ -6,7 +6,7 @@ Local check-ins on 2026-10-22: 9fb17f6 formatting/Linux CI, 5973276 ordering/MCP
 
 ## Selected next work
 
-User accepted the current integrated T115–T117 build on 2026-10-22 (“seems to work well”); this supersedes the historical pending-acceptance notes below. Local check-in is being completed, without push. Proposed small follow-up: Command-Shift-P prefills `>` command mode, preserving Command-P unified search and Command-F @ requests; not implemented yet.
+User accepted the integrated T115–T117 build on 2026-10-22 (“seems to work well”), checked in locally as 0476bf1 without push; this supersedes historical pending-acceptance notes below. User explicitly confirmed the Command-Shift-P follow-up on 2026-10-22: it prefills `>` command mode, preserving Command-P unified search and Command-F @ requests. The verified shortcut is being checked in separately; T111 HTML/XML remains next.
 
 T117 refinement implemented locally: unprefixed palette includes every navigation, command and variable result; `@` narrows to requests, `#` to collections, `>` to commands and `$` to variable names. Command-P opens blank, Command-F prefills `@`. Native field-editor caret placement leaves prefixes unselected after opening/mode switching and preserves ordinary editing. All 23 focused refinement tests, lint and syntax passed; whole-app native/user acceptance and commit remain pending.
 

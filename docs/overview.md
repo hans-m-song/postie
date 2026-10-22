@@ -1,6 +1,6 @@
 # Postie overview
 
-User accepted the current integrated navigation/history/palette build on 2026-10-22 (“seems to work well”); supersedes pending-acceptance checkpoints below. Command-Shift-P for command mode is a proposed follow-up, not yet implemented.
+User accepted the integrated navigation/history/palette build on 2026-10-22 (“seems to work well”), checked in as 0476bf1; supersedes pending-acceptance checkpoints below. User also explicitly confirmed the Command-Shift-P follow-up on 2026-10-22; it opens `>` command mode.
 
 Workspace palette (T117, 2026-10-22): Command-P opens unified search across requests, collections, snapshots, commands and variables. Command-F prefills `@` for requests; `#` narrows to collections, `>` to page/creation commands, and `$` to variable names. Prefilled text leaves the caret at the end with no selection. Plain values have bounded previews; secrets remain masked without decryption. The initial 311-test baseline and subsequent 23 focused refinement tests passed, with lint/syntax; whole-app native/user acceptance remains pending. See [navigation](navigation.md).
 

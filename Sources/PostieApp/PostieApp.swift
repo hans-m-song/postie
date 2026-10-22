@@ -52,6 +52,8 @@ struct PostieApp: App {
                 Divider()
                 Button("Search Workspace…") { model.showRequestSearch() }
                     .keyboardShortcut("p", modifiers: [.command])
+                Button("Workspace Commands…") { model.showRequestSearch(query: ">") }
+                    .keyboardShortcut("p", modifiers: [.command, .shift])
                 Button("Search Requests…") { model.showRequestSearch(query: "@") }
                     .keyboardShortcut("f", modifiers: [.command])
                 Button("Requests") { model.showRequests() }

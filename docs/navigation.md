@@ -1,6 +1,6 @@
 # Workspace navigation
 
-User accepted the current integrated navigation/history/palette build on 2026-10-22 (“seems to work well”). Earlier pending native/user-verification statements describe their checkpoint; no exhaustive native/VoiceOver check is implied. A proposed Command-Shift-P shortcut for `>` commands is not implemented yet.
+User accepted the integrated navigation/history/palette build on 2026-10-22 (“seems to work well”), checked in as 0476bf1. Earlier pending native/user-verification statements describe their checkpoint; no exhaustive native/VoiceOver check is implied. User also explicitly confirmed Command-Shift-P on 2026-10-22; it opens `>` commands using the existing caret-at-end behavior.
 
 ## T-115 — Workspace switcher (implemented locally, 2026-10-22)
 

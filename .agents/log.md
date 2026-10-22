@@ -1,5 +1,11 @@
 # Decision log
 
+## 2026-10-22 — Command-mode shortcut
+
+User explicitly confirmed the shortcut works on 2026-10-22. Checking in the verified shortcut and its documentation locally under the standing workflow; no push. This supersedes the pending-acceptance checkpoint in the paragraph below.
+
+Accepted integrated navigation/history/palette checked in locally as 0476bf1, without push. User subsequently approved Command-Shift-P for `>` command mode. Added the menu action using the existing focus-revision/caret-at-end path; other shortcuts unchanged. No new/repeated tests for this two-line binding change; strict lint, release build and signature checks passed, dist/Postie.app refreshed. Logs /Volumes/Data/tmp/postie-command-shortcut-lint.log and postie-command-shortcut-build.log. Native shortcut acceptance and its check-in remain pending.
+
 ## 2026-10-22 — User acceptance and check-in
 
 User reports the current rebuilt navigation/history/palette “seems to work well”; checking in the integrated T115–T117 scope under the standing acceptance/check-in instruction. Earlier pending-acceptance entries record their checkpoint; no independent exhaustive native/VoiceOver validation is claimed. Command-Shift-P for `>` commands is proposed separately and is not yet implemented. Existing Command-P blank and Command-F @ remain.
