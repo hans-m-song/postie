@@ -772,12 +772,25 @@ struct RequestEditorView: View {
     }
 
     private var settingsEditor: some View {
-        HTTPSettingsEditor(
-            overrides: model.requestOptionOverrides(for: identity),
-            globalOptions: model.globalOptions,
-            isReadOnly: !model.canEdit(identity)
-        ) { overrides in
-            model.updateRequestOptionOverrides(overrides, for: identity)
+        VStack(alignment: .leading, spacing: 18) {
+            HTTPSettingsEditor(
+                overrides: model.requestOptionOverrides(for: identity),
+                globalOptions: model.globalOptions,
+                isReadOnly: !model.canEdit(identity)
+            ) { overrides in
+                model.updateRequestOptionOverrides(overrides, for: identity)
+            }
+            Divider()
+            MCPResourceSettingsView(
+                policy: model.request(for: identity)?.mcpPolicy ?? .init(),
+                inheritedDescription: MCPResponseViewPolicy.resolveMode(
+                    global: model.globalMCPResponseViewing,
+                    collection: model.collection(id: identity.collectionID)?.mcpPolicy.responseViewing ?? .inherit
+                ).displayName,
+                isReadOnly: !model.canEdit(identity)
+            ) { policy in
+                model.updateRequestMCPPolicy(policy, for: identity)
+            }
         }
     }
 

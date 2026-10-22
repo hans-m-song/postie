@@ -16,7 +16,7 @@ struct CollectionEditorView: View {
             if let collection = model.collection(id: collectionID) {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(collection.name).font(.title2.weight(.semibold))
-                    Text("Shared variables, headers and authentication for this collection.")
+                    Text("Shared variables, headers, authentication and MCP access for this collection.")
                         .font(.callout).foregroundStyle(.secondary)
                     Picker(
                         "Collection section",
@@ -28,6 +28,7 @@ struct CollectionEditorView: View {
                         Text("Variables").tag(CollectionEditorSection.variables)
                         Text("Headers").tag(CollectionEditorSection.headers)
                         Text("Auth").tag(CollectionEditorSection.authentication)
+                        Text("Settings").tag(CollectionEditorSection.settings)
                     }
                     .pickerStyle(.segmented).labelsHidden()
                 }
@@ -55,6 +56,18 @@ struct CollectionEditorView: View {
                                 active: section == .headers)
                             retained(
                                 AuthenticationEditor(collectionID: collectionID), active: section == .authentication)
+                            retained(
+                                VStack(alignment: .leading, spacing: 12) {
+                                    MCPResourceSettingsView(
+                                        policy: collection.mcpPolicy,
+                                        inheritedDescription: MCPResponseViewPolicy.resolveMode(
+                                            global: model.globalMCPResponseViewing
+                                        ).displayName,
+                                        isReadOnly: collection.isReadOnly
+                                    ) { policy in
+                                        Task { await model.updateCollectionMCPPolicy(policy, for: collectionID) }
+                                    }
+                                }, active: section == .settings, requiresEditableOwner: false)
                         }
                     }
                     .padding(18)
@@ -72,10 +85,14 @@ struct CollectionEditorView: View {
         }
     }
 
-    private func retained<Content: View>(_ content: Content, active: Bool) -> some View {
+    private func retained<Content: View>(
+        _ content: Content,
+        active: Bool,
+        requiresEditableOwner: Bool = true
+    ) -> some View {
         content
             .frame(maxWidth: .infinity, alignment: .leading)
-            .disabled(!active || !model.canEditVariables(owner))
+            .disabled(!active || (requiresEditableOwner && !model.canEditVariables(owner)))
             .allowsHitTesting(active)
             .accessibilityHidden(!active)
             .frame(height: active ? nil : 0, alignment: .top)

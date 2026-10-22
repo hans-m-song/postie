@@ -1,9 +1,1077 @@
 import Foundation
 import Combine
 import PostieCore
+import PostieAutomation
 
 enum CollectionEditorSection: Hashable {
-    case variables, headers, authentication
+    case variables, headers, authentication, settings
+}
+
+@MainActor
+private final class AutomationResultBox<Value> {
+    var result: Result<Value, Error>?
+}
+
+private struct AutomationResponseProjections: Sendable {
+    let fallback: AutomationJSON
+    let redacted: AutomationJSON?
+    let unredacted: AutomationJSON?
+
+    init(
+        response: HTTPResponseRecord,
+        bodyURL: URL?,
+        context: SnapshotPreparationCapture?,
+        mcpMode: MCPResponseViewPolicy?
+    ) {
+        guard let mcpMode else {
+            fallback = ResponseProjection.cliRaw(response: response, bodyURL: bodyURL)
+            redacted = nil
+            unredacted = nil
+            return
+        }
+
+        fallback = ResponseProjection.mcpBlocked(response: response, context: context)
+        redacted =
+            mcpMode == .allow || mcpMode == .unredacted
+            ? ResponseProjection.mcpAllowed(response: response, bodyURL: bodyURL, context: context)
+            : nil
+        unredacted =
+            mcpMode == .unredacted
+            ? ResponseProjection.mcpUnredacted(response: response, bodyURL: bodyURL)
+            : nil
+    }
+
+    func response(for mode: MCPResponseViewPolicy) -> AutomationJSON {
+        switch mode {
+        case .unredacted: unredacted ?? redacted ?? fallback
+        case .allow: redacted ?? fallback
+        case .block, .inherit: fallback
+        }
+    }
+}
+
+private enum SnapshotSaveFailure: LocalizedError {
+    case storageUnavailable
+    case bodyUnavailable
+
+    var errorDescription: String? {
+        switch self {
+        case .storageUnavailable:
+            return "Snapshot storage is unavailable."
+        case .bodyUnavailable:
+            return "The response body is unavailable."
+        }
+    }
+}
+
+extension AppModel {
+    func automationReply(_ command: AutomationCommand, channel: AutomationChannel) async -> AutomationReply {
+        guard !isTerminating, workspaceLoaded else {
+            return AutomationReply(
+                id: command.id, error: AutomationFailure(.unavailable, "The workspace is unavailable."))
+        }
+
+        do {
+            let result = try await performAutomationOperation(command, channel: channel)
+            return AutomationReply(id: command.id, result: result)
+        } catch let failure as AutomationFailure {
+            return AutomationReply(id: command.id, error: failure)
+        } catch {
+            return AutomationReply(
+                id: command.id, error: AutomationFailure(.storageFailure, "The operation could not be completed."))
+        }
+    }
+
+    private func performAutomationOperation(
+        _ command: AutomationCommand,
+        channel: AutomationChannel
+    ) async throws -> AutomationJSON {
+        switch command.operation {
+        case .collectionsList:
+            _ = try AutomationArguments(command.arguments, allowed: [])
+            return .array(
+                collections.compactMap { collection in
+                    if isMCP(channel), collection.mcpPolicy.excluded { return nil }
+                    return collectionJSON(collection)
+                })
+
+        case .requestsList:
+            let arguments = try AutomationArguments(
+                command.arguments, allowed: ["collectionID"])
+            let collectionID = try arguments.uuid("collectionID", required: false)
+            let visibleCollections: [RequestCollection]
+            if let collectionID {
+                visibleCollections = [try requireCollection(collectionID, channel: channel)]
+            } else {
+                visibleCollections = collections.filter { collection in
+                    !isMCP(channel) || !collection.mcpPolicy.excluded
+                }
+            }
+            return .array(
+                visibleCollections.flatMap { collection in
+                    collection.requests.compactMap { loadedRequest in
+                        let identity = RequestIdentity(collectionID: collection.id, requestID: loadedRequest.id)
+                        let request = drafts[identity] ?? loadedRequest
+                        if isMCP(channel), request.mcpPolicy.excluded { return nil }
+                        return requestSummaryJSON(request, in: collection, channel: channel)
+                    }
+                })
+
+        case .requestsGet:
+            let identity = try requestIdentity(command.arguments, channel: channel)
+            let (collection, request) = try requireRequest(identity, channel: channel)
+            return requestJSON(request, in: collection, channel: channel)
+
+        case .requestsCreate:
+            let arguments = try AutomationArguments(
+                command.arguments, allowed: ["collectionID", "request"])
+            guard let collectionID = try arguments.uuid("collectionID"),
+                let patch = arguments.value("request")
+            else {
+                throw AutomationFailure(.invalidArguments, "Missing request fields.")
+            }
+            return try await createAutomationRequest(patch, in: collectionID, channel: channel)
+
+        case .requestsUpdate:
+            let arguments = try AutomationArguments(
+                command.arguments, allowed: ["collectionID", "requestID", "request"])
+            guard let collectionID = try arguments.uuid("collectionID"),
+                let requestID = try arguments.uuid("requestID"),
+                let patch = arguments.value("request")
+            else {
+                throw AutomationFailure(.invalidArguments, "Missing request fields.")
+            }
+            let identity = RequestIdentity(collectionID: collectionID, requestID: requestID)
+            return try await updateAutomationRequest(identity, with: patch, channel: channel)
+
+        case .requestsStart:
+            let identity = try requestIdentity(command.arguments, channel: channel)
+            let _ = try requireRequest(identity, channel: channel)
+            guard canEdit(identity), activeRuns[identity] == nil else {
+                throw AutomationFailure(.conflict, "The request cannot start in its current state.")
+            }
+            startRequest(identity)
+            guard let active = activeRuns[identity] else {
+                throw AutomationFailure(.unavailable, "The request could not start.")
+            }
+            return runStartJSON(active, identity: identity)
+
+        case .runsList:
+            _ = try AutomationArguments(command.arguments, allowed: [])
+            return .array(
+                activeRuns.keys.sorted(by: requestIdentitySort).compactMap { identity in
+                    guard let active = activeRuns[identity], isAccessibleRun(identity, channel: channel) else {
+                        return nil
+                    }
+                    return activeRunJSON(active, identity: identity, channel: channel)
+                })
+
+        case .runsGet:
+            let arguments = try AutomationArguments(command.arguments, allowed: ["runID"])
+            guard let token = try arguments.uuid("runID") else {
+                throw AutomationFailure(.invalidArguments, "Missing runID.")
+            }
+            return try await automationRunJSON(token: token, channel: channel)
+
+        case .runsCancel:
+            let arguments = try AutomationArguments(command.arguments, allowed: ["runID"])
+            guard let token = try arguments.uuid("runID") else {
+                throw AutomationFailure(.invalidArguments, "Missing runID.")
+            }
+            return try cancelAutomationRun(token: token, channel: channel)
+
+        case .variablesList:
+            let arguments = try AutomationArguments(
+                command.arguments, allowed: ["collectionID", "requestID"])
+            let scope = try variableScope(arguments, channel: channel)
+            return variableListJSON(scope)
+
+        case .variablesGet:
+            let arguments = try AutomationArguments(
+                command.arguments, allowed: ["collectionID", "requestID", "name"])
+            guard let name = try arguments.string("name") else {
+                throw AutomationFailure(.invalidArguments, "Missing name.")
+            }
+            let scope = try variableScope(arguments, channel: channel)
+            guard let value = variables(for: scope.owner)[name] else {
+                throw AutomationFailure(.notFound, "The variable was not found.")
+            }
+            guard case .plain(let plainValue) = value else {
+                throw AutomationFailure(.forbidden, "Secret variables cannot be read directly.")
+            }
+            return .object([
+                "name": .string(name),
+                "scope": .string(scope.label),
+                "secret": .bool(false),
+                "value": .string(plainValue),
+            ])
+
+        case .snapshotsList:
+            let arguments = try AutomationArguments(
+                command.arguments, allowed: ["collectionID", "requestID"])
+            try requireMCPWorkspaceIndex(channel)
+            let scope = try optionalRequestScope(arguments, channel: channel)
+            let matching = snapshots.filter { snapshot in
+                if let scope {
+                    let identity = snapshotGrouping(for: snapshot).identity
+                    if let requestIdentity = scope.identity, identity != requestIdentity { return false }
+                    if scope.identity == nil, identity.collectionID != scope.collectionID { return false }
+                }
+                return !isMCP(channel) || !snapshotIsMCPExcluded(snapshot)
+            }
+            return .array(matching.map(snapshotJSON))
+
+        case .snapshotsGet:
+            let arguments = try AutomationArguments(command.arguments, allowed: ["snapshotID"])
+            guard let id = try arguments.uuid("snapshotID") else {
+                throw AutomationFailure(.invalidArguments, "Missing snapshotID.")
+            }
+            return try await openAutomationSnapshot(id: id, channel: channel)
+
+        case .snapshotsCreate:
+            let arguments = try AutomationArguments(command.arguments, allowed: ["runID", "name"])
+            guard let token = try arguments.uuid("runID"),
+                let outcome = automationRunOutcome(token: token)
+            else {
+                throw AutomationFailure(.notFound, "The run handle is no longer available.")
+            }
+            let name = try arguments.string("name", required: false)
+            return try await createAutomationSnapshot(outcome: outcome, name: name, channel: channel)
+
+        case .snapshotsRename:
+            let arguments = try AutomationArguments(command.arguments, allowed: ["snapshotID", "name"])
+            guard let id = try arguments.uuid("snapshotID"),
+                let name = try arguments.string("name")
+            else {
+                throw AutomationFailure(.invalidArguments, "Missing snapshot fields.")
+            }
+            return try await renameAutomationSnapshot(id: id, name: name, channel: channel)
+
+        case .snapshotsDelete:
+            let arguments = try AutomationArguments(command.arguments, allowed: ["snapshotID"])
+            guard let id = try arguments.uuid("snapshotID") else {
+                throw AutomationFailure(.invalidArguments, "Missing snapshotID.")
+            }
+            return try await deleteAutomationSnapshot(id: id, channel: channel)
+        }
+    }
+
+    private func requestIdentity(
+        _ values: [String: AutomationJSON],
+        channel: AutomationChannel
+    ) throws -> RequestIdentity {
+        let arguments = try AutomationArguments(values, allowed: ["collectionID", "requestID"])
+        guard let collectionID = try arguments.uuid("collectionID"),
+            let requestID = try arguments.uuid("requestID")
+        else {
+            throw AutomationFailure(.invalidArguments, "Missing request identity.")
+        }
+        return RequestIdentity(collectionID: collectionID, requestID: requestID)
+    }
+
+    private func requireCollection(_ id: UUID, channel: AutomationChannel) throws -> RequestCollection {
+        guard let collection = collections.first(where: { $0.id == id }) else {
+            throw AutomationFailure(.notFound, "The collection was not found.")
+        }
+        if isMCP(channel), collection.mcpPolicy.excluded {
+            throw AutomationFailure(.forbidden, "The collection is excluded from MCP access.")
+        }
+        return collection
+    }
+
+    private func requireRequest(
+        _ identity: RequestIdentity,
+        channel: AutomationChannel
+    ) throws -> (RequestCollection, HTTPRequestConfiguration) {
+        let collection = try requireCollection(identity.collectionID, channel: channel)
+        guard let request = drafts[identity] else {
+            throw AutomationFailure(.notFound, "The request was not found.")
+        }
+        if isMCP(channel), request.mcpPolicy.excluded {
+            throw AutomationFailure(.forbidden, "The request is excluded from MCP access.")
+        }
+        return (collection, request)
+    }
+
+    private func isMCP(_ channel: AutomationChannel) -> Bool {
+        if case .mcp = channel { return true }
+        return false
+    }
+
+    private func isAccessibleRun(_ identity: RequestIdentity, channel: AutomationChannel) -> Bool {
+        guard isMCP(channel) else { return true }
+        if let collection = collections.first(where: { $0.id == identity.collectionID }), collection.mcpPolicy.excluded
+        {
+            return false
+        }
+        if let request = drafts[identity], request.mcpPolicy.excluded { return false }
+        return true
+    }
+
+    private func requireAccessibleRun(_ outcome: AutomationRunOutcome, channel: AutomationChannel) throws {
+        if isMCP(channel), runIsMCPExcluded(outcome) || !isAccessibleRun(outcome.identity, channel: channel) {
+            throw AutomationFailure(.forbidden, "The request is excluded from MCP access.")
+        }
+    }
+
+    private func retainedRunOutcome(_ token: UUID) throws -> AutomationRunOutcome {
+        guard let outcome = automationRunOutcome(token: token) else {
+            throw AutomationFailure(.notFound, "The run handle was not found.")
+        }
+        return outcome
+    }
+
+    private func runIsMCPExcluded(_ outcome: AutomationRunOutcome) -> Bool {
+        guard let collection = collections.first(where: { $0.id == outcome.identity.collectionID }) else {
+            return outcome.mcpAccessExcluded
+        }
+        if collection.mcpPolicy.excluded { return true }
+        guard let request = drafts[outcome.identity] else { return outcome.mcpAccessExcluded }
+        return request.mcpPolicy.excluded
+    }
+
+    private func collectionJSON(_ collection: RequestCollection) -> AutomationJSON {
+        .object([
+            "collectionID": .string(collection.id.uuidString),
+            "name": .string(collection.name),
+            "requestCount": integer(collection.requests.count),
+        ])
+    }
+
+    private func requestSummaryJSON(
+        _ request: HTTPRequestConfiguration,
+        in collection: RequestCollection,
+        channel: AutomationChannel
+    ) -> AutomationJSON {
+        .object([
+            "collectionID": .string(collection.id.uuidString),
+            "requestID": .string(request.id.uuidString),
+            "name": .string(request.name),
+            "method": .string(request.method),
+            "url": .string(QueryParameters.render(baseURL: request.url, fields: request.query)),
+        ])
+    }
+
+    private func requestJSON(
+        _ request: HTTPRequestConfiguration,
+        in collection: RequestCollection,
+        channel: AutomationChannel
+    ) -> AutomationJSON {
+        var result = requestSummaryJSON(request, in: collection, channel: channel).objectValue ?? [:]
+        result["pathParameters"] = .array(request.pathParameters.map { httpFieldJSON($0, channel: channel) })
+        result["query"] = .array(request.query.map { httpFieldJSON($0, channel: channel) })
+        let sensitiveHeaderNames = Set(
+            ["authorization", "proxy-authorization", "cookie", "cookie2"]
+                + [request.authentication.apiKeyHeaderName, collection.authentication.apiKeyHeaderName]
+                .compactMap { $0?.lowercased() }
+        )
+        result["headers"] = .array(
+            request.headers.map { httpFieldJSON($0, sensitiveHeaderNames: sensitiveHeaderNames, channel: channel) })
+        result["body"] = .string(request.body)
+        result["bodyEnabled"] = .bool(request.bodyEnabled)
+        result["bodySyntax"] = .string(request.bodySyntax.rawValue)
+        result["optionOverrides"] = (try? automationJSON(request.optionOverrides ?? .init())) ?? .object([:])
+        result["inheritsCollectionAuthentication"] = .bool(request.inheritsCollectionAuthentication)
+        result["authentication"] = .object([
+            "kind": .string(request.authentication.kind.rawValue),
+            "username": .string(request.authentication.username),
+            "apiKeyHeaderName": request.authentication.apiKeyHeaderName.map(AutomationJSON.string) ?? .null,
+            "hasPassword": .bool(request.authentication.password != nil),
+            "hasToken": .bool(request.authentication.token != nil),
+            "hasAPIKey": .bool(request.authentication.apiKey != nil),
+        ])
+        return .object(result)
+    }
+
+    private func httpFieldJSON(
+        _ field: HTTPField,
+        sensitiveHeaderNames: Set<String> = [],
+        channel: AutomationChannel = .cli
+    ) -> AutomationJSON {
+        let isSensitiveHeader = sensitiveHeaderNames.contains(field.name.lowercased())
+        let value =
+            isMCP(channel) && isSensitiveHeader && !containsOnlyTemplateReferencesAndScheme(field.value)
+            ? SecretRetemplating.redaction
+            : field.value
+        return .object([
+            "name": .string(field.name),
+            "value": .string(value),
+            "isEnabled": .bool(field.isEnabled),
+        ])
+    }
+
+    private func containsOnlyTemplateReferencesAndScheme(_ value: String) -> Bool {
+        let scan = TemplateEngine.scan(value)
+        guard !scan.references.isEmpty, scan.invalidRanges.isEmpty else { return false }
+        let text = value as NSString
+        var cursor = 0
+        var sawReference = false
+        for reference in scan.references {
+            let literal = text.substring(with: NSRange(location: cursor, length: reference.range.location - cursor))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !literal.isEmpty {
+                if !sawReference, ["bearer", "basic"].contains(literal.lowercased()) {
+                    sawReference = true
+                } else if sawReference, literal.allSatisfy({ $0 == ":" }) {
+                    continue
+                } else {
+                    return false
+                }
+            }
+            sawReference = true
+            cursor = NSMaxRange(reference.range)
+        }
+        let suffix = text.substring(from: cursor).trimmingCharacters(in: .whitespacesAndNewlines)
+        return suffix.isEmpty || suffix.allSatisfy { $0 == ":" }
+    }
+
+    private func integer(_ value: Int) -> AutomationJSON {
+        .number(Decimal(value))
+    }
+
+    private func automationJSON<Value: Encodable>(_ value: Value) throws -> AutomationJSON {
+        try JSONDecoder().decode(AutomationJSON.self, from: JSONEncoder().encode(value))
+    }
+
+    private func requestIdentitySort(_ left: RequestIdentity, _ right: RequestIdentity) -> Bool {
+        if left.collectionID != right.collectionID {
+            return left.collectionID.uuidString < right.collectionID.uuidString
+        }
+        return left.requestID.uuidString < right.requestID.uuidString
+    }
+
+    private func canContinueAutomationRequestUpdate(_ identity: RequestIdentity) -> Bool {
+        guard !isTerminating,
+            let collection = collection(for: identity), !collection.isReadOnly,
+            drafts[identity] != nil,
+            activeRuns[identity] == nil,
+            !deletingCollections.contains(identity.collectionID),
+            !deletingRequests.contains(identity),
+            !movingRequests.contains(identity),
+            !reconcilingRequests.contains(identity)
+        else { return false }
+        return true
+    }
+
+    private func createAutomationRequest(
+        _ patch: AutomationJSON,
+        in collectionID: UUID,
+        channel: AutomationChannel
+    ) async throws -> AutomationJSON {
+        let result = AutomationResultBox<AutomationJSON>()
+        await withCollectionMutation(collectionID) { [weak self] in
+            guard let self else {
+                result.result = .failure(AutomationFailure(.unavailable, "The workspace is unavailable."))
+                return
+            }
+            do {
+                let collection = try self.requireCollection(collectionID, channel: channel)
+                guard !self.isTerminating, !collection.isReadOnly,
+                    !self.deletingCollections.contains(collectionID), let store = self.store
+                else {
+                    throw AutomationFailure(.conflict, "The collection cannot be changed in its current state.")
+                }
+                var request = HTTPRequestConfiguration()
+                request.inheritsCollectionAuthentication = true
+                request.optionOverrides = HTTPOptionsOverrides()
+                let vault = self.secretVault
+                request = try await RequestPatch.apply(patch, to: request) { value in
+                    try await vault.encrypt(value)
+                }
+                let currentCollection = try self.requireCollection(collectionID, channel: channel)
+                guard !self.isTerminating, !currentCollection.isReadOnly,
+                    !self.deletingCollections.contains(collectionID)
+                else {
+                    throw AutomationFailure(.conflict, "The collection cannot be changed in its current state.")
+                }
+                try await store.createRequest(request, in: collectionID)
+                guard !self.isTerminating, !self.deletingCollections.contains(collectionID) else {
+                    throw AutomationFailure(.conflict, "The collection changed while the request was being created.")
+                }
+                var outputCollection = collection
+                if var updatedCollection = self.collections.first(where: { $0.id == collectionID }) {
+                    updatedCollection.requests.append(request)
+                    self.replaceCollection(updatedCollection)
+                    outputCollection = updatedCollection
+                }
+                let identity = RequestIdentity(collectionID: collectionID, requestID: request.id)
+                self.drafts[identity] = request
+                self.editVersions[identity] = 0
+                self.markWorkspaceChanged()
+                let (_, savedRequest) = try self.requireRequest(identity, channel: channel)
+                outputCollection = self.collections.first(where: { $0.id == collectionID }) ?? outputCollection
+                result.result = .success(self.requestJSON(savedRequest, in: outputCollection, channel: channel))
+            } catch {
+                result.result = .failure(error)
+            }
+        }
+        guard let operation = result.result else {
+            throw AutomationFailure(.unavailable, "The request could not be created.")
+        }
+        return try operation.get()
+    }
+
+    private func updateAutomationRequest(
+        _ identity: RequestIdentity,
+        with patch: AutomationJSON,
+        channel: AutomationChannel
+    ) async throws -> AutomationJSON {
+        let (_, _) = try requireRequest(identity, channel: channel)
+        guard canEdit(identity), activeRuns[identity] == nil,
+            !movingRequests.contains(identity), !deletingRequests.contains(identity),
+            !deletingCollections.contains(identity.collectionID)
+        else {
+            throw AutomationFailure(.conflict, "The request cannot be changed in its current state.")
+        }
+        automationEditingRequests.insert(identity)
+        defer { automationEditingRequests.remove(identity) }
+
+        let result = AutomationResultBox<AutomationJSON>()
+        await withCollectionMutation(identity.collectionID) { [weak self] in
+            guard let self else {
+                result.result = .failure(AutomationFailure(.unavailable, "The workspace is unavailable."))
+                return
+            }
+            do {
+                let (_, original) = try self.requireRequest(identity, channel: channel)
+                guard self.canContinueAutomationRequestUpdate(identity),
+                    let store = self.store
+                else {
+                    throw AutomationFailure(.conflict, "The request cannot be changed in its current state.")
+                }
+                await self.waitForSecretEdits(owner: .request(identity))
+                try await self.flushRequestSaves(for: identity)
+                let current = self.drafts[identity] ?? original
+                let vault = self.secretVault
+                var updated = try await RequestPatch.apply(patch, to: current) { value in
+                    try await vault.encrypt(value)
+                }
+                updated.id = identity.requestID
+                let (_, latest) = try self.requireRequest(identity, channel: channel)
+                guard self.canContinueAutomationRequestUpdate(identity) else {
+                    throw AutomationFailure(.conflict, "The request cannot be changed in its current state.")
+                }
+                updated.mcpPolicy = latest.mcpPolicy
+                try await store.saveRequest(updated, in: identity.collectionID)
+                let (_, latestAfterSave) = try self.requireRequest(identity, channel: channel)
+                guard self.canContinueAutomationRequestUpdate(identity) else {
+                    throw AutomationFailure(.conflict, "The request changed while it was being saved.")
+                }
+                guard latestAfterSave.mcpPolicy == updated.mcpPolicy else {
+                    throw AutomationFailure(.conflict, "The request policy changed while it was being saved.")
+                }
+                self.drafts[identity] = updated
+                if var currentCollection = self.collections.first(where: { $0.id == identity.collectionID }),
+                    let index = currentCollection.requests.firstIndex(where: { $0.id == identity.requestID })
+                {
+                    currentCollection.requests[index] = updated
+                    self.replaceCollection(currentCollection)
+                }
+                let (latestCollection, savedRequest) = try self.requireRequest(identity, channel: channel)
+                guard self.canContinueAutomationRequestUpdate(identity) else {
+                    throw AutomationFailure(.conflict, "The request changed while it was being saved.")
+                }
+                self.markWorkspaceChanged()
+                result.result = .success(self.requestJSON(savedRequest, in: latestCollection, channel: channel))
+            } catch {
+                result.result = .failure(error)
+            }
+        }
+        guard let operation = result.result else {
+            throw AutomationFailure(.unavailable, "The request could not be updated.")
+        }
+        return try operation.get()
+    }
+
+    private struct AutomationVariableScope {
+        let owner: VariableOwner
+        let label: String
+    }
+
+    private func variableScope(
+        _ arguments: AutomationArguments,
+        channel: AutomationChannel
+    ) throws -> AutomationVariableScope {
+        guard let scope = try optionalVariableScope(arguments, channel: channel) else {
+            return AutomationVariableScope(owner: .global, label: "global")
+        }
+        return scope
+    }
+
+    private func optionalVariableScope(
+        _ arguments: AutomationArguments,
+        channel: AutomationChannel
+    ) throws -> AutomationVariableScope? {
+        let collectionID = try arguments.uuid("collectionID", required: false)
+        let requestID = try arguments.uuid("requestID", required: false)
+        guard requestID == nil || collectionID != nil else {
+            throw AutomationFailure(.invalidArguments, "requestID requires collectionID.")
+        }
+        guard let collectionID else { return nil }
+        _ = try requireCollection(collectionID, channel: channel)
+        guard let requestID else {
+            return AutomationVariableScope(owner: .collection(collectionID), label: "collection")
+        }
+        let identity = RequestIdentity(collectionID: collectionID, requestID: requestID)
+        let (_, _) = try requireRequest(identity, channel: channel)
+        return AutomationVariableScope(owner: .request(identity), label: "request")
+    }
+
+    private func optionalRequestScope(
+        _ arguments: AutomationArguments,
+        channel: AutomationChannel
+    ) throws -> (collectionID: UUID, identity: RequestIdentity?)? {
+        let collectionID = try arguments.uuid("collectionID", required: false)
+        let requestID = try arguments.uuid("requestID", required: false)
+        guard requestID == nil || collectionID != nil else {
+            throw AutomationFailure(.invalidArguments, "requestID requires collectionID.")
+        }
+        guard let collectionID else { return nil }
+        _ = try requireCollection(collectionID, channel: channel)
+        guard let requestID else { return (collectionID, nil) }
+        let identity = RequestIdentity(collectionID: collectionID, requestID: requestID)
+        _ = try requireRequest(identity, channel: channel)
+        return (collectionID, identity)
+    }
+
+    private func variableListJSON(_ scope: AutomationVariableScope?) -> AutomationJSON {
+        let effectiveScope = scope ?? AutomationVariableScope(owner: .global, label: "global")
+        let variables = self.variables(for: effectiveScope.owner)
+        return .array(
+            variables.keys.sorted().compactMap { name in
+                guard let value = variables[name] else { return nil }
+                if case .plain(let plainValue) = value {
+                    return .object([
+                        "name": .string(name),
+                        "scope": .string(effectiveScope.label),
+                        "secret": .bool(false),
+                        "value": .string(plainValue),
+                    ])
+                }
+                return .object([
+                    "name": .string(name),
+                    "scope": .string(effectiveScope.label),
+                    "secret": .bool(true),
+                    "value": .null,
+                ])
+            })
+    }
+
+    private func runStartJSON(_ active: ActiveRun, identity: RequestIdentity) -> AutomationJSON {
+        .object([
+            "runID": .string(active.token.uuidString),
+            "state": .string("preparing"),
+            "collectionID": .string(identity.collectionID.uuidString),
+            "requestID": .string(identity.requestID.uuidString),
+        ])
+    }
+
+    private func activeRunJSON(
+        _ active: ActiveRun,
+        identity: RequestIdentity,
+        channel: AutomationChannel
+    ) -> AutomationJSON {
+        let state: String
+        switch active.phase {
+        case .preparing: state = "preparing"
+        case .running: state = "running"
+        case .cancelling: state = "cancelling"
+        }
+        let elapsed = max(0, Date().timeIntervalSince(active.startedAt))
+        let progress =
+            active.progress.map { progress in
+                AutomationJSON.object([
+                    "receivedBytes": .number(Decimal(max(0, progress.receivedBytes))),
+                    "expectedBytes": progress.expectedBytes.map { .number(Decimal(max(0, $0))) } ?? .null,
+                ])
+            } ?? .null
+        let redirects =
+            isMCP(channel)
+            ? ResponseProjection.mcpRedirects(
+                active.redirects,
+                context: active.snapshotCapture,
+                mode: responseViewingMode(for: identity)
+            )
+            : ResponseProjection.cliRedirects(active.redirects)
+        return .object([
+            "runID": .string(active.token.uuidString),
+            "state": .string(state),
+            "collectionID": .string(identity.collectionID.uuidString),
+            "requestID": .string(identity.requestID.uuidString),
+            "startedAt": .string(iso8601(active.startedAt)),
+            "elapsedSeconds": .number(Decimal(elapsed)),
+            "progress": progress,
+            "redirectCount": integer(active.redirects.count),
+            "redirects": redirects,
+        ])
+    }
+
+    private func automationRunOutcome(token: UUID) -> AutomationRunOutcome? {
+        automationRunOutcomes.values.first { $0.token == token }
+    }
+
+    private func automationRunJSON(token: UUID, channel: AutomationChannel) async throws -> AutomationJSON {
+        if let (identity, active) = activeRuns.first(where: { $0.value.token == token }) {
+            guard isAccessibleRun(identity, channel: channel) else {
+                throw AutomationFailure(.forbidden, "The request is excluded from MCP access.")
+            }
+            return activeRunJSON(active, identity: identity, channel: channel)
+        }
+
+        guard let outcome = automationRunOutcome(token: token) else {
+            throw AutomationFailure(.notFound, "The run handle was not found.")
+        }
+        if isMCP(channel), runIsMCPExcluded(outcome) || !isAccessibleRun(outcome.identity, channel: channel) {
+            throw AutomationFailure(.forbidden, "The request is excluded from MCP access.")
+        }
+
+        var result: [String: AutomationJSON] = [
+            "runID": .string(outcome.token.uuidString),
+            "collectionID": .string(outcome.identity.collectionID.uuidString),
+            "requestID": .string(outcome.identity.requestID.uuidString),
+            "finishedAt": .string(iso8601(outcome.finishedAt)),
+        ]
+        switch outcome.terminal {
+        case let .completed(response, _):
+            result["state"] = .string("completed")
+            result["response"] = try await projectLiveResponse(response, outcome: outcome, channel: channel)
+        case let .failed(message):
+            result["state"] = .string("failed")
+            result["error"] =
+                isMCP(channel)
+                ? ResponseProjection.mcpFailure("Request failed.", context: nil)
+                : .string(message)
+        case .cancelled:
+            result["state"] = .string("cancelled")
+        }
+        return .object(result)
+    }
+
+    private func cancelAutomationRun(token: UUID, channel: AutomationChannel) throws -> AutomationJSON {
+        if let (identity, _) = activeRuns.first(where: { $0.value.token == token }) {
+            guard isAccessibleRun(identity, channel: channel) else {
+                throw AutomationFailure(.forbidden, "The request is excluded from MCP access.")
+            }
+            cancelRequest(identity)
+            let state = activeRuns[identity]?.phase == .cancelling ? "cancelling" : "cancelled"
+            return .object(["runID": .string(token.uuidString), "state": .string(state)])
+        }
+
+        guard let outcome = automationRunOutcome(token: token) else {
+            throw AutomationFailure(.notFound, "The run handle was not found.")
+        }
+        if isMCP(channel), runIsMCPExcluded(outcome) || !isAccessibleRun(outcome.identity, channel: channel) {
+            throw AutomationFailure(.forbidden, "The request is excluded from MCP access.")
+        }
+        throw AutomationFailure(.conflict, "The specified run has already ended.")
+    }
+
+    private func projectLiveResponse(
+        _ response: HTTPResponseRecord,
+        outcome: AutomationRunOutcome,
+        channel: AutomationChannel
+    ) async throws -> AutomationJSON {
+        let capture = response.snapshotCapture
+        let isMCPChannel = isMCP(channel)
+        try requireAccessibleRun(outcome, channel: channel)
+        var mode = responseViewingMode(for: outcome.identity)
+        let mayProjectBody = !isMCPChannel || mode != .block
+        var bodyURL: URL?
+        var lease: HTTPBodyLease?
+
+        if mayProjectBody {
+            if let executionManager, let acquired = try? await executionManager.acquireBodyLease(for: response) {
+                lease = acquired
+                bodyURL = acquired.bodyURL
+            } else if isMCPChannel {
+                mode = .block
+            }
+        }
+
+        let projectionMode = isMCPChannel ? mode : nil
+        let projectedBodyURL = bodyURL
+        let projection = Task.detached(priority: .utility) {
+            AutomationResponseProjections(
+                response: response, bodyURL: projectedBodyURL, context: capture, mcpMode: projectionMode
+            )
+        }
+        let projected = await projection.value
+        if let lease, let executionManager {
+            await executionManager.releaseBodyLease(lease)
+        }
+        let currentOutcome = try retainedRunOutcome(outcome.token)
+        try requireAccessibleRun(currentOutcome, channel: channel)
+
+        return projected.response(for: isMCPChannel ? responseViewingMode(for: currentOutcome.identity) : .block)
+    }
+
+    private func responseViewingMode(for identity: RequestIdentity) -> MCPResponseViewPolicy {
+        let collection = collections.first(where: { $0.id == identity.collectionID })
+        let request = drafts[identity] ?? collection?.requests.first(where: { $0.id == identity.requestID })
+        return MCPResponseViewPolicy.resolveMode(
+            global: globalMCPResponseViewing,
+            collection: collection?.mcpPolicy.responseViewing ?? .inherit,
+            request: request?.mcpPolicy.responseViewing ?? .inherit
+        )
+    }
+
+    private func openAutomationSnapshot(id: UUID, channel: AutomationChannel) async throws -> AutomationJSON {
+        try requireMCPWorkspaceIndex(channel)
+        guard let snapshot = snapshots.first(where: { $0.id == id }) else {
+            throw AutomationFailure(.notFound, "The snapshot was not found.")
+        }
+        if isMCP(channel), snapshotIsMCPExcluded(snapshot) {
+            throw AutomationFailure(.forbidden, "The snapshot is excluded from MCP access.")
+        }
+        guard let snapshotStore else {
+            throw AutomationFailure(.unavailable, "Snapshot storage is unavailable.")
+        }
+
+        let opened: OpenedSnapshot
+        do {
+            opened = try await snapshotStore.open(id: id)
+        } catch {
+            throw AutomationFailure(.storageFailure, "The snapshot could not be opened.")
+        }
+        guard let currentSnapshot = snapshots.first(where: { $0.id == id }) else {
+            throw AutomationFailure(.notFound, "The snapshot was not found.")
+        }
+        try requireAccessibleSnapshot(currentSnapshot, channel: channel)
+        let grouping = snapshotGrouping(for: currentSnapshot)
+        let mode = isMCP(channel) ? responseViewingMode(for: grouping.identity) : nil
+        let response = opened.response
+        let context = opened.context?.preparation
+        var templateRequest = opened.template.configuration
+        templateRequest.id = opened.summary.source.identity.requestID
+        templateRequest.name = opened.summary.source.requestName
+        let projection = Task.detached(priority: .utility) {
+            AutomationResponseProjections(
+                response: response, bodyURL: response.bodyFileURL, context: context, mcpMode: mode
+            )
+        }
+        let projections = await projection.value
+        guard let latestSnapshot = snapshots.first(where: { $0.id == id }) else {
+            throw AutomationFailure(.notFound, "The snapshot was not found.")
+        }
+        try requireAccessibleSnapshot(latestSnapshot, channel: channel)
+        let latestGrouping = snapshotGrouping(for: latestSnapshot)
+        let projected = projections.response(
+            for: isMCP(channel) ? responseViewingMode(for: latestGrouping.identity) : .block)
+        return .object([
+            "snapshot": snapshotJSON(latestSnapshot),
+            "grouping": groupingJSON(latestGrouping),
+            "request": requestJSON(
+                templateRequest,
+                in: RequestCollection(
+                    id: opened.summary.source.identity.collectionID, name: opened.summary.source.collectionName),
+                channel: channel
+            ),
+            "response": projected,
+        ])
+    }
+
+    private func createAutomationSnapshot(
+        outcome: AutomationRunOutcome,
+        name: String?,
+        channel: AutomationChannel
+    ) async throws -> AutomationJSON {
+        try requireMCPWorkspaceIndex(channel)
+        guard isAccessibleRun(outcome.identity, channel: channel),
+            !(isMCP(channel) && runIsMCPExcluded(outcome))
+        else {
+            throw AutomationFailure(.forbidden, "The request is excluded from MCP access.")
+        }
+        guard case let .completed(response, capturedSource) = outcome.terminal,
+            response.snapshotCapture != nil,
+            let capturedSource
+        else {
+            throw AutomationFailure(.conflict, "Only a completed run with captured request context can be saved.")
+        }
+        guard canEdit(outcome.identity),
+            !movingRequests.contains(outcome.identity),
+            !deletingRequests.contains(outcome.identity),
+            !deletingCollections.contains(outcome.identity.collectionID),
+            let collection = collections.first(where: { $0.id == outcome.identity.collectionID }),
+            collection.requests.contains(where: { $0.id == outcome.identity.requestID }),
+            let request = drafts[outcome.identity]
+        else {
+            throw AutomationFailure(.conflict, "The request cannot save a snapshot in its current state.")
+        }
+        guard !isTerminating, snapshotStore != nil, executionManager != nil else {
+            throw AutomationFailure(.unavailable, "Snapshot storage is unavailable.")
+        }
+        let normalizedName = name ?? Self.defaultSnapshotName(source: capturedSource, completedAt: response.completedAt)
+        guard !normalizedName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw AutomationFailure(.invalidArguments, "Snapshot name cannot be empty.")
+        }
+        guard !savingSnapshotRunIDs.contains(response.runID) else {
+            throw AutomationFailure(.conflict, "A snapshot is already being saved for this run.")
+        }
+
+        let source = SnapshotSource(
+            identity: outcome.identity,
+            collectionName: collection.name,
+            requestName: request.name
+        )
+        let operationID = UUID()
+        let result = AutomationResultBox<AutomationJSON>()
+        let task = Task { @MainActor [self] in
+            do {
+                let saved = try await saveSnapshotRecord(
+                    response: response,
+                    source: source,
+                    name: normalizedName,
+                    runID: response.runID,
+                    operationID: operationID
+                )
+                result.result = .success(snapshotJSON(saved))
+            } catch {
+                result.result = .failure(error)
+            }
+        }
+        snapshotSaveTasks[response.runID, default: [:]][operationID] = task
+        savingSnapshotRunIDs.insert(response.runID)
+        await task.value
+
+        guard let operation = result.result else {
+            throw AutomationFailure(.unavailable, "The snapshot could not be saved.")
+        }
+        do {
+            return try operation.get()
+        } catch SnapshotSaveFailure.bodyUnavailable {
+            throw AutomationFailure(.unavailable, "The response body is unavailable.")
+        } catch SnapshotSaveFailure.storageUnavailable {
+            throw AutomationFailure(.unavailable, "Snapshot storage is unavailable.")
+        } catch {
+            throw AutomationFailure(.storageFailure, "The snapshot could not be saved.")
+        }
+    }
+
+    private func renameAutomationSnapshot(
+        id: UUID,
+        name: String,
+        channel: AutomationChannel
+    ) async throws -> AutomationJSON {
+        try requireMCPWorkspaceIndex(channel)
+        guard let snapshot = snapshots.first(where: { $0.id == id }) else {
+            throw AutomationFailure(.notFound, "The snapshot was not found.")
+        }
+        if isMCP(channel), snapshotIsMCPExcluded(snapshot) {
+            throw AutomationFailure(.forbidden, "The snapshot is excluded from MCP access.")
+        }
+        guard !isTerminating, let snapshotStore else {
+            throw AutomationFailure(.unavailable, "Snapshot storage is unavailable.")
+        }
+        guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw AutomationFailure(.invalidArguments, "Snapshot name cannot be empty.")
+        }
+
+        do {
+            let renamed = try await snapshotStore.rename(id: id, name: name)
+            upsertSnapshot(renamed)
+            return snapshotJSON(renamed)
+        } catch {
+            throw AutomationFailure(.storageFailure, "The snapshot could not be renamed.")
+        }
+    }
+
+    private func deleteAutomationSnapshot(id: UUID, channel: AutomationChannel) async throws -> AutomationJSON {
+        try requireMCPWorkspaceIndex(channel)
+        guard let snapshot = snapshots.first(where: { $0.id == id }) else {
+            throw AutomationFailure(.notFound, "The snapshot was not found.")
+        }
+        if isMCP(channel), snapshotIsMCPExcluded(snapshot) {
+            throw AutomationFailure(.forbidden, "The snapshot is excluded from MCP access.")
+        }
+        guard !isTerminating, let snapshotStore else {
+            throw AutomationFailure(.unavailable, "Snapshot storage is unavailable.")
+        }
+
+        let result = AutomationResultBox<AutomationJSON>()
+        await withWorkspaceIndexMutation { [weak self] in
+            guard let self else {
+                result.result = .failure(AutomationFailure(.unavailable, "The workspace is unavailable."))
+                return
+            }
+            do {
+                try await snapshotStore.delete(id: id)
+                self.markWorkspaceChanged()
+                self.snapshots.removeAll { $0.id == id }
+                self.openedSnapshots.removeValue(forKey: id)
+                self.openingSnapshots.remove(id)
+                self.snapshotOpenErrors.removeValue(forKey: id)
+                guard let store = self.store else {
+                    throw AutomationFailure(
+                        .storageFailure, "The snapshot was deleted but workspace metadata could not be updated.")
+                }
+                do {
+                    self.workspaceIndex = try await store.removeSnapshotGrouping(id: id)
+                    result.result = .success(.object(["snapshotID": .string(id.uuidString), "deleted": .bool(true)]))
+                } catch {
+                    self.operationError = "A deleted snapshot's workspace metadata could not be cleared."
+                    result.result = .failure(
+                        AutomationFailure(
+                            .storageFailure, "The snapshot was deleted but workspace metadata could not be updated."))
+                }
+            } catch {
+                result.result = .failure(AutomationFailure(.storageFailure, "The snapshot could not be deleted."))
+            }
+        }
+        guard let operation = result.result else {
+            throw AutomationFailure(.unavailable, "The snapshot could not be deleted.")
+        }
+        return try operation.get()
+    }
+
+    private func requireMCPWorkspaceIndex(_ channel: AutomationChannel) throws {
+        guard !isMCP(channel) || !workspaceIndexIsReadOnly else {
+            throw AutomationFailure(.forbidden, "Snapshot access is unavailable while workspace metadata is read-only.")
+        }
+    }
+
+    private func requireAccessibleSnapshot(_ snapshot: SavedSnapshot, channel: AutomationChannel) throws {
+        try requireMCPWorkspaceIndex(channel)
+        if isMCP(channel), snapshotIsMCPExcluded(snapshot) {
+            throw AutomationFailure(.forbidden, "The snapshot is excluded from MCP access.")
+        }
+    }
+
+    private func snapshotJSON(_ snapshot: SavedSnapshot) -> AutomationJSON {
+        .object([
+            "snapshotID": .string(snapshot.id.uuidString),
+            "name": .string(snapshot.name),
+            "capturedAt": .string(iso8601(snapshot.capturedAt)),
+            "statusCode": integer(snapshot.statusCode),
+            "bodyByteCount": .number(Decimal(snapshot.bodyByteCount)),
+            "source": .object([
+                "collectionID": .string(snapshot.source.identity.collectionID.uuidString),
+                "requestID": .string(snapshot.source.identity.requestID.uuidString),
+                "collectionName": .string(snapshot.source.collectionName),
+                "requestName": .string(snapshot.source.requestName),
+            ]),
+        ])
+    }
+
+    private func groupingJSON(_ grouping: SnapshotGrouping) -> AutomationJSON {
+        .object([
+            "collectionID": .string(grouping.identity.collectionID.uuidString),
+            "requestID": .string(grouping.identity.requestID.uuidString),
+            "collectionName": .string(grouping.collectionName),
+            "requestName": .string(grouping.requestName),
+        ])
+    }
+
+    private func iso8601(_ date: Date) -> String {
+        ISO8601DateFormatter().string(from: date)
+    }
+
+    private func requestScope(
+        _ arguments: AutomationArguments,
+        channel: AutomationChannel
+    ) throws -> (collectionID: UUID, identity: RequestIdentity?)? {
+        try optionalRequestScope(arguments, channel: channel)
+    }
+
 }
 
 enum RequestEditorSection: Hashable {
@@ -47,6 +1115,7 @@ final class AppModel: ObservableObject {
         let token: UUID
         let request: HTTPRequestConfiguration
         let snapshotSource: SnapshotSource?
+        var snapshotCapture: SnapshotPreparationCapture? = nil
         let startedAt: Date
         var phase: Phase
         var runID: UUID?
@@ -63,10 +1132,27 @@ final class AppModel: ObservableObject {
         var isLoadingPreview: Bool
     }
 
+    private enum AutomationRunTerminal {
+        case completed(HTTPResponseRecord, SnapshotSource?)
+        case failed(String)
+        case cancelled
+    }
+
+    private struct AutomationRunOutcome {
+        let token: UUID
+        var identity: RequestIdentity
+        let terminal: AutomationRunTerminal
+        let finishedAt: Date
+        var mcpAccessExcluded: Bool
+    }
+
     @Published private(set) var globalVariables: VariableValues = [:]
     @Published private(set) var globalVariablesAreReadOnly = true
     @Published private(set) var globalOptions = HTTPOptions()
     @Published private(set) var globalOptionsAreReadOnly = true
+    @Published private(set) var workspaceIndex = WorkspaceIndex()
+    @Published private(set) var workspaceIndexIsReadOnly = false
+    @Published private(set) var globalMCPResponseViewing: MCPResponseViewPolicy = .block
     @Published private(set) var showsGlobalSettings = false
     @Published private(set) var variableSaveErrors: [VariableOwner: String] = [:]
     @Published private(set) var showsGlobalVariables = false
@@ -100,6 +1186,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var deletingCollections: Set<UUID> = []
     @Published private(set) var deletingRequests: Set<RequestIdentity> = []
     @Published private(set) var reconcilingRequests: Set<RequestIdentity> = []
+    @Published private(set) var movingRequests: Set<RequestIdentity> = []
     @Published var operationError: String?
 
     private struct Directories {
@@ -134,6 +1221,8 @@ final class AppModel: ObservableObject {
     private var scopeSaveErrors: [VariableOwner: String] = [:]
     private var secretEditTokens: [SecretEditTarget: UUID] = [:]
     private var secretCommitErrors: [SecretEditTarget: String] = [:]
+    private var secretCommitTasks: [SecretEditTarget: (token: UUID, task: Task<Result<Void, Error>, Never>)] = [:]
+    private var automationEditingRequests: Set<RequestIdentity> = []
     private var preparationTasks: [RequestIdentity: Task<Void, Never>] = [:]
     private var store: CollectionStore?
     private var snapshotStore: SnapshotStore?
@@ -148,10 +1237,15 @@ final class AppModel: ObservableObject {
     private var settlementWaiters: [RequestIdentity: [CheckedContinuation<Void, Never>]] = [:]
     private var collectionMutationTasks: [UUID: Task<Void, Never>] = [:]
     private var collectionMutationTokens: [UUID: UUID] = [:]
+    private var workspaceIndexMutationTask: Task<Void, Never>?
+    private var workspaceIndexMutationToken: UUID?
     private var acceptedMutationTasks: [UUID: Task<Void, Never>] = [:]
     private var mutationDrainWaiters: [UUID: CheckedContinuation<Void, Error>] = [:]
     private var mutationDrainTimeoutTasks: [UUID: Task<Void, Never>] = [:]
     private var workspaceRevision: UInt64 = 0
+    private var automationRunOutcomes: [RequestIdentity: AutomationRunOutcome] = [:]
+    private var automationRunOutcomeOrder: [RequestIdentity] = []
+    private let maximumAutomationRunOutcomes = 256
 
     init(arguments: [String] = ProcessInfo.processInfo.arguments, secretVault: SecretVault? = nil) {
         self.secretVault =
@@ -264,7 +1358,51 @@ final class AppModel: ObservableObject {
     func canEdit(_ identity: RequestIdentity) -> Bool {
         guard workspaceLoaded, let collection = collection(for: identity), drafts[identity] != nil else { return false }
         return !collection.isReadOnly && !deletingCollections.contains(identity.collectionID)
-            && !deletingRequests.contains(identity) && !reconcilingRequests.contains(identity) && !isTerminating
+            && !deletingRequests.contains(identity) && !reconcilingRequests.contains(identity)
+            && !movingRequests.contains(identity) && !automationEditingRequests.contains(identity) && !isTerminating
+    }
+
+    private var snapshotInventoryAllowsSourceMutation: Bool {
+        workspaceLoaded && snapshotLoadError == nil && snapshotStorageIssues.isEmpty
+    }
+
+    var canReorderCollections: Bool {
+        workspaceLoaded && !workspaceIndexIsReadOnly && !isTerminating && collections.count > 1
+    }
+
+    func snapshotGrouping(for snapshot: SavedSnapshot) -> SnapshotGrouping {
+        let fallback = SnapshotGrouping(
+            identity: snapshot.source.identity,
+            collectionName: snapshot.source.collectionName,
+            requestName: snapshot.source.requestName
+        )
+        let grouping = workspaceIndex.snapshotGroupingOverrides[snapshot.id] ?? fallback
+        guard let collection = collections.first(where: { $0.id == grouping.identity.collectionID }),
+            let request = collection.requests.first(where: { $0.id == grouping.identity.requestID })
+        else {
+            return grouping
+        }
+        return SnapshotGrouping(
+            identity: grouping.identity,
+            collectionName: collection.name,
+            requestName: request.name
+        )
+    }
+
+    func snapshotIsMCPExcluded(_ snapshot: SavedSnapshot) -> Bool {
+        workspaceIndexIsReadOnly || workspaceIndex.mcpExcludedSnapshotIDs.contains(snapshot.id)
+            || snapshotPolicyIsMCPExcluded(snapshot)
+    }
+
+    private func snapshotPolicyIsMCPExcluded(_ snapshot: SavedSnapshot) -> Bool {
+        let grouping = snapshotGrouping(for: snapshot)
+        guard let collection = collections.first(where: { $0.id == grouping.identity.collectionID }) else {
+            return false
+        }
+        let requestPolicy =
+            drafts[grouping.identity]?.mcpPolicy ?? collection.requests
+            .first(where: { $0.id == grouping.identity.requestID })?.mcpPolicy ?? MCPResourcePolicy()
+        return !MCPResourcePolicy.isAccessible(collection: collection.mcpPolicy, request: requestPolicy)
     }
 
     func canFollowRedirect(_ identity: RequestIdentity) -> Bool {
@@ -374,6 +1512,20 @@ final class AppModel: ObservableObject {
         globalOptions = options
         markWorkspaceChanged()
         scheduleVariableSave(.global)
+    }
+
+    func saveGlobalMCPResponseViewing(_ policy: MCPResponseViewPolicy) async {
+        guard workspaceLoaded, !isTerminating, policy != .inherit, let store else { return }
+        await withAcceptedMutation { [weak self] in
+            guard let self, !self.isTerminating else { return }
+            do {
+                try await store.saveGlobalMCPResponseViewing(policy)
+                self.globalMCPResponseViewing = policy
+                self.markWorkspaceChanged()
+            } catch {
+                self.operationError = error.localizedDescription
+            }
+        }
     }
 
     func requestOptionOverrides(for identity: RequestIdentity) -> HTTPOptionsOverrides {
@@ -526,6 +1678,30 @@ final class AppModel: ObservableObject {
         collections[index].headers = headers
         markWorkspaceChanged()
         scheduleVariableSave(.collection(id))
+    }
+
+    func updateCollectionMCPPolicy(_ policy: MCPResourcePolicy, for collectionID: UUID) async {
+        guard !isTerminating,
+            let store,
+            collections.contains(where: { $0.id == collectionID && !$0.isReadOnly })
+        else { return }
+        await withCollectionMutation(collectionID) { [weak self] in
+            guard let self,
+                !self.isTerminating,
+                let index = self.collections.firstIndex(where: { $0.id == collectionID && !$0.isReadOnly })
+            else { return }
+            do {
+                try await store.saveCollectionMCPPolicy(policy, in: collectionID)
+                self.collections[index].mcpPolicy = policy
+                self.markWorkspaceChanged()
+            } catch {
+                self.operationError = error.localizedDescription
+            }
+        }
+    }
+
+    func updateRequestMCPPolicy(_ policy: MCPResourcePolicy, for identity: RequestIdentity) {
+        updateDraft(identity) { $0.mcpPolicy = policy }
     }
 
     func setInheritsCollectionAuthentication(_ inherits: Bool, for identity: RequestIdentity) {
@@ -839,7 +2015,8 @@ final class AppModel: ObservableObject {
         let prepared = try await RequestPreparer.prepare(
             preview,
             context: variableContext,
-            decryptor: secretVault
+            decryptor: secretVault,
+            captureRedactionInputs: false
         )
 
         let resolvedHeaderName: String?
@@ -871,6 +2048,7 @@ final class AppModel: ObservableObject {
     }
 
     private func updateAuthentication(_ owner: VariableOwner, _ update: (inout RequestAuthentication) -> Void) {
+        guard canCommitVariables(owner) else { return }
         switch owner {
         case let .request(identity):
             guard var draft = drafts[identity] else { return }
@@ -896,6 +2074,7 @@ final class AppModel: ObservableObject {
             guard let collection = collection(for: identity), drafts[identity] != nil else { return false }
             return !collection.isReadOnly && !deletingCollections.contains(identity.collectionID)
                 && !deletingRequests.contains(identity) && !reconcilingRequests.contains(identity)
+                && !movingRequests.contains(identity) && !automationEditingRequests.contains(identity)
         }
     }
 
@@ -944,15 +2123,32 @@ final class AppModel: ObservableObject {
             }
         }
         acceptedMutationTasks[token] = Task { _ = await task.value }
+        secretCommitTasks[target] = (token, task)
         let result = await task.value
+        if secretCommitTasks[target]?.token == token {
+            secretCommitTasks.removeValue(forKey: target)
+        }
         finishAcceptedMutation(token)
         try result.get()
+    }
+
+    private func waitForSecretEdits(owner: VariableOwner) async {
+        let tasks =
+            secretCommitTasks
+            .filter { $0.key.owner == owner }
+            .map { $0.value.task }
+        for task in tasks { _ = await task.value }
     }
 
     private func discardSecretEdit(_ target: SecretEditTarget) {
         secretEditTokens.removeValue(forKey: target)
         secretCommitErrors.removeValue(forKey: target)
         refreshVariableError(target.owner)
+    }
+
+    private func invalidateSecretEdits(for owner: VariableOwner) {
+        for target in Array(secretEditTokens.keys) where target.owner == owner { discardSecretEdit(target) }
+        for target in Array(secretCommitErrors.keys) where target.owner == owner { discardSecretEdit(target) }
     }
 
     private func refreshVariableError(_ owner: VariableOwner) {
@@ -1029,15 +2225,22 @@ final class AppModel: ObservableObject {
         guard !isTerminating, let store else { return }
         let normalizedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalizedName.isEmpty else { return }
+        guard !workspaceIndexIsReadOnly else {
+            operationError = "Collection order is read-only because the workspace index could not be updated."
+            return
+        }
 
-        await withAcceptedMutation { [weak self] in
+        await withWorkspaceIndexMutation { [weak self] in
             guard let self else { return }
             do {
                 let collection = try await store.createCollection(name: normalizedName)
                 self.markWorkspaceChanged()
-                self.collections = self.sorted(self.collections + [collection])
+                self.workspaceIndex = try await store.reorderCollections(
+                    ids: self.collections.map(\.id) + [collection.id])
+                self.collections = self.ordered(self.collections + [collection])
             } catch {
                 self.operationError = error.localizedDescription
+                await self.loadWorkspace()
             }
         }
     }
@@ -1057,11 +2260,20 @@ final class AppModel: ObservableObject {
     }
 
     func deleteCollection(id: UUID) async {
+        guard snapshotInventoryAllowsSourceMutation else {
+            operationError = "Collections cannot be deleted until snapshot storage is fully available."
+            return
+        }
         guard !isTerminating,
             !deletingCollections.contains(id),
             !deletingRequests.contains(where: { $0.collectionID == id }),
+            !automationEditingRequests.contains(where: { $0.collectionID == id }),
             collections.contains(where: { $0.id == id && !$0.isReadOnly })
         else { return }
+        guard !workspaceIndexIsReadOnly else {
+            operationError = "Collection order is read-only because the workspace index could not be updated."
+            return
+        }
         deletingCollections.insert(id)
         await withCollectionMutation(id) { [weak self] in
             await self?.performDeleteCollection(id: id)
@@ -1091,6 +2303,10 @@ final class AppModel: ObservableObject {
     }
 
     func deleteRequest(_ identity: RequestIdentity) async {
+        guard snapshotInventoryAllowsSourceMutation else {
+            operationError = "Requests cannot be deleted until snapshot storage is fully available."
+            return
+        }
         guard !isTerminating,
             !deletingCollections.contains(identity.collectionID),
             !deletingRequests.contains(identity),
@@ -1110,6 +2326,82 @@ final class AppModel: ObservableObject {
         else { return }
         await withCollectionMutation(collectionID) { [weak self] in
             await self?.performReorderRequests(requestIDs, in: collectionID)
+        }
+    }
+
+    func reorderCollections(_ collectionIDs: [UUID]) async {
+        guard canReorderCollections else { return }
+        await withWorkspaceIndexMutation { [weak self] in
+            await self?.performReorderCollections(collectionIDs)
+        }
+    }
+
+    func moveRequest(
+        _ identity: RequestIdentity,
+        toCollectionID: UUID,
+        beforeRequestID: UUID? = nil
+    ) async {
+        guard !isTerminating,
+            !movingRequests.contains(identity),
+            !deletingCollections.contains(identity.collectionID),
+            !deletingRequests.contains(identity),
+            !reconcilingRequests.contains(identity),
+            !automationEditingRequests.contains(identity),
+            let sourceCollection = collection(for: identity),
+            !sourceCollection.isReadOnly,
+            sourceCollection.requests.contains(where: { $0.id == identity.requestID })
+        else { return }
+
+        if identity.collectionID == toCollectionID {
+            guard let collection = collections.first(where: { $0.id == toCollectionID }),
+                beforeRequestID != identity.requestID
+            else { return }
+            var orderedIDs = collection.requests.map(\.id).filter { $0 != identity.requestID }
+            let insertionIndex = beforeRequestID.flatMap { id in orderedIDs.firstIndex(of: id) } ?? orderedIDs.endIndex
+            orderedIDs.insert(identity.requestID, at: insertionIndex)
+            await reorderRequests(orderedIDs, in: toCollectionID)
+            return
+        }
+
+        guard snapshotInventoryAllowsSourceMutation else {
+            operationError = "Requests cannot move between collections until snapshot storage is fully available."
+            return
+        }
+
+        guard let destinationCollection = collections.first(where: { $0.id == toCollectionID }) else {
+            operationError = "The destination collection is no longer available."
+            return
+        }
+        guard !destinationCollection.isReadOnly else {
+            operationError = "Requests cannot be moved into a read-only collection."
+            return
+        }
+
+        guard !workspaceIndexIsReadOnly else {
+            operationError = "Requests cannot move while the workspace index is read-only."
+            return
+        }
+        guard activeRuns[identity] == nil else {
+            operationError = "Stop the request before moving it to another collection."
+            return
+        }
+
+        let destinationIdentity = RequestIdentity(collectionID: toCollectionID, requestID: identity.requestID)
+        guard !movingRequests.contains(destinationIdentity) else { return }
+        movingRequests.formUnion([identity, destinationIdentity])
+        invalidateSecretEdits(for: .request(identity))
+        if let definition = variableDefinitionRequest,
+            case let .request(definitionIdentity) = definition.owner,
+            definitionIdentity == identity
+        {
+            variableDefinitionRequest = nil
+        }
+        defer {
+            movingRequests.remove(identity)
+            movingRequests.remove(destinationIdentity)
+        }
+        await withCollectionMutations([identity.collectionID, toCollectionID]) { [weak self] in
+            await self?.performMoveRequest(identity, toCollectionID: toCollectionID, beforeRequestID: beforeRequestID)
         }
     }
 
@@ -1258,10 +2550,12 @@ final class AppModel: ObservableObject {
                     collection: collectionDefaults, captureRedactionInputs: true
                 )
                 try Task.checkCancellation()
-                guard let self, self.activeRuns[identity]?.token == token else { return }
+                guard let self, var active = self.activeRuns[identity], active.token == token else { return }
+                active.snapshotCapture = prepared.snapshotCapture
+                self.activeRuns[identity] = active
                 guard self.canEdit(identity), self.activeRuns[identity]?.cancelRequested == false else {
                     self.cancelledRequests.insert(identity)
-                    self.settleRun(identity, token: token)
+                    self.settleRun(identity, token: token, terminal: .cancelled)
                     return
                 }
                 let run = try await executionManager.start(identity: identity, prepared: prepared)
@@ -1269,7 +2563,7 @@ final class AppModel: ObservableObject {
             } catch is CancellationError {
                 guard let self, self.activeRuns[identity]?.token == token else { return }
                 self.cancelledRequests.insert(identity)
-                self.settleRun(identity, token: token)
+                self.settleRun(identity, token: token, terminal: .cancelled)
             } catch {
                 self?.finishRun(identity, token: token, error: error.localizedDescription)
             }
@@ -1294,6 +2588,7 @@ final class AppModel: ObservableObject {
             token: token,
             request: currentRequest,
             snapshotSource: latestResponses[identity]?.snapshotSource,
+            snapshotCapture: response.snapshotCapture,
             startedAt: Date(),
             phase: .preparing,
             runID: nil,
@@ -1310,7 +2605,7 @@ final class AppModel: ObservableObject {
                 guard let self, self.activeRuns[identity]?.token == token else { return }
                 guard self.canEdit(identity), self.activeRuns[identity]?.cancelRequested == false else {
                     self.cancelledRequests.insert(identity)
-                    self.settleRun(identity, token: token)
+                    self.settleRun(identity, token: token, terminal: .cancelled)
                     return
                 }
                 let run = try await executionManager.followRedirect(identity: identity, response: response)
@@ -1318,7 +2613,7 @@ final class AppModel: ObservableObject {
             } catch is CancellationError {
                 guard let self, self.activeRuns[identity]?.token == token else { return }
                 self.cancelledRequests.insert(identity)
-                self.settleRun(identity, token: token)
+                self.settleRun(identity, token: token, terminal: .cancelled)
             } catch {
                 self?.finishRun(identity, token: token, error: error.localizedDescription)
             }
@@ -1372,7 +2667,7 @@ final class AppModel: ObservableObject {
         guard active.runID != nil else {
             preparationTasks.removeValue(forKey: identity)?.cancel()
             cancelledRequests.insert(identity)
-            settleRun(identity, token: active.token)
+            settleRun(identity, token: active.token, terminal: .cancelled)
             return
         }
         guard let runID = active.runID, let executionManager else { return }
@@ -1430,13 +2725,16 @@ final class AppModel: ObservableObject {
     }
 
     func snapshots(for identity: RequestIdentity) -> [SavedSnapshot] {
-        snapshots.filter { $0.source.identity == identity }
+        snapshots.filter { snapshotGrouping(for: $0).identity == identity }
     }
 
     func canSaveSnapshot(for identity: RequestIdentity) -> Bool {
         guard !isTerminating,
             snapshotStore != nil,
             executionManager != nil,
+            !movingRequests.contains(identity),
+            !deletingCollections.contains(identity.collectionID),
+            !deletingRequests.contains(identity),
             let latest = latestResponses[identity],
             latest.snapshotSource != nil,
             latest.response.snapshotCapture != nil
@@ -1484,16 +2782,26 @@ final class AppModel: ObservableObject {
 
     func deleteSnapshot(id: UUID) async {
         guard !isTerminating, let snapshotStore else { return }
-        do {
-            try await snapshotStore.delete(id: id)
-            markWorkspaceChanged()
-            snapshots.removeAll { $0.id == id }
-            openedSnapshots.removeValue(forKey: id)
-            openingSnapshots.remove(id)
-            snapshotOpenErrors.removeValue(forKey: id)
-            if selectedSnapshotID == id { selectedSnapshotID = nil }
-        } catch {
-            operationError = error.localizedDescription
+        await withWorkspaceIndexMutation { [weak self] in
+            guard let self, !self.isTerminating else { return }
+            do {
+                try await snapshotStore.delete(id: id)
+                self.markWorkspaceChanged()
+                self.snapshots.removeAll { $0.id == id }
+                self.openedSnapshots.removeValue(forKey: id)
+                self.openingSnapshots.remove(id)
+                self.snapshotOpenErrors.removeValue(forKey: id)
+                if self.selectedSnapshotID == id { self.selectedSnapshotID = nil }
+                guard let store = self.store else { return }
+                do {
+                    self.workspaceIndex = try await store.removeSnapshotGrouping(id: id)
+                } catch {
+                    self.operationError = error.localizedDescription
+                    await self.loadWorkspace()
+                }
+            } catch {
+                self.operationError = error.localizedDescription
+            }
         }
     }
 
@@ -1523,15 +2831,36 @@ final class AppModel: ObservableObject {
         runID: UUID,
         operationID: UUID
     ) async {
+        do {
+            _ = try await saveSnapshotRecord(
+                response: response,
+                source: source,
+                name: name,
+                runID: runID,
+                operationID: operationID
+            )
+        } catch {
+            operationError = error.localizedDescription
+        }
+    }
+
+    private func saveSnapshotRecord(
+        response: HTTPResponseRecord,
+        source: SnapshotSource,
+        name: String,
+        runID: UUID,
+        operationID: UUID
+    ) async throws -> SavedSnapshot {
         defer { finishSnapshotSave(runID: runID, operationID: operationID) }
-        guard let snapshotStore, let executionManager else { return }
+        guard let snapshotStore, let executionManager else {
+            throw SnapshotSaveFailure.storageUnavailable
+        }
 
         let lease: HTTPBodyLease
         do {
             lease = try await executionManager.acquireBodyLease(for: response)
         } catch {
-            operationError = error.localizedDescription
-            return
+            throw SnapshotSaveFailure.bodyUnavailable
         }
 
         do {
@@ -1541,11 +2870,13 @@ final class AppModel: ObservableObject {
                 name: name,
                 bodyLease: lease
             )
+            await executionManager.releaseBodyLease(lease)
             upsertSnapshot(saved)
+            return saved
         } catch {
-            operationError = error.localizedDescription
+            await executionManager.releaseBodyLease(lease)
+            throw error
         }
-        await executionManager.releaseBodyLease(lease)
     }
 
     private func finishSnapshotSave(runID: UUID, operationID: UUID) {
@@ -1770,7 +3101,7 @@ final class AppModel: ObservableObject {
                 guard revision == workspaceRevision else { continue }
 
                 let retainedCollections = Dictionary(uniqueKeysWithValues: collections.map { ($0.id, $0) })
-                let nextCollections = sorted(
+                let nextCollections = Self.ordered(
                     loaded.collections.map { collection in
                         var collection = collection
                         if dirtyVariableOwners.contains(.collection(collection.id)),
@@ -1781,7 +3112,7 @@ final class AppModel: ObservableObject {
                             collection.authentication = retained.authentication
                         }
                         return collection
-                    })
+                    }, by: loaded.workspaceIndex)
                 let nextGlobals = dirtyVariableOwners.contains(.global) ? globalVariables : loaded.globalVariables
                 var nextDrafts = drafts.filter { !unavailable.contains($0.key) }
                 for (identity, request) in available where nextDrafts[identity] == nil {
@@ -1808,6 +3139,9 @@ final class AppModel: ObservableObject {
                 for identity in unavailable {
                     removeLocalRequestState(for: identity)
                 }
+                workspaceIndex = loaded.workspaceIndex
+                workspaceIndexIsReadOnly = loaded.workspaceIndexIsReadOnly
+                globalMCPResponseViewing = loaded.globalMCPResponseViewing
                 collections = nextCollections
                 snapshotLoadError = snapshotError
                 if let snapshotLoad {
@@ -2039,14 +3373,14 @@ final class AppModel: ObservableObject {
             guard response.runID == runID else { return false }
             replaceLatestResponse(response, for: identity, source: active.snapshotSource)
             activeRuns[identity]?.redirects = response.redirects
-            settleRun(identity, token: token)
+            settleRun(identity, token: token, terminal: .completed(response, active.snapshotSource))
             return true
         case let .failed(message):
             finishRun(identity, token: token, runID: runID, error: message)
             return true
         case .cancelled:
             cancelledRequests.insert(identity)
-            settleRun(identity, token: token)
+            settleRun(identity, token: token, terminal: .cancelled)
             return true
         }
     }
@@ -2057,15 +3391,38 @@ final class AppModel: ObservableObject {
             runID == nil || active.runID == runID
         else { return }
         runErrors[identity] = error
-        settleRun(identity, token: token)
+        settleRun(identity, token: token, terminal: .failed(error))
     }
 
-    private func settleRun(_ identity: RequestIdentity, token: UUID) {
-        guard activeRuns[identity]?.token == token else { return }
+    private func settleRun(_ identity: RequestIdentity, token: UUID, terminal: AutomationRunTerminal? = nil) {
+        guard let active = activeRuns[identity], active.token == token else { return }
+        let result = terminal ?? (cancelledRequests.contains(identity) ? .cancelled : nil)
+        if let result {
+            retainAutomationRunOutcome(
+                AutomationRunOutcome(
+                    token: token,
+                    identity: identity,
+                    terminal: result,
+                    finishedAt: Date(),
+                    mcpAccessExcluded: (drafts[identity]?.mcpPolicy.excluded ?? active.request.mcpPolicy.excluded)
+                        || collection(for: identity)?.mcpPolicy.excluded == true
+                )
+            )
+        }
         preparationTasks.removeValue(forKey: identity)
         activeRuns.removeValue(forKey: identity)
         let waiters = settlementWaiters.removeValue(forKey: identity) ?? []
         waiters.forEach { $0.resume() }
+    }
+
+    private func retainAutomationRunOutcome(_ outcome: AutomationRunOutcome) {
+        automationRunOutcomes[outcome.identity] = outcome
+        automationRunOutcomeOrder.removeAll { $0 == outcome.identity }
+        automationRunOutcomeOrder.append(outcome.identity)
+        while automationRunOutcomeOrder.count > maximumAutomationRunOutcomes {
+            let expired = automationRunOutcomeOrder.removeFirst()
+            automationRunOutcomes.removeValue(forKey: expired)
+        }
     }
 
     private func replaceLatestResponse(
@@ -2142,22 +3499,36 @@ final class AppModel: ObservableObject {
             await cancelAndWait(for: identity)
             await waitForSaves(for: identity)
         }
+        await waitForSnapshotSaves()
 
-        do {
-            try await store.deleteCollection(id: id)
-            markWorkspaceChanged()
-            for identity in requestIdentities {
-                removeLocalRequestState(for: identity)
+        await withWorkspaceIndexMutation { [weak self] in
+            guard let self else { return }
+            guard self.snapshotInventoryAllowsSourceMutation else {
+                self.operationError = "Collections cannot be deleted until snapshot storage is fully available."
+                return
             }
-            collections.removeAll { $0.id == id }
-            if selectedCollectionID == id { selectedCollectionID = nil }
-            removeVariableOwnerState(.collection(id))
-            if selectedIdentity?.collectionID == id {
-                selectFirstRequest()
+            do {
+                let retainedSnapshots = self.snapshots.filter {
+                    self.snapshotGrouping(for: $0).identity.collectionID == id
+                }
+                try await self.persistMCPExclusions(for: retainedSnapshots, using: store)
+                try await store.deleteCollection(id: id)
+                self.markWorkspaceChanged()
+                self.workspaceIndex = try await store.reorderCollections(
+                    ids: self.collections.map(\.id).filter { $0 != id })
+                for identity in requestIdentities {
+                    self.removeLocalRequestState(for: identity)
+                }
+                self.collections.removeAll { $0.id == id }
+                if self.selectedCollectionID == id { self.selectedCollectionID = nil }
+                self.removeVariableOwnerState(.collection(id))
+                if self.selectedIdentity?.collectionID == id {
+                    self.selectFirstRequest()
+                }
+            } catch {
+                self.operationError = error.localizedDescription
+                await self.loadWorkspace()
             }
-        } catch {
-            operationError = error.localizedDescription
-            await loadWorkspace()
         }
     }
 
@@ -2220,24 +3591,45 @@ final class AppModel: ObservableObject {
         else { return }
         await cancelAndWait(for: identity)
         await waitForSaves(for: identity)
+        await waitForSnapshotSaves()
 
-        do {
-            try await store.deleteRequest(id: identity.requestID, in: identity.collectionID)
-            markWorkspaceChanged()
-            guard var current = collections.first(where: { $0.id == identity.collectionID }) else {
-                removeLocalRequestState(for: identity)
-                await loadWorkspace()
+        await withWorkspaceIndexMutation { [weak self] in
+            guard let self else { return }
+            guard self.snapshotInventoryAllowsSourceMutation else {
+                self.operationError = "Requests cannot be deleted until snapshot storage is fully available."
                 return
             }
-            current.requests.removeAll { $0.id == identity.requestID }
-            replaceCollection(current)
-            removeLocalRequestState(for: identity)
-            if selectedIdentity == identity {
-                selectFirstRequest()
+            do {
+                try await self.persistMCPExclusions(for: self.snapshots(for: identity), using: store)
+                try await store.deleteRequest(id: identity.requestID, in: identity.collectionID)
+                self.markWorkspaceChanged()
+                guard var current = self.collections.first(where: { $0.id == identity.collectionID }) else {
+                    self.removeLocalRequestState(for: identity)
+                    await self.loadWorkspace()
+                    return
+                }
+                current.requests.removeAll { $0.id == identity.requestID }
+                self.replaceCollection(current)
+                self.removeLocalRequestState(for: identity)
+                if self.selectedIdentity == identity {
+                    self.selectFirstRequest()
+                }
+            } catch {
+                self.operationError = error.localizedDescription
+                await self.loadWorkspace()
             }
-        } catch {
-            operationError = error.localizedDescription
-            await loadWorkspace()
+        }
+    }
+
+    private func persistMCPExclusions(for snapshots: [SavedSnapshot], using store: CollectionStore) async throws {
+        let excludedSnapshots = snapshots.filter {
+            workspaceIndex.mcpExcludedSnapshotIDs.contains($0.id) || snapshotPolicyIsMCPExcluded($0)
+        }
+        guard !excludedSnapshots.isEmpty else { return }
+        guard !workspaceIndexIsReadOnly else { throw CollectionStoreError.workspaceIndexIsReadOnly }
+
+        for snapshot in excludedSnapshots {
+            workspaceIndex = try await store.setSnapshotMCPExcluded(id: snapshot.id, isExcluded: true)
         }
     }
 
@@ -2266,6 +3658,203 @@ final class AppModel: ObservableObject {
         }
     }
 
+    private func performReorderCollections(_ requestedIDs: [UUID]) async {
+        guard let store, !workspaceIndexIsReadOnly else { return }
+        let availableIDs = collections.map(\.id)
+        let availableSet = Set(availableIDs)
+        var seen = Set<UUID>()
+        var orderedIDs = requestedIDs.filter { availableSet.contains($0) && seen.insert($0).inserted }
+        orderedIDs.append(contentsOf: availableIDs.filter { seen.insert($0).inserted })
+
+        do {
+            workspaceIndex = try await store.reorderCollections(ids: orderedIDs)
+            markWorkspaceChanged()
+            collections = Self.ordered(collections, by: workspaceIndex)
+        } catch {
+            operationError = error.localizedDescription
+            await loadWorkspace()
+        }
+    }
+
+    private func performMoveRequest(
+        _ identity: RequestIdentity,
+        toCollectionID: UUID,
+        beforeRequestID: UUID?
+    ) async {
+        do {
+            try await flushRequestSaves(for: identity)
+            await waitForVariableSaves(.request(identity))
+            await waitForSnapshotSaves()
+            await finishPendingPreview(for: identity)
+        } catch {
+            operationError = error.localizedDescription
+            return
+        }
+
+        await withWorkspaceIndexMutation { [weak self] in
+            guard let self,
+                let store = self.store,
+                self.movingRequests.contains(identity)
+            else { return }
+            guard self.snapshotInventoryAllowsSourceMutation else {
+                self.operationError =
+                    "Requests cannot move between collections until snapshot storage is fully available."
+                return
+            }
+            guard self.activeRuns[identity] == nil else {
+                self.operationError = "Stop the request before moving it to another collection."
+                return
+            }
+            guard let source = self.collections.first(where: { $0.id == identity.collectionID && !$0.isReadOnly }),
+                source.requests.contains(where: { $0.id == identity.requestID })
+            else {
+                self.operationError = "The request is no longer available to move."
+                return
+            }
+            guard self.collections.contains(where: { $0.id == toCollectionID && !$0.isReadOnly }) else {
+                self.operationError = "The destination collection is no longer available."
+                return
+            }
+
+            let snapshotIDs = self.snapshots
+                .filter { self.snapshotGrouping(for: $0).identity == identity }
+                .map(\.id)
+            do {
+                let result = try await store.moveRequest(
+                    identity,
+                    toCollectionID: toCollectionID,
+                    beforeRequestID: beforeRequestID,
+                    snapshotIDs: snapshotIDs
+                )
+                self.markWorkspaceChanged()
+                self.workspaceIndex = result.workspaceIndex
+                self.installMovedRequest(result.newIdentity, from: result.oldIdentity, beforeRequestID: beforeRequestID)
+                self.remapRequestState(from: result.oldIdentity, to: result.newIdentity)
+            } catch {
+                self.operationError = error.localizedDescription
+                await self.loadWorkspace()
+            }
+        }
+    }
+
+    private func flushRequestSaves(for identity: RequestIdentity) async throws {
+        guard self.store != nil else { throw SaveFlushError.workspaceUnavailable }
+        let needsSave = dirtyDrafts.contains(identity) || autosaveErrors[identity] != nil
+        if needsSave {
+            pendingSaveTasks.removeValue(forKey: identity)?.cancel()
+            let version = (editVersions[identity] ?? 0) &+ 1
+            editVersions[identity] = version
+            autosaveErrors.removeValue(forKey: identity)
+            guard let draft = drafts[identity] else { throw SaveFlushError.workspaceUnavailable }
+            enqueueSave(draft, for: identity, version: version)
+        }
+        await saveChains[identity]?.value
+        saveChains.removeValue(forKey: identity)
+        guard !dirtyDrafts.contains(identity) else {
+            let name = drafts[identity]?.name ?? "Request"
+            throw SaveFlushError.failed([
+                "\(name): \(autosaveErrors[identity] ?? "The latest change is still unsaved.")"
+            ])
+        }
+    }
+
+    private func finishPendingPreview(for identity: RequestIdentity) async {
+        guard let pending = previewTasks[identity] else { return }
+        do {
+            finishPreview(try await pending.task.value, for: identity, runID: pending.runID)
+        } catch {
+            failPreview(error.localizedDescription, for: identity, runID: pending.runID)
+        }
+    }
+
+    private func installMovedRequest(
+        _ newIdentity: RequestIdentity,
+        from oldIdentity: RequestIdentity,
+        beforeRequestID: UUID?
+    ) {
+        guard let request = drafts[oldIdentity],
+            let sourceIndex = collections.firstIndex(where: { $0.id == oldIdentity.collectionID }),
+            let destinationIndex = collections.firstIndex(where: { $0.id == newIdentity.collectionID })
+        else {
+            Task { await loadWorkspace() }
+            return
+        }
+
+        collections[sourceIndex].requests.removeAll { $0.id == oldIdentity.requestID }
+        let insertionIndex =
+            beforeRequestID
+            .flatMap { id in collections[destinationIndex].requests.firstIndex(where: { $0.id == id }) }
+            ?? collections[destinationIndex].requests.endIndex
+        collections[destinationIndex].requests.insert(request, at: insertionIndex)
+        collections = Self.ordered(collections, by: workspaceIndex)
+    }
+
+    private func remapRequestState(from oldIdentity: RequestIdentity, to newIdentity: RequestIdentity) {
+        guard oldIdentity != newIdentity else { return }
+        removeVariableOwnerState(.request(oldIdentity))
+        moveValue(in: &drafts, from: oldIdentity, to: newIdentity)
+        moveValue(in: &editVersions, from: oldIdentity, to: newIdentity)
+        moveValue(in: &pendingSaveTasks, from: oldIdentity, to: newIdentity)
+        moveValue(in: &saveChains, from: oldIdentity, to: newIdentity)
+        moveValue(in: &latestResponses, from: oldIdentity, to: newIdentity) { response in
+            guard response.snapshotSource != nil,
+                let collection = collections.first(where: { $0.id == newIdentity.collectionID }),
+                let request = collection.requests.first(where: { $0.id == newIdentity.requestID })
+            else { return }
+            response = LatestResponse(
+                response: response.response,
+                snapshotSource: SnapshotSource(
+                    identity: newIdentity, collectionName: collection.name, requestName: request.name),
+                preview: response.preview,
+                previewError: response.previewError,
+                isLoadingPreview: response.isLoadingPreview
+            )
+        }
+        moveValue(in: &automationRunOutcomes, from: oldIdentity, to: newIdentity) { outcome in
+            outcome.identity = newIdentity
+            outcome.mcpAccessExcluded =
+                collections.first(where: { $0.id == newIdentity.collectionID })?.mcpPolicy.excluded == true
+                || drafts[newIdentity]?.mcpPolicy.excluded == true
+        }
+        if let index = automationRunOutcomeOrder.firstIndex(of: oldIdentity) {
+            automationRunOutcomeOrder[index] = newIdentity
+        }
+        moveValue(in: &runErrors, from: oldIdentity, to: newIdentity)
+        moveValue(in: &cancelledRequests, from: oldIdentity, to: newIdentity)
+        moveValue(in: &autosaveErrors, from: oldIdentity, to: newIdentity)
+        moveValue(in: &previewTasks, from: oldIdentity, to: newIdentity)
+        moveValue(in: &requestEditorSections, from: oldIdentity, to: newIdentity)
+        moveValue(in: &requestEditorExpansionStates, from: oldIdentity, to: newIdentity)
+        if dirtyDrafts.remove(oldIdentity) != nil { dirtyDrafts.insert(newIdentity) }
+        if reconcilingRequests.remove(oldIdentity) != nil { reconcilingRequests.insert(newIdentity) }
+        navigationHistory.remapRequest(from: oldIdentity, to: newIdentity)
+        if selectedIdentity == oldIdentity { selectedIdentity = newIdentity }
+        if let definition = variableDefinitionRequest,
+            case let .request(identity) = definition.owner,
+            identity == oldIdentity
+        {
+            variableDefinitionRequest = nil
+        }
+        refreshVariableError(.request(newIdentity))
+    }
+
+    private func moveValue<Value>(
+        in values: inout [RequestIdentity: Value],
+        from oldIdentity: RequestIdentity,
+        to newIdentity: RequestIdentity,
+        transform: (inout Value) -> Void = { _ in }
+    ) {
+        guard var value = values.removeValue(forKey: oldIdentity) else { return }
+        transform(&value)
+        values[newIdentity] = value
+    }
+
+    private func moveValue(
+        in values: inout Set<RequestIdentity>, from oldIdentity: RequestIdentity, to newIdentity: RequestIdentity
+    ) {
+        if values.remove(oldIdentity) != nil { values.insert(newIdentity) }
+    }
+
     private func withCollectionMutation(_ collectionID: UUID, operation: @escaping @MainActor () async -> Void) async {
         let token = UUID()
         let previous = collectionMutationTasks[collectionID]
@@ -2281,6 +3870,47 @@ final class AppModel: ObservableObject {
         if collectionMutationTokens[collectionID] == token {
             collectionMutationTasks.removeValue(forKey: collectionID)
             collectionMutationTokens.removeValue(forKey: collectionID)
+        }
+    }
+
+    private func withCollectionMutations(_ collectionIDs: [UUID], operation: @escaping @MainActor () async -> Void)
+        async
+    {
+        let orderedIDs = Array(Set(collectionIDs)).sorted { $0.uuidString < $1.uuidString }
+        let previousTasks = orderedIDs.compactMap { collectionMutationTasks[$0] }
+        let token = UUID()
+        let task = Task { @MainActor in
+            for previous in previousTasks { await previous.value }
+            await operation()
+        }
+        for id in orderedIDs {
+            collectionMutationTasks[id] = task
+            collectionMutationTokens[id] = token
+        }
+        acceptedMutationTasks[token] = task
+        await task.value
+        finishAcceptedMutation(token)
+        for id in orderedIDs where collectionMutationTokens[id] == token {
+            collectionMutationTasks.removeValue(forKey: id)
+            collectionMutationTokens.removeValue(forKey: id)
+        }
+    }
+
+    private func withWorkspaceIndexMutation(_ operation: @escaping @MainActor () async -> Void) async {
+        let previous = workspaceIndexMutationTask
+        let token = UUID()
+        let task = Task { @MainActor in
+            await previous?.value
+            await operation()
+        }
+        workspaceIndexMutationTask = task
+        workspaceIndexMutationToken = token
+        acceptedMutationTasks[token] = task
+        await task.value
+        finishAcceptedMutation(token)
+        if workspaceIndexMutationToken == token {
+            workspaceIndexMutationTask = nil
+            workspaceIndexMutationToken = nil
         }
     }
 
@@ -2344,6 +3974,8 @@ final class AppModel: ObservableObject {
 
     private func removeLocalRequestState(for identity: RequestIdentity) {
         removeVariableOwnerState(.request(identity))
+        automationRunOutcomes.removeValue(forKey: identity)
+        automationRunOutcomeOrder.removeAll { $0 == identity }
         pendingSaveTasks.removeValue(forKey: identity)?.cancel()
         saveChains.removeValue(forKey: identity)?.cancel()
         editVersions.removeValue(forKey: identity)
@@ -2362,7 +3994,7 @@ final class AppModel: ObservableObject {
     }
 
     private func replaceCollection(_ collection: RequestCollection) {
-        collections = sorted(collections.map { $0.id == collection.id ? collection : $0 })
+        collections = collections.map { $0.id == collection.id ? collection : $0 }
     }
 
     private func markWorkspaceChanged() {
@@ -2384,11 +4016,18 @@ final class AppModel: ObservableObject {
         }
     }
 
-    private func sorted(_ collections: [RequestCollection]) -> [RequestCollection] {
-        collections.sorted {
-            let left = $0.name.localizedCaseInsensitiveCompare($1.name)
-            return left == .orderedSame ? $0.id.uuidString < $1.id.uuidString : left == .orderedAscending
-        }
+    private func ordered(_ collections: [RequestCollection]) -> [RequestCollection] {
+        Self.ordered(collections, by: workspaceIndex)
+    }
+
+    private static func ordered(_ collections: [RequestCollection], by index: WorkspaceIndex) -> [RequestCollection] {
+        let positions = Dictionary(
+            uniqueKeysWithValues: index.collectionOrder.enumerated().map { ($0.element, $0.offset) })
+        return collections.enumerated().sorted { left, right in
+            let leftPosition = positions[left.element.id, default: Int.max]
+            let rightPosition = positions[right.element.id, default: Int.max]
+            return leftPosition == rightPosition ? left.offset < right.offset : leftPosition < rightPosition
+        }.map(\.element)
     }
 
     private static func directories(from arguments: [String]) throws -> Directories {

@@ -33,6 +33,10 @@ struct GlobalSettingsPage: View {
 
                     Divider()
 
+                    AutomationSettingsView()
+
+                    Divider()
+
                     if let error = model.variableSaveErrors[.global] {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Settings were not saved")
@@ -60,6 +64,7 @@ struct GlobalSettingsPage: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
+
 }
 
 struct HTTPSettingsEditor: View {

@@ -99,17 +99,23 @@ struct SnapshotSidebarRow: View {
 }
 
 struct HistoricalSnapshotCollectionsSidebar: View {
+    @EnvironmentObject private var model: AppModel
     let snapshots: [SavedSnapshot]
     let liveCollectionIDs: Set<UUID>
 
     private var historicalGroups: [HistoricalCollectionGroup] {
-        Dictionary(grouping: snapshots.filter { !liveCollectionIDs.contains($0.source.identity.collectionID) }) {
-            $0.source.identity.collectionID
+        Dictionary(
+            grouping: snapshots.filter {
+                !liveCollectionIDs.contains(model.snapshotGrouping(for: $0).identity.collectionID)
+            }
+        ) {
+            model.snapshotGrouping(for: $0).identity.collectionID
         }
         .map { HistoricalCollectionGroup(id: $0.key, snapshots: $0.value) }
         .sorted {
-            let left = $0.latestSnapshot.source.collectionName.localizedCaseInsensitiveCompare(
-                $1.latestSnapshot.source.collectionName)
+            let leftName = model.snapshotGrouping(for: $0.latestSnapshot).collectionName
+            let rightName = model.snapshotGrouping(for: $1.latestSnapshot).collectionName
+            let left = leftName.localizedCaseInsensitiveCompare(rightName)
             return left == .orderedSame ? $0.id.uuidString < $1.id.uuidString : left == .orderedAscending
         }
     }
@@ -131,10 +137,12 @@ private struct HistoricalCollectionGroup: Identifiable {
 }
 
 private struct HistoricalSnapshotCollectionSection: View {
+    @EnvironmentObject private var model: AppModel
     let group: HistoricalCollectionGroup
     @State private var isExpanded = true
 
     var body: some View {
+        let grouping = model.snapshotGrouping(for: group.latestSnapshot)
         VStack(alignment: .leading, spacing: 3) {
             Button {
                 isExpanded.toggle()
@@ -146,7 +154,7 @@ private struct HistoricalSnapshotCollectionSection: View {
                     Image(systemName: "folder")
                         .foregroundStyle(.secondary)
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(group.latestSnapshot.source.collectionName)
+                        Text(grouping.collectionName)
                             .font(.system(size: 13, weight: .medium))
                             .lineLimit(1)
                             .truncationMode(.tail)
@@ -162,7 +170,7 @@ private struct HistoricalSnapshotCollectionSection: View {
                 .opacity(0.58)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Historical collection \(group.latestSnapshot.source.collectionName)")
+            .accessibilityLabel("Historical collection \(grouping.collectionName)")
 
             if isExpanded {
                 DeletedRequestSnapshotGroups(snapshots: group.snapshots)
@@ -173,15 +181,17 @@ private struct HistoricalSnapshotCollectionSection: View {
 }
 
 struct DeletedRequestSnapshotGroups: View {
+    @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var snapshotSidebarExpansion: SnapshotSidebarExpansion
     let snapshots: [SavedSnapshot]
 
     private var requestGroups: [HistoricalRequestGroup] {
-        Dictionary(grouping: snapshots) { $0.source.identity }
+        Dictionary(grouping: snapshots) { model.snapshotGrouping(for: $0).identity }
             .map { HistoricalRequestGroup(identity: $0.key, snapshots: $0.value) }
             .sorted {
-                let left = $0.latestSnapshot.source.requestName.localizedCaseInsensitiveCompare(
-                    $1.latestSnapshot.source.requestName)
+                let leftName = model.snapshotGrouping(for: $0.latestSnapshot).requestName
+                let rightName = model.snapshotGrouping(for: $1.latestSnapshot).requestName
+                let left = leftName.localizedCaseInsensitiveCompare(rightName)
                 return left == .orderedSame
                     ? $0.identity.requestID.uuidString < $1.identity.requestID.uuidString : left == .orderedAscending
             }
@@ -189,6 +199,7 @@ struct DeletedRequestSnapshotGroups: View {
 
     var body: some View {
         ForEach(requestGroups) { group in
+            let grouping = model.snapshotGrouping(for: group.latestSnapshot)
             let snapshots = group.snapshots.sorted { $0.capturedAt > $1.capturedAt }
             let isExpanded = snapshotSidebarExpansion.isExpanded(identity: group.identity)
 
@@ -197,7 +208,7 @@ struct DeletedRequestSnapshotGroups: View {
                     Image(systemName: "arrow.up.right.square")
                         .foregroundStyle(.secondary)
                         .frame(width: 14)
-                    Text(group.latestSnapshot.source.requestName)
+                    Text(grouping.requestName)
                         .font(.system(size: 12, weight: .medium))
                         .lineLimit(1)
                         .truncationMode(.tail)
@@ -227,7 +238,7 @@ struct DeletedRequestSnapshotGroups: View {
                     .buttonStyle(.plain)
                     .help("\(isExpanded ? "Hide" : "Show") \(snapshots.count) snapshots")
                     .accessibilityLabel(
-                        "\(isExpanded ? "Hide" : "Show") \(snapshots.count) snapshots for deleted request \(group.latestSnapshot.source.requestName)"
+                        "\(isExpanded ? "Hide" : "Show") \(snapshots.count) snapshots for deleted request \(grouping.requestName)"
                     )
                     .accessibilityHint("Expands or collapses saved snapshots for this deleted request.")
                 }

@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import PostieCore
+import UniformTypeIdentifiers
 
 struct ContentView: View {
     @EnvironmentObject private var model: AppModel
@@ -144,6 +145,7 @@ struct ContentView: View {
             }
             .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
             .environment(\.variableInspectionOwner, .request(identity))
+            .id(identity)
         } else {
             ContentUnavailableView(
                 "No request selected",
@@ -156,6 +158,7 @@ struct ContentView: View {
 
 private struct SidebarView: View {
     @EnvironmentObject private var model: AppModel
+    @StateObject private var dragFeedback = SidebarDragFeedback()
     @StateObject private var snapshotSidebarExpansion = SnapshotSidebarExpansion()
     @Binding var namePrompt: NamePrompt?
     @Binding var deletionTarget: DeletionTarget?
@@ -310,7 +313,12 @@ private struct SidebarView: View {
         }
         .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
         .background(.regularMaterial)
+        .environmentObject(dragFeedback)
         .environmentObject(snapshotSidebarExpansion)
+        .onDragSessionUpdated { session in
+            dragFeedback.sessionUpdated(session.phase)
+        }
+        .onDisappear { dragFeedback.clear() }
     }
 
     private var sidebarIcon: NSImage {
@@ -351,46 +359,19 @@ private struct SidebarView: View {
 
 private struct CollectionSidebarSection: View {
     @EnvironmentObject private var model: AppModel
+    @EnvironmentObject private var dragFeedback: SidebarDragFeedback
     let collection: RequestCollection
     @Binding var namePrompt: NamePrompt?
     @Binding var deletionTarget: DeletionTarget?
     @State private var isExpanded = true
+    private var dropEdge: SidebarDropEdge? { dragFeedback.edge(for: .collection(collection.id)) }
+    private var dropEdgeBinding: Binding<SidebarDropEdge?> {
+        Binding(get: { dropEdge }, set: { dragFeedback.setEdge($0, for: .collection(collection.id)) })
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 6) {
-                Button {
-                    isExpanded.toggle()
-                } label: {
-                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                        .font(.caption2.weight(.bold))
-                        .frame(width: 14, height: 24)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(isExpanded ? "Collapse collection" : "Expand collection")
-                Button {
-                    model.showCollection(collection.id)
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "folder").foregroundStyle(.secondary)
-                        Text(collection.name)
-                            .font(.system(size: 13, weight: .medium))
-                            .lineLimit(1).truncationMode(.tail)
-                        Spacer(minLength: 0)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 5)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(.horizontal, 6)
-            .background(
-                model.selectedCollectionID == collection.id ? Color.accentColor.opacity(0.14) : .clear,
-                in: RoundedRectangle(cornerRadius: 6)
-            )
-            .contextMenu { collectionActions }
+            collectionHeader
 
             if isExpanded {
                 if collection.requests.isEmpty {
@@ -408,13 +389,79 @@ private struct CollectionSidebarSection: View {
                 }
                 let liveRequestIDs = Set(collection.requests.map(\.id))
                 let deletedRequestSnapshots = model.snapshots.filter {
-                    $0.source.identity.collectionID == collection.id
-                        && !liveRequestIDs.contains($0.source.identity.requestID)
+                    let grouping = model.snapshotGrouping(for: $0)
+                    return grouping.identity.collectionID == collection.id
+                        && !liveRequestIDs.contains(grouping.identity.requestID)
                 }
                 DeletedRequestSnapshotGroups(snapshots: deletedRequestSnapshots)
             }
         }
         .padding(.vertical, 3)
+    }
+
+    @ViewBuilder
+    private var collectionHeader: some View {
+        let header = HStack(spacing: 6) {
+            Button {
+                isExpanded.toggle()
+            } label: {
+                Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                    .font(.caption2.weight(.bold))
+                    .frame(width: 14, height: 24)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(isExpanded ? "Collapse collection" : "Expand collection")
+            Button {
+                model.showCollection(collection.id)
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "folder").foregroundStyle(.secondary)
+                    Text(collection.name)
+                        .font(.system(size: 13, weight: .medium))
+                        .lineLimit(1).truncationMode(.tail)
+                    Spacer(minLength: 0)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 5)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 6)
+        .background(
+            model.selectedCollectionID == collection.id ? Color.accentColor.opacity(0.14) : .clear,
+            in: RoundedRectangle(cornerRadius: 6)
+        )
+        .contextMenu { collectionActions }
+        .overlay {
+            GeometryReader { geometry in
+                Color.clear.onDrop(
+                    of: [UTType.plainText],
+                    delegate: CollectionSidebarDropDelegate(
+                        model: model,
+                        targetCollectionID: collection.id,
+                        targetIsReadOnly: collection.isReadOnly,
+                        targetHeight: geometry.size.height,
+                        edge: dropEdgeBinding
+                    )
+                )
+            }
+        }
+        .overlay(alignment: dropEdge == .before ? .top : .bottom) {
+            if dropEdge != nil {
+                Rectangle()
+                    .fill(Color.accentColor)
+                    .frame(height: 2)
+                    .padding(.horizontal, 6)
+            }
+        }
+
+        if model.canReorderCollections {
+            header.onDrag { NSItemProvider(object: SidebarDragPayload.collection(collection.id).encoded as NSString) }
+        } else {
+            header
+        }
     }
 
     @ViewBuilder
@@ -446,6 +493,7 @@ private struct CollectionSidebarSection: View {
 
 private struct RequestSidebarRow: View {
     @EnvironmentObject private var model: AppModel
+    @EnvironmentObject private var dragFeedback: SidebarDragFeedback
     @EnvironmentObject private var snapshotSidebarExpansion: SnapshotSidebarExpansion
     let request: HTTPRequestConfiguration
     let identity: RequestIdentity
@@ -454,6 +502,11 @@ private struct RequestSidebarRow: View {
     let canEdit: Bool
     @Binding var namePrompt: NamePrompt?
     @Binding var deletionTarget: DeletionTarget?
+    private var dropEdge: SidebarDropEdge? { dragFeedback.edge(for: .request(identity)) }
+    private var dropEdgeBinding: Binding<SidebarDropEdge?> {
+        Binding(get: { dropEdge }, set: { dragFeedback.setEdge($0, for: .request(identity)) })
+    }
+
     private var currentRequest: HTTPRequestConfiguration {
         model.request(for: identity) ?? request
     }
@@ -510,6 +563,19 @@ private struct RequestSidebarRow: View {
             }
             .buttonStyle(.plain)
             .accessibilityAddTraits(isSelected ? .isSelected : [])
+            .overlay {
+                GeometryReader { geometry in
+                    Color.clear.onDrop(
+                        of: [UTType.plainText],
+                        delegate: RequestSidebarDropDelegate(
+                            model: model,
+                            targetIdentity: identity,
+                            targetHeight: geometry.size.height,
+                            edge: dropEdgeBinding
+                        )
+                    )
+                }
+            }
 
             if snapshotCount > 0 {
                 snapshotDisclosureButton(count: snapshotCount, isExpanded: snapshotsExpanded)
@@ -539,8 +605,20 @@ private struct RequestSidebarRow: View {
                 Button("Delete request", role: .destructive) { deletionTarget = .request(identity) }
             }
         }
+        .overlay(alignment: dropEdge == .before ? .top : .bottom) {
+            if dropEdge != nil {
+                Rectangle()
+                    .fill(Color.accentColor)
+                    .frame(height: 2)
+                    .padding(.leading, 25)
+            }
+        }
 
-        row
+        if canEdit {
+            row.onDrag { NSItemProvider(object: SidebarDragPayload.request(identity).encoded as NSString) }
+        } else {
+            row
+        }
     }
 
     private func snapshotDisclosureButton(count: Int, isExpanded: Bool) -> some View {
@@ -577,6 +655,163 @@ private struct RequestSidebarRow: View {
         case "DELETE": .red
         default: .secondary
         }
+    }
+}
+
+private enum SidebarDragPayload {
+    case collection(UUID)
+    case request(RequestIdentity)
+
+    init?(_ encoded: String) {
+        let parts = encoded.split(separator: "/")
+        guard parts.count >= 3, parts[0] == "postie" else { return nil }
+        switch parts[1] {
+        case "collection":
+            guard parts.count == 3, let id = UUID(uuidString: String(parts[2])) else { return nil }
+            self = .collection(id)
+        case "request":
+            guard parts.count == 4,
+                let collectionID = UUID(uuidString: String(parts[2])),
+                let requestID = UUID(uuidString: String(parts[3]))
+            else { return nil }
+            self = .request(RequestIdentity(collectionID: collectionID, requestID: requestID))
+        default:
+            return nil
+        }
+    }
+
+    var encoded: String {
+        switch self {
+        case let .collection(id): "postie/collection/\(id.uuidString)"
+        case let .request(identity):
+            "postie/request/\(identity.collectionID.uuidString)/\(identity.requestID.uuidString)"
+        }
+    }
+}
+
+@MainActor
+private struct RequestSidebarDropDelegate: DropDelegate {
+    let model: AppModel
+    let targetIdentity: RequestIdentity
+    let targetHeight: CGFloat
+    @Binding var edge: SidebarDropEdge?
+
+    func validateDrop(info: DropInfo) -> Bool {
+        info.hasItemsConforming(to: [UTType.plainText])
+    }
+
+    func dropEntered(info: DropInfo) {
+        edge = edge(at: info.location.y)
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        edge = edge(at: info.location.y)
+        return DropProposal(operation: .move)
+    }
+
+    func dropExited(info: DropInfo) {
+        edge = nil
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        guard let provider = info.itemProviders(for: [UTType.plainText]).first else {
+            edge = nil
+            return false
+        }
+        let insertion = edge(at: info.location.y)
+        edge = nil
+        provider.loadObject(ofClass: NSString.self) { item, _ in
+            guard let encoded = item as? String,
+                let payload = SidebarDragPayload(encoded),
+                case let .request(sourceIdentity) = payload,
+                sourceIdentity != targetIdentity
+            else { return }
+            Task { @MainActor in
+                guard let collection = model.collections.first(where: { $0.id == targetIdentity.collectionID }),
+                    let targetIndex = collection.requests.firstIndex(where: { $0.id == targetIdentity.requestID })
+                else { return }
+                let beforeRequestID: UUID?
+                if insertion == .before {
+                    beforeRequestID = targetIdentity.requestID
+                } else {
+                    let nextIndex = targetIndex + 1
+                    beforeRequestID =
+                        collection.requests.indices.contains(nextIndex) ? collection.requests[nextIndex].id : nil
+                }
+                await model.moveRequest(
+                    sourceIdentity,
+                    toCollectionID: targetIdentity.collectionID,
+                    beforeRequestID: beforeRequestID
+                )
+            }
+        }
+        return true
+    }
+
+    private func edge(at y: CGFloat) -> SidebarDropEdge {
+        y < targetHeight / 2 ? .before : .after
+    }
+}
+
+@MainActor
+private struct CollectionSidebarDropDelegate: DropDelegate {
+    let model: AppModel
+    let targetCollectionID: UUID
+    let targetIsReadOnly: Bool
+    let targetHeight: CGFloat
+    @Binding var edge: SidebarDropEdge?
+
+    func validateDrop(info: DropInfo) -> Bool {
+        info.hasItemsConforming(to: [UTType.plainText])
+    }
+
+    func dropEntered(info: DropInfo) {
+        edge = edge(at: info.location.y)
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        edge = edge(at: info.location.y)
+        return DropProposal(operation: .move)
+    }
+
+    func dropExited(info: DropInfo) {
+        edge = nil
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        guard let provider = info.itemProviders(for: [UTType.plainText]).first else {
+            edge = nil
+            return false
+        }
+        let insertion = edge(at: info.location.y)
+        edge = nil
+        provider.loadObject(ofClass: NSString.self) { item, _ in
+            guard let encoded = item as? String,
+                let payload = SidebarDragPayload(encoded)
+            else { return }
+            Task { @MainActor in
+                switch payload {
+                case let .request(identity):
+                    guard !targetIsReadOnly else {
+                        model.operationError = "Requests cannot be moved into a read-only collection."
+                        return
+                    }
+                    await model.moveRequest(identity, toCollectionID: targetCollectionID)
+                case let .collection(sourceCollectionID):
+                    guard model.canReorderCollections, sourceCollectionID != targetCollectionID else { return }
+                    var orderedIDs = model.collections.map(\.id).filter { $0 != sourceCollectionID }
+                    guard let targetIndex = orderedIDs.firstIndex(of: targetCollectionID) else { return }
+                    let insertionIndex = insertion == .before ? targetIndex : targetIndex + 1
+                    orderedIDs.insert(sourceCollectionID, at: insertionIndex)
+                    await model.reorderCollections(orderedIDs)
+                }
+            }
+        }
+        return true
+    }
+
+    private func edge(at y: CGFloat) -> SidebarDropEdge {
+        y < targetHeight / 2 ? .before : .after
     }
 }
 

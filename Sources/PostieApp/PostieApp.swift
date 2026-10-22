@@ -9,7 +9,9 @@ private final class PostieAppDelegate: NSObject, NSApplicationDelegate {
         guard !isPreparingForTermination else { return .terminateLater }
         isPreparingForTermination = true
         Task { @MainActor [weak self] in
-            let mayTerminate = await AppModel.shared.prepareForTermination()
+            let automationStopped = await AutomationService.shared.stop()
+            let mayTerminate = automationStopped ? await AppModel.shared.prepareForTermination() : false
+            if !mayTerminate { await AutomationService.shared.start() }
             self?.isPreparingForTermination = false
             sender.reply(toApplicationShouldTerminate: mayTerminate)
         }
@@ -30,6 +32,7 @@ struct PostieApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .task { await AutomationService.shared.start() }
                 .preferredColorScheme(theme.colorScheme)
                 .environmentObject(model)
                 .frame(minWidth: 900, minHeight: 600)

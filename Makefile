@@ -24,6 +24,18 @@ SWIFTPM_OPTIONS := \
 
 .PHONY: app test fixture
 
+.PHONY: cli
+
+cli:
+	@set -eu; \
+	cd "$(ROOT_DIR)"; \
+	"$(SWIFT)" build $(SWIFTPM_OPTIONS) --configuration "$(CONFIGURATION)" --product PostieCLI; \
+	bin_dir="$$("$(SWIFT)" build $(SWIFTPM_OPTIONS) --configuration "$(CONFIGURATION)" --show-bin-path)"; \
+	mkdir -p dist; \
+	cp "$$bin_dir/PostieCLI" dist/postie; \
+	codesign --force --sign - dist/postie; \
+	printf '%s\n' "$(ROOT_DIR)/dist/postie"
+
 app:
 	@set -eu; \
 	cd "$(ROOT_DIR)"; \

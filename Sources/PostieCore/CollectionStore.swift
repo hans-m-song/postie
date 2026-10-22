@@ -18,6 +18,9 @@ public enum CollectionStoreError: LocalizedError, Sendable {
     case requestDocumentIsMalformed
     case requestVersionIsUnsupported
     case requestOrderIsInvalid
+    case collectionOrderIsInvalid
+    case workspaceIndexIsReadOnly
+    case requestMoveRecoveryRequired
     case ioFailure(operation: String)
     case partialFailure(operation: String)
 
@@ -45,6 +48,12 @@ public enum CollectionStoreError: LocalizedError, Sendable {
             "The request document uses an unsupported format and was preserved."
         case .requestOrderIsInvalid:
             "The requested order does not match the collection's available requests."
+        case .collectionOrderIsInvalid:
+            "The requested order does not match the workspace's available collections."
+        case .workspaceIndexIsReadOnly:
+            "The workspace index is malformed or unsupported, so index changes are read-only."
+        case .requestMoveRecoveryRequired:
+            "A previous request move needs recovery before collection changes can continue."
         case .ioFailure(let operation):
             "Postie could not \(operation)."
         case .partialFailure(let operation):
@@ -57,15 +66,32 @@ public actor CollectionStore {
     private static let currentFormatVersion = 1
     private static let lockFilename = ".postie.lock"
     private static let globalsFilename = "globals.json"
+    private static let globalMCPResponseViewingKey = "mcpResponseViewing"
     private static let collectionsDirectoryName = "collections"
     private static let deletionStagingDirectoryName = ".deletion-staging"
+    private static let workspaceIndexFilename = "workspace-index.json"
+    private static let moveStagingDirectoryName = ".moves"
+    private static let moveIntentFilename = "intent.json"
+    private static let moveCompleteFilename = "complete"
+    private static let moveRequestFilename = "request.json"
+    private static let moveSourceBeforeFilename = "source-index-before.json"
+    private static let moveSourceAfterFilename = "source-index-after.json"
+    private static let moveDestinationBeforeFilename = "destination-index-before.json"
+    private static let moveDestinationAfterFilename = "destination-index-after.json"
+    private static let moveWorkspaceBeforeFilename = "workspace-index-before.json"
+    private static let moveWorkspaceAfterFilename = "workspace-index-after.json"
+    private static let moveCompleteMarker = Data("Postie request move complete v1\n".utf8)
 
     private let rootURL: URL
     private let collectionsURL: URL
     private let globalsURL: URL
     private let deletionStagingURL: URL
+    private let workspaceIndexURL: URL
+    private let moveStagingURL: URL
     private let lockPath: String
     private var lockDescriptor: Int32 = -1
+    private var moveRecoveryIssues: [StorageIssue] = []
+    private var moveRecoveryBlocksStructuralWrites = false
 
     public init(rootURL: URL) throws {
         let resolvedRoot = rootURL.standardizedFileURL.resolvingSymlinksInPath()
@@ -74,6 +100,8 @@ public actor CollectionStore {
         self.globalsURL = resolvedRoot.appendingPathComponent(Self.globalsFilename, isDirectory: false)
         self.deletionStagingURL = resolvedRoot.appendingPathComponent(
             Self.deletionStagingDirectoryName, isDirectory: true)
+        self.workspaceIndexURL = resolvedRoot.appendingPathComponent(Self.workspaceIndexFilename, isDirectory: false)
+        self.moveStagingURL = resolvedRoot.appendingPathComponent(Self.moveStagingDirectoryName, isDirectory: true)
         let lockURL = resolvedRoot.appendingPathComponent(Self.lockFilename, isDirectory: false)
         self.lockPath = lockURL.path
 
@@ -115,6 +143,14 @@ public actor CollectionStore {
             _ = Self.closeDescriptor(descriptor)
             throw CollectionStoreError.ioFailure(operation: "initialize the data directory")
         }
+
+        let recovery = Self.recoverCommittedMoves(
+            in: moveStagingURL,
+            collectionsAt: collectionsURL,
+            workspaceIndexAt: workspaceIndexURL
+        )
+        self.moveRecoveryIssues = recovery.issues
+        self.moveRecoveryBlocksStructuralWrites = recovery.blocksStructuralWrites
     }
 
     deinit {
@@ -125,8 +161,9 @@ public actor CollectionStore {
     }
 
     public func load() throws -> WorkspaceLoad {
-        var issues: [StorageIssue] = []
+        var issues = moveRecoveryIssues
         let globals = loadGlobals(issues: &issues)
+        let workspace = loadWorkspaceIndex(issues: &issues)
 
         let collectionEntries: [URL]
         do {
@@ -183,6 +220,7 @@ public actor CollectionStore {
             }
             return $0.name.localizedStandardCompare($1.name) == .orderedAscending
         }
+        collections = Self.applyingCollectionOrder(workspace.index.collectionOrder, to: collections)
 
         return WorkspaceLoad(
             collections: collections,
@@ -190,7 +228,10 @@ public actor CollectionStore {
             globalVariables: globals.values,
             globalVariablesAreReadOnly: globals.isReadOnly,
             globalOptions: globals.options,
-            globalOptionsAreReadOnly: globals.optionsAreReadOnly
+            globalOptionsAreReadOnly: globals.optionsAreReadOnly,
+            workspaceIndex: workspace.index,
+            workspaceIndexIsReadOnly: workspace.isReadOnly,
+            globalMCPResponseViewing: globals.mcpResponseViewing
         )
     }
 
@@ -223,7 +264,27 @@ public actor CollectionStore {
         try replaceJSON(.object(object), at: globalsURL, operation: "save global HTTP settings")
     }
 
+    public func saveGlobalMCPResponseViewing(_ policy: MCPResponseViewPolicy) throws {
+        guard policy != .inherit else {
+            throw CollectionStoreError.ioFailure(operation: "save an inherited global MCP response-view policy")
+        }
+
+        var object = try writableGlobalsObject()
+        if let existing = object[Self.globalMCPResponseViewingKey] {
+            do {
+                let storedPolicy = try Self.decodeMCPResponseViewPolicy(existing)
+                guard storedPolicy != .inherit else { throw CollectionStoreError.requestDocumentIsMalformed }
+            } catch {
+                throw CollectionStoreError.ioFailure(
+                    operation: "save global MCP response viewing because the stored policy is malformed")
+            }
+        }
+        object[Self.globalMCPResponseViewingKey] = try Self.mcpResponseViewPolicyJSONValue(policy)
+        try replaceJSON(.object(object), at: globalsURL, operation: "save global MCP response viewing")
+    }
+
     public func saveCollectionVariables(_ variables: VariableValues, in collectionID: UUID) throws {
+        try ensureStructuralWritesAvailable()
         let (directory, record) = try writableCollection(id: collectionID)
         let existing = record.object["variables"] ?? .object([:])
         var updated = record
@@ -239,6 +300,7 @@ public actor CollectionStore {
         variables: VariableValues,
         in collectionID: UUID
     ) throws {
+        try ensureStructuralWritesAvailable()
         let (directory, record) = try writableCollection(id: collectionID)
         let settings = try Self.collectionDefaultsJSONValue(defaults)
         guard case .object(let settingsObject) = settings,
@@ -261,7 +323,19 @@ public actor CollectionStore {
             operation: "save collection configuration")
     }
 
+    public func saveCollectionMCPPolicy(_ policy: MCPResourcePolicy, in collectionID: UUID) throws {
+        try ensureStructuralWritesAvailable()
+        let (directory, record) = try writableCollection(id: collectionID)
+        let incoming = try Self.mcpResourcePolicyJSONValue(policy)
+        var updated = record
+        updated.object["mcpPolicy"] = Self.mergeUnknownData(record.object["mcpPolicy"] ?? .object([:]), with: incoming)
+        try replaceJSON(
+            updated.jsonValue, at: directory.appendingPathComponent("collection.json"),
+            operation: "save collection MCP policy")
+    }
+
     public func createCollection(name: String) throws -> RequestCollection {
+        try ensureStructuralWritesAvailable()
         var id = UUID()
         var directoryURL = collectionDirectoryURL(id)
         for _ in 0..<4 {
@@ -299,6 +373,7 @@ public actor CollectionStore {
     }
 
     public func renameCollection(id: UUID, name: String) throws {
+        try ensureStructuralWritesAvailable()
         let (directory, record) = try writableCollection(id: id)
         var renamed = record
         renamed.name = name
@@ -308,6 +383,7 @@ public actor CollectionStore {
     }
 
     public func deleteCollection(id: UUID) throws {
+        try ensureStructuralWritesAvailable()
         let (directory, _) = try writableCollection(id: id)
         do {
             if Self.fileMode(at: deletionStagingURL) != nil && !Self.isDirectory(deletionStagingURL) {
@@ -355,6 +431,7 @@ public actor CollectionStore {
     }
 
     public func createRequest(_ request: HTTPRequestConfiguration, in collectionID: UUID) throws {
+        try ensureStructuralWritesAvailable()
         let (directory, record) = try writableCollection(id: collectionID)
         let membershipCount = record.entries.reduce(into: 0) { count, entry in
             if Self.uuidValue(entry) == request.id { count += 1 }
@@ -390,6 +467,7 @@ public actor CollectionStore {
     }
 
     public func saveRequest(_ request: HTTPRequestConfiguration, in collectionID: UUID) throws {
+        try ensureStructuralWritesAvailable()
         let (directory, record) = try writableCollection(id: collectionID)
         let membershipCount = record.entries.reduce(into: 0) { count, entry in
             if Self.uuidValue(entry) == request.id { count += 1 }
@@ -412,6 +490,7 @@ public actor CollectionStore {
     }
 
     public func deleteRequest(id: UUID, in collectionID: UUID) throws {
+        try ensureStructuralWritesAvailable()
         let (directory, record) = try writableCollection(id: collectionID)
         let matchingIndices = record.entries.indices.filter { Self.uuidValue(record.entries[$0]) == id }
         guard matchingIndices.count == 1, let matchingIndex = matchingIndices.first else {
@@ -443,6 +522,7 @@ public actor CollectionStore {
     }
 
     public func recoverRequest(id: UUID, in collectionID: UUID) throws {
+        try ensureStructuralWritesAvailable()
         let (directory, record) = try writableCollection(id: collectionID)
         let membershipCount = record.entries.reduce(into: 0) { count, entry in
             if Self.uuidValue(entry) == id { count += 1 }
@@ -467,6 +547,7 @@ public actor CollectionStore {
     }
 
     public func reorderRequests(ids: [UUID], in collectionID: UUID) throws {
+        try ensureStructuralWritesAvailable()
         let (directory, record) = try writableCollection(id: collectionID)
         let counts = record.entries.reduce(into: [UUID: Int]()) { result, entry in
             if let id = Self.uuidValue(entry) { result[id, default: 0] += 1 }
@@ -498,6 +579,860 @@ public actor CollectionStore {
             updated.jsonValue, at: directory.appendingPathComponent("collection.json"), operation: "reorder requests")
     }
 
+    public func reorderCollections(ids: [UUID]) throws -> WorkspaceIndex {
+        try ensureStructuralWritesAvailable()
+        let document = try writableWorkspaceIndexDocument()
+        let availableIDs = try collectionIDs()
+        guard ids.count == Set(ids).count, Set(ids) == Set(availableIDs) else {
+            throw CollectionStoreError.collectionOrderIsInvalid
+        }
+
+        let mergedOrder = Self.replacingKnownCollectionOrder(
+            document.index.collectionOrder,
+            with: ids,
+            knownIDs: Set(availableIDs)
+        )
+        var updatedIndex = document.index
+        updatedIndex.collectionOrder = mergedOrder
+        let updatedObject = Self.workspaceIndexObject(document.object, applying: updatedIndex)
+        try replaceJSON(.object(updatedObject), at: workspaceIndexURL, operation: "reorder collections")
+        return updatedIndex
+    }
+
+    public func moveRequest(
+        _ source: RequestIdentity,
+        toCollectionID destinationCollectionID: UUID,
+        beforeRequestID: UUID?,
+        snapshotIDs: [UUID]
+    ) throws -> RequestMoveResult {
+        try ensureStructuralWritesAvailable()
+        let workspaceDocument = try writableWorkspaceIndexDocument()
+        let newIdentity = RequestIdentity(collectionID: destinationCollectionID, requestID: source.requestID)
+
+        if source.collectionID == destinationCollectionID {
+            let (directory, record) = try writableCollection(id: source.collectionID)
+            let sourceIndex = try Self.uniqueIndex(of: source.requestID, in: record.entries)
+            let requestURLs = try requestFileURLs(in: directory)[source.requestID, default: []]
+            guard requestURLs.count == 1, let requestURL = requestURLs.first, Self.isRegularFile(requestURL) else {
+                throw requestURLs.count > 1
+                    ? CollectionStoreError.requestIsAmbiguous : CollectionStoreError.requestNotFound
+            }
+            let updatedEntries = try Self.movingEntry(
+                at: sourceIndex,
+                before: beforeRequestID,
+                in: record.entries,
+                movingID: source.requestID
+            )
+            if beforeRequestID != source.requestID {
+                var updatedRecord = record
+                updatedRecord.entries = updatedEntries
+                try replaceJSON(
+                    updatedRecord.jsonValue, at: directory.appendingPathComponent("collection.json"),
+                    operation: "reorder the request")
+            }
+            return RequestMoveResult(
+                oldIdentity: source, newIdentity: newIdentity, workspaceIndex: workspaceDocument.index)
+        }
+
+        let (sourceDirectory, sourceRecord, sourceMetadataBefore) = try writableCollectionDocument(
+            id: source.collectionID)
+        let (destinationDirectory, destinationRecord, destinationMetadataBefore) = try writableCollectionDocument(
+            id: destinationCollectionID)
+        let sourceIndex = try Self.uniqueIndex(of: source.requestID, in: sourceRecord.entries)
+        guard !destinationRecord.entries.contains(where: { Self.uuidValue($0) == source.requestID }) else {
+            throw CollectionStoreError.requestAlreadyExists
+        }
+
+        let sourceRequestURLs = try requestFileURLs(in: sourceDirectory)[source.requestID, default: []]
+        guard sourceRequestURLs.count == 1, let sourceRequestURL = sourceRequestURLs.first,
+            Self.isRegularFile(sourceRequestURL)
+        else {
+            throw sourceRequestURLs.count > 1
+                ? CollectionStoreError.requestIsAmbiguous : CollectionStoreError.requestNotFound
+        }
+        let destinationRequestURLs = try requestFileURLs(in: destinationDirectory)[source.requestID, default: []]
+        guard destinationRequestURLs.isEmpty else {
+            throw CollectionStoreError.requestAlreadyExists
+        }
+        guard let sourceRequestBytes = try? Data(contentsOf: sourceRequestURL) else {
+            throw CollectionStoreError.requestDocumentIsMalformed
+        }
+        let parsedRequest: ParsedRequest
+        do {
+            parsedRequest = try ParsedRequest.decode(sourceRequestBytes, identity: source.requestID)
+        } catch RequestDocumentFailure.unsupported {
+            throw CollectionStoreError.requestVersionIsUnsupported
+        } catch {
+            throw CollectionStoreError.requestDocumentIsMalformed
+        }
+
+        var destinationEntries = destinationRecord.entries
+        if let beforeRequestID {
+            let insertionIndex = try Self.uniqueIndex(of: beforeRequestID, in: destinationEntries)
+            destinationEntries.insert(.string(Self.canonicalID(source.requestID)), at: insertionIndex)
+        } else {
+            destinationEntries.append(.string(Self.canonicalID(source.requestID)))
+        }
+        var updatedSourceRecord = sourceRecord
+        updatedSourceRecord.entries.remove(at: sourceIndex)
+        var updatedDestinationRecord = destinationRecord
+        updatedDestinationRecord.entries = destinationEntries
+
+        let sourceMetadataAfter = try encodeJSON(updatedSourceRecord.jsonValue)
+        let destinationMetadataAfter = try encodeJSON(updatedDestinationRecord.jsonValue)
+
+        var updatedIndex = workspaceDocument.index
+        for snapshotID in Set(snapshotIDs) {
+            updatedIndex.mcpExcludedSnapshotIDs.remove(snapshotID)
+            updatedIndex.snapshotGroupingOverrides[snapshotID] = SnapshotGrouping(
+                identity: newIdentity,
+                collectionName: destinationRecord.name,
+                requestName: parsedRequest.configuration.name
+            )
+        }
+        let workspaceMetadataAfter = try encodeJSON(
+            .object(Self.workspaceIndexObject(workspaceDocument.object, applying: updatedIndex)))
+
+        let workspaceMetadataBefore = workspaceDocument.data
+
+        let intent = MoveJournalIntent(
+            formatVersion: 1,
+            transactionID: UUID(),
+            sourceCollectionID: source.collectionID,
+            destinationCollectionID: destinationCollectionID,
+            requestID: source.requestID,
+            sourceFilename: sourceRequestURL.lastPathComponent,
+            workspaceIndexExistedBefore: workspaceMetadataBefore != nil
+        )
+        try commitRequestMove(
+            intent: intent,
+            requestBytes: sourceRequestBytes,
+            sourceMetadataBefore: sourceMetadataBefore,
+            sourceMetadataAfter: sourceMetadataAfter,
+            destinationMetadataBefore: destinationMetadataBefore,
+            destinationMetadataAfter: destinationMetadataAfter,
+            workspaceMetadataBefore: workspaceMetadataBefore,
+            workspaceMetadataAfter: workspaceMetadataAfter
+        )
+
+        return RequestMoveResult(oldIdentity: source, newIdentity: newIdentity, workspaceIndex: updatedIndex)
+    }
+
+    public func removeSnapshotGrouping(id: UUID) throws -> WorkspaceIndex {
+        try ensureStructuralWritesAvailable()
+        let document = try writableWorkspaceIndexDocument()
+        guard
+            document.index.snapshotGroupingOverrides[id] != nil
+                || document.index.mcpExcludedSnapshotIDs.contains(id)
+        else { return document.index }
+        var updatedIndex = document.index
+        updatedIndex.snapshotGroupingOverrides.removeValue(forKey: id)
+        updatedIndex.mcpExcludedSnapshotIDs.remove(id)
+        let updatedObject = Self.workspaceIndexObject(document.object, applying: updatedIndex)
+        try replaceJSON(.object(updatedObject), at: workspaceIndexURL, operation: "remove snapshot grouping")
+        return updatedIndex
+    }
+
+    public func setSnapshotMCPExcluded(id: UUID, isExcluded: Bool) throws -> WorkspaceIndex {
+        try ensureStructuralWritesAvailable()
+        let document = try writableWorkspaceIndexDocument()
+        let alreadyExcluded = document.index.mcpExcludedSnapshotIDs.contains(id)
+        guard alreadyExcluded != isExcluded else { return document.index }
+
+        var updatedIndex = document.index
+        if isExcluded {
+            updatedIndex.mcpExcludedSnapshotIDs.insert(id)
+        } else {
+            updatedIndex.mcpExcludedSnapshotIDs.remove(id)
+        }
+        let updatedObject = Self.workspaceIndexObject(document.object, applying: updatedIndex)
+        try replaceJSON(.object(updatedObject), at: workspaceIndexURL, operation: "update snapshot MCP exclusion")
+        return updatedIndex
+    }
+
+    private func ensureStructuralWritesAvailable() throws {
+        guard !moveRecoveryBlocksStructuralWrites else {
+            throw CollectionStoreError.requestMoveRecoveryRequired
+        }
+    }
+
+    private func loadWorkspaceIndex(issues: inout [StorageIssue]) -> WorkspaceIndexDocument {
+        guard Self.fileMode(at: workspaceIndexURL) != nil else {
+            return WorkspaceIndexDocument(index: WorkspaceIndex(), object: nil, isReadOnly: false)
+        }
+        guard Self.isRegularFile(workspaceIndexURL), let data = try? Data(contentsOf: workspaceIndexURL) else {
+            issues.append(
+                makeIssue(.malformedWorkspaceIndex, message: "The workspace index is unreadable and was preserved."))
+            return WorkspaceIndexDocument(index: WorkspaceIndex(), object: nil, isReadOnly: true)
+        }
+
+        let value: JSONValue
+        do {
+            value = try JSONDecoder().decode(JSONValue.self, from: data)
+        } catch {
+            issues.append(
+                makeIssue(.malformedWorkspaceIndex, message: "The workspace index is malformed and was preserved."))
+            return WorkspaceIndexDocument(index: WorkspaceIndex(), object: nil, isReadOnly: true)
+        }
+        guard case .object(let object) = value,
+            case .number(let version)? = object["formatVersion"]
+        else {
+            issues.append(
+                makeIssue(.malformedWorkspaceIndex, message: "The workspace index is malformed and was preserved."))
+            return WorkspaceIndexDocument(index: WorkspaceIndex(), object: nil, isReadOnly: true)
+        }
+        guard version == 1 else {
+            issues.append(
+                makeIssue(
+                    .unsupportedWorkspaceIndex,
+                    message: "The workspace index uses an unsupported format and was preserved."))
+            return WorkspaceIndexDocument(index: WorkspaceIndex(), object: nil, isReadOnly: true)
+        }
+
+        do {
+            return WorkspaceIndexDocument(
+                index: try Self.decodeWorkspaceIndex(object),
+                object: object,
+                isReadOnly: false
+            )
+        } catch {
+            issues.append(
+                makeIssue(.malformedWorkspaceIndex, message: "The workspace index is malformed and was preserved."))
+            return WorkspaceIndexDocument(index: WorkspaceIndex(), object: nil, isReadOnly: true)
+        }
+    }
+
+    private func writableWorkspaceIndexDocument() throws -> (
+        index: WorkspaceIndex, object: [String: JSONValue], data: Data?
+    ) {
+        guard Self.fileMode(at: workspaceIndexURL) != nil else {
+            return (WorkspaceIndex(), Self.emptyWorkspaceIndexObject, nil)
+        }
+        guard Self.isRegularFile(workspaceIndexURL), let data = try? Data(contentsOf: workspaceIndexURL) else {
+            throw CollectionStoreError.workspaceIndexIsReadOnly
+        }
+        guard case .object(let object) = try? JSONDecoder().decode(JSONValue.self, from: data),
+            case .number(let version)? = object["formatVersion"], version == 1
+        else {
+            throw CollectionStoreError.workspaceIndexIsReadOnly
+        }
+        do {
+            return (try Self.decodeWorkspaceIndex(object), object, data)
+        } catch {
+            throw CollectionStoreError.workspaceIndexIsReadOnly
+        }
+    }
+
+    private static let emptyWorkspaceIndexObject: [String: JSONValue] = [
+        "formatVersion": .number(1),
+        "collectionOrder": .array([]),
+        "snapshotGroupingOverrides": .object([:]),
+        "mcpExcludedSnapshotIDs": .array([]),
+    ]
+
+    private static func decodeWorkspaceIndex(_ object: [String: JSONValue]) throws -> WorkspaceIndex {
+        guard case .array(let rawOrder)? = object["collectionOrder"],
+            case .object(let rawOverrides)? = object["snapshotGroupingOverrides"]
+        else {
+            throw DocumentFailure.malformed
+        }
+
+        var collectionOrder: [UUID] = []
+        var orderedIDs = Set<UUID>()
+        for rawID in rawOrder {
+            guard let string = rawID.stringValue, let id = UUID(uuidString: string), orderedIDs.insert(id).inserted
+            else {
+                throw DocumentFailure.malformed
+            }
+            collectionOrder.append(id)
+        }
+
+        var snapshotGroupingOverrides: [UUID: SnapshotGrouping] = [:]
+        for (rawSnapshotID, value) in rawOverrides {
+            guard let snapshotID = UUID(uuidString: rawSnapshotID), snapshotGroupingOverrides[snapshotID] == nil,
+                case .object(let grouping) = value,
+                case .object(let identity)? = grouping["identity"],
+                case .string(let rawCollectionID)? = identity["collectionID"],
+                let collectionID = UUID(uuidString: rawCollectionID),
+                case .string(let rawRequestID)? = identity["requestID"],
+                let requestID = UUID(uuidString: rawRequestID),
+                case .string(let collectionName)? = grouping["collectionName"],
+                case .string(let requestName)? = grouping["requestName"]
+            else {
+                throw DocumentFailure.malformed
+            }
+            snapshotGroupingOverrides[snapshotID] = SnapshotGrouping(
+                identity: RequestIdentity(collectionID: collectionID, requestID: requestID),
+                collectionName: collectionName,
+                requestName: requestName
+            )
+        }
+
+        let rawExcludedSnapshotIDs: [JSONValue]
+        if let rawValue = object["mcpExcludedSnapshotIDs"] {
+            guard case .array(let values) = rawValue else { throw DocumentFailure.malformed }
+            rawExcludedSnapshotIDs = values
+        } else {
+            rawExcludedSnapshotIDs = []
+        }
+        var mcpExcludedSnapshotIDs = Set<UUID>()
+        for rawID in rawExcludedSnapshotIDs {
+            guard let string = rawID.stringValue,
+                let id = UUID(uuidString: string),
+                mcpExcludedSnapshotIDs.insert(id).inserted
+            else {
+                throw DocumentFailure.malformed
+            }
+        }
+
+        return WorkspaceIndex(
+            collectionOrder: collectionOrder,
+            snapshotGroupingOverrides: snapshotGroupingOverrides,
+            mcpExcludedSnapshotIDs: mcpExcludedSnapshotIDs
+        )
+    }
+
+    private static func workspaceIndexObject(
+        _ object: [String: JSONValue],
+        applying index: WorkspaceIndex
+    ) -> [String: JSONValue] {
+        var updated = object
+        updated["formatVersion"] = .number(1)
+        updated["collectionOrder"] = .array(index.collectionOrder.map { .string(canonicalID($0)) })
+        updated["mcpExcludedSnapshotIDs"] = .array(
+            index.mcpExcludedSnapshotIDs
+                .sorted { $0.uuidString < $1.uuidString }
+                .map { .string(canonicalID($0)) })
+
+        let existingOverrides: [String: JSONValue]
+        if case .object(let values)? = object["snapshotGroupingOverrides"] {
+            existingOverrides = values
+        } else {
+            existingOverrides = [:]
+        }
+
+        var overrides: [String: JSONValue] = [:]
+        for snapshotID in index.snapshotGroupingOverrides.keys.sorted(by: { $0.uuidString < $1.uuidString }) {
+            guard let grouping = index.snapshotGroupingOverrides[snapshotID] else { continue }
+            let oldKey = existingOverrides.keys.first { UUID(uuidString: $0) == snapshotID }
+            var groupingObject: [String: JSONValue] = [:]
+            if let oldKey, case .object(let oldObject)? = existingOverrides[oldKey] {
+                groupingObject = oldObject
+            }
+            var identityObject: [String: JSONValue] = [:]
+            if case .object(let oldIdentity)? = groupingObject["identity"] {
+                identityObject = oldIdentity
+            }
+            identityObject["collectionID"] = .string(canonicalID(grouping.identity.collectionID))
+            identityObject["requestID"] = .string(canonicalID(grouping.identity.requestID))
+            groupingObject["identity"] = .object(identityObject)
+            groupingObject["collectionName"] = .string(grouping.collectionName)
+            groupingObject["requestName"] = .string(grouping.requestName)
+            overrides[oldKey ?? canonicalID(snapshotID)] = .object(groupingObject)
+        }
+        updated["snapshotGroupingOverrides"] = .object(overrides)
+        return updated
+    }
+
+    private func collectionIDs() throws -> [UUID] {
+        let entries: [URL]
+        do {
+            entries = try FileManager.default.contentsOfDirectory(
+                at: collectionsURL, includingPropertiesForKeys: [.isDirectoryKey], options: [])
+        } catch {
+            throw CollectionStoreError.ioFailure(operation: "list workspace collections")
+        }
+        return Set(
+            entries.compactMap { url -> UUID? in
+                guard Self.isDirectory(url) else { return nil }
+                return UUID(uuidString: url.lastPathComponent)
+            }
+        ).sorted { $0.uuidString < $1.uuidString }
+    }
+
+    private static func applyingCollectionOrder(_ order: [UUID], to collections: [RequestCollection])
+        -> [RequestCollection]
+    {
+        var remaining = Dictionary(uniqueKeysWithValues: collections.map { ($0.id, $0) })
+        var result: [RequestCollection] = []
+        for id in order {
+            if let collection = remaining.removeValue(forKey: id) { result.append(collection) }
+        }
+        result.append(
+            contentsOf: remaining.values.sorted {
+                if $0.name.localizedStandardCompare($1.name) == .orderedSame {
+                    return $0.id.uuidString < $1.id.uuidString
+                }
+                return $0.name.localizedStandardCompare($1.name) == .orderedAscending
+            })
+        return result
+    }
+
+    private static func replacingKnownCollectionOrder(
+        _ existingOrder: [UUID],
+        with requestedOrder: [UUID],
+        knownIDs: Set<UUID>
+    ) -> [UUID] {
+        var nextIndex = 0
+        var result = existingOrder.map { currentID -> UUID in
+            guard knownIDs.contains(currentID), nextIndex < requestedOrder.count else { return currentID }
+            defer { nextIndex += 1 }
+            return requestedOrder[nextIndex]
+        }
+        result.append(contentsOf: requestedOrder.dropFirst(nextIndex))
+        return result
+    }
+
+    private static func uniqueIndex(of id: UUID, in entries: [JSONValue]) throws -> Int {
+        let matches = entries.indices.filter { uuidValue(entries[$0]) == id }
+        guard matches.count == 1, let index = matches.first else {
+            throw matches.count > 1 ? CollectionStoreError.requestIsAmbiguous : CollectionStoreError.requestNotFound
+        }
+        return index
+    }
+
+    private static func movingEntry(
+        at sourceIndex: Int,
+        before targetID: UUID?,
+        in originalEntries: [JSONValue],
+        movingID: UUID
+    ) throws -> [JSONValue] {
+        guard originalEntries.indices.contains(sourceIndex) else { throw CollectionStoreError.requestNotFound }
+        let movingEntry = originalEntries[sourceIndex]
+        if targetID == movingID { return originalEntries }
+        var entries = originalEntries
+        entries.remove(at: sourceIndex)
+        let insertionIndex: Int
+        if let targetID {
+            insertionIndex = try uniqueIndex(of: targetID, in: entries)
+        } else {
+            insertionIndex = entries.endIndex
+        }
+        entries.insert(movingEntry, at: insertionIndex)
+        return entries
+    }
+
+    private static func readRegularFile(at url: URL) throws -> Data {
+        guard isRegularFile(url), let data = try? Data(contentsOf: url) else {
+            throw CollectionStoreError.ioFailure(operation: "read stored metadata")
+        }
+        return data
+    }
+
+    private func commitRequestMove(
+        intent: MoveJournalIntent,
+        requestBytes: Data,
+        sourceMetadataBefore: Data,
+        sourceMetadataAfter: Data,
+        destinationMetadataBefore: Data,
+        destinationMetadataAfter: Data,
+        workspaceMetadataBefore: Data?,
+        workspaceMetadataAfter: Data
+    ) throws {
+        guard intent.formatVersion == 1 else {
+            throw CollectionStoreError.ioFailure(operation: "prepare the request move")
+        }
+        if Self.fileMode(at: moveStagingURL) == nil {
+            do {
+                try FileManager.default.createDirectory(at: moveStagingURL, withIntermediateDirectories: false)
+            } catch {
+                throw CollectionStoreError.ioFailure(operation: "prepare request-move recovery")
+            }
+        }
+        guard Self.isDirectory(moveStagingURL) else {
+            throw CollectionStoreError.ioFailure(operation: "prepare request-move recovery")
+        }
+
+        let transactionDirectory = moveStagingURL.appendingPathComponent(
+            Self.canonicalID(intent.transactionID), isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: transactionDirectory, withIntermediateDirectories: false)
+        } catch {
+            throw CollectionStoreError.ioFailure(operation: "stage the request move")
+        }
+
+        let stagedFiles: [(String, Data)] =
+            [
+                (Self.moveRequestFilename, requestBytes),
+                (Self.moveSourceBeforeFilename, sourceMetadataBefore),
+                (Self.moveSourceAfterFilename, sourceMetadataAfter),
+                (Self.moveDestinationBeforeFilename, destinationMetadataBefore),
+                (Self.moveDestinationAfterFilename, destinationMetadataAfter),
+                (Self.moveWorkspaceAfterFilename, workspaceMetadataAfter),
+            ] + (workspaceMetadataBefore.map { [(Self.moveWorkspaceBeforeFilename, $0)] } ?? [])
+
+        do {
+            for (filename, data) in stagedFiles {
+                try AtomicFileWriter.writeNew(
+                    data, to: transactionDirectory.appendingPathComponent(filename, isDirectory: false))
+            }
+        } catch {
+            moveRecoveryIssues.append(
+                makeIssue(
+                    .requestMoveStaging,
+                    detail: Self.canonicalID(intent.transactionID),
+                    message: "Incomplete request-move staging data was preserved."
+                ))
+            throw CollectionStoreError.ioFailure(operation: "stage the request move")
+        }
+
+        let intentURL = transactionDirectory.appendingPathComponent(Self.moveIntentFilename, isDirectory: false)
+        do {
+            try AtomicFileWriter.writeNew(try JSONEncoder.postieEncoder.encode(intent), to: intentURL)
+        } catch {
+            if Self.isRegularFile(intentURL) {
+                moveRecoveryBlocksStructuralWrites = true
+                moveRecoveryIssues.append(
+                    makeIssue(
+                        .requestMoveRecovery,
+                        detail: Self.canonicalID(intent.transactionID),
+                        message: "A committed request move needs recovery; collection changes are read-only."
+                    ))
+            }
+            throw CollectionStoreError.ioFailure(operation: "commit the request move")
+        }
+
+        do {
+            try Self.replayCommittedMove(
+                intent: intent,
+                in: transactionDirectory,
+                collectionsAt: collectionsURL,
+                workspaceIndexAt: workspaceIndexURL
+            )
+        } catch {
+            moveRecoveryBlocksStructuralWrites = true
+            moveRecoveryIssues.append(
+                makeIssue(
+                    .requestMoveRecovery,
+                    collectionID: intent.sourceCollectionID,
+                    requestID: intent.requestID,
+                    detail: Self.canonicalID(intent.transactionID),
+                    message:
+                        "A committed request move could not be completed; collection changes are read-only until recovery."
+                ))
+            throw CollectionStoreError.partialFailure(operation: "move the request")
+        }
+
+        if !Self.cleanupCompletedMove(at: transactionDirectory) {
+            moveRecoveryIssues.append(
+                makeIssue(
+                    .requestMoveStaging,
+                    detail: Self.canonicalID(intent.transactionID),
+                    message: "The request move completed, but recovery staging data could not be fully removed."
+                ))
+        }
+    }
+
+    private static func recoverCommittedMoves(
+        in stagingRoot: URL,
+        collectionsAt collectionsURL: URL,
+        workspaceIndexAt workspaceIndexURL: URL
+    ) -> MoveRecoveryResult {
+        guard fileMode(at: stagingRoot) != nil else {
+            return MoveRecoveryResult(issues: [], blocksStructuralWrites: false)
+        }
+        guard isDirectory(stagingRoot) else {
+            return MoveRecoveryResult(
+                issues: [
+                    StorageIssue(
+                        id: "store:request-move-staging",
+                        message: "Request-move recovery data is not a directory and was preserved.")
+                ],
+                blocksStructuralWrites: false
+            )
+        }
+
+        let entries: [URL]
+        do {
+            entries = try FileManager.default.contentsOfDirectory(
+                at: stagingRoot, includingPropertiesForKeys: [.isDirectoryKey], options: [])
+        } catch {
+            return MoveRecoveryResult(
+                issues: [
+                    StorageIssue(
+                        id: "store:request-move-recovery",
+                        message: "Request-move recovery data could not be listed; collection changes are read-only.")
+                ],
+                blocksStructuralWrites: true
+            )
+        }
+
+        var issues: [StorageIssue] = []
+        var blocksStructuralWrites = false
+        for entry in entries.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
+            guard let transactionID = UUID(uuidString: entry.lastPathComponent), isDirectory(entry) else {
+                issues.append(
+                    StorageIssue(
+                        id: "store:request-move-staging:\(entry.lastPathComponent)",
+                        message: "Unrecognised request-move staging data was preserved."
+                    ))
+                continue
+            }
+
+            let intentURL = entry.appendingPathComponent(moveIntentFilename, isDirectory: false)
+            let completeURL = entry.appendingPathComponent(moveCompleteFilename, isDirectory: false)
+            let intentMode = fileMode(at: intentURL)
+            let completeMode = fileMode(at: completeURL)
+            if completeMode != nil {
+                guard isRegularFile(completeURL), (try? Data(contentsOf: completeURL)) == moveCompleteMarker else {
+                    issues.append(
+                        moveRecoveryIssue(
+                            transactionID: transactionID,
+                            message: "A request-move completion marker is damaged; collection changes are read-only."
+                        ))
+                    blocksStructuralWrites = true
+                    continue
+                }
+                if !cleanupCompletedMove(at: entry) {
+                    issues.append(
+                        StorageIssue(
+                            id: "store:request-move-staging:\(canonicalID(transactionID))",
+                            message: "Completed request-move recovery data could not be fully removed."
+                        ))
+                }
+                continue
+            }
+
+            guard intentMode != nil else {
+                issues.append(
+                    StorageIssue(
+                        id: "store:request-move-staging:\(canonicalID(transactionID))",
+                        message: "Incomplete request-move staging data was preserved."
+                    ))
+                continue
+            }
+            guard isRegularFile(intentURL), let intentData = try? Data(contentsOf: intentURL),
+                let intent = try? JSONDecoder().decode(MoveJournalIntent.self, from: intentData),
+                intent.formatVersion == 1,
+                intent.transactionID == transactionID,
+                intent.sourceCollectionID != intent.destinationCollectionID,
+                isSafeRequestFilename(intent.sourceFilename, requestID: intent.requestID)
+            else {
+                issues.append(
+                    moveRecoveryIssue(
+                        transactionID: transactionID,
+                        message: "A committed request move is unreadable; collection changes are read-only."
+                    ))
+                blocksStructuralWrites = true
+                continue
+            }
+
+            do {
+                try replayCommittedMove(
+                    intent: intent,
+                    in: entry,
+                    collectionsAt: collectionsURL,
+                    workspaceIndexAt: workspaceIndexURL
+                )
+                if !cleanupCompletedMove(at: entry) {
+                    issues.append(
+                        StorageIssue(
+                            id: "store:request-move-staging:\(canonicalID(transactionID))",
+                            message: "Recovered request-move staging data could not be fully removed."
+                        ))
+                }
+            } catch {
+                issues.append(
+                    moveRecoveryIssue(
+                        transactionID: transactionID,
+                        collectionID: intent.sourceCollectionID,
+                        requestID: intent.requestID,
+                        message:
+                            "A committed request move could not be completed; collection changes are read-only until recovery."
+                    ))
+                blocksStructuralWrites = true
+            }
+        }
+        return MoveRecoveryResult(issues: issues, blocksStructuralWrites: blocksStructuralWrites)
+    }
+
+    private static func replayCommittedMove(
+        intent: MoveJournalIntent,
+        in transactionDirectory: URL,
+        collectionsAt collectionsURL: URL,
+        workspaceIndexAt workspaceIndexURL: URL
+    ) throws {
+        let requestBytes = try readRegularFile(
+            at: transactionDirectory.appendingPathComponent(moveRequestFilename, isDirectory: false))
+        let sourceBefore = try readRegularFile(
+            at: transactionDirectory.appendingPathComponent(moveSourceBeforeFilename, isDirectory: false))
+        let sourceAfter = try readRegularFile(
+            at: transactionDirectory.appendingPathComponent(moveSourceAfterFilename, isDirectory: false))
+        let destinationBefore = try readRegularFile(
+            at: transactionDirectory.appendingPathComponent(moveDestinationBeforeFilename, isDirectory: false))
+        let destinationAfter = try readRegularFile(
+            at: transactionDirectory.appendingPathComponent(moveDestinationAfterFilename, isDirectory: false))
+        let workspaceAfter = try readRegularFile(
+            at: transactionDirectory.appendingPathComponent(moveWorkspaceAfterFilename, isDirectory: false))
+        let workspaceBeforeURL = transactionDirectory.appendingPathComponent(
+            moveWorkspaceBeforeFilename, isDirectory: false)
+        let workspaceBefore: Data?
+        if intent.workspaceIndexExistedBefore {
+            workspaceBefore = try readRegularFile(at: workspaceBeforeURL)
+        } else {
+            guard fileMode(at: workspaceBeforeURL) == nil else {
+                throw CollectionStoreError.partialFailure(operation: "read request-move recovery data")
+            }
+            workspaceBefore = nil
+        }
+
+        let sourceDirectory = collectionsURL.appendingPathComponent(
+            canonicalID(intent.sourceCollectionID), isDirectory: true)
+        let destinationDirectory = collectionsURL.appendingPathComponent(
+            canonicalID(intent.destinationCollectionID), isDirectory: true)
+        guard isDirectory(sourceDirectory), isDirectory(destinationDirectory) else {
+            throw CollectionStoreError.partialFailure(operation: "find request-move collections")
+        }
+
+        let destinationRequestURL = destinationDirectory.appendingPathComponent(
+            requestFilename(intent.requestID), isDirectory: false)
+        if fileMode(at: destinationRequestURL) == nil {
+            do {
+                try AtomicFileWriter.writeNew(requestBytes, to: destinationRequestURL)
+            } catch {
+                throw CollectionStoreError.partialFailure(operation: "write the destination request")
+            }
+        } else {
+            guard isRegularFile(destinationRequestURL), (try? Data(contentsOf: destinationRequestURL)) == requestBytes
+            else {
+                throw CollectionStoreError.partialFailure(operation: "verify the destination request")
+            }
+        }
+
+        try applyMoveMetadataImage(
+            before: destinationBefore,
+            after: destinationAfter,
+            at: destinationDirectory.appendingPathComponent("collection.json", isDirectory: false)
+        )
+        try applyMoveMetadataImage(
+            before: sourceBefore,
+            after: sourceAfter,
+            at: sourceDirectory.appendingPathComponent("collection.json", isDirectory: false)
+        )
+        try applyMoveMetadataImage(before: workspaceBefore, after: workspaceAfter, at: workspaceIndexURL)
+
+        let sourceRequestURL = sourceDirectory.appendingPathComponent(intent.sourceFilename, isDirectory: false)
+        if fileMode(at: sourceRequestURL) != nil {
+            guard isRegularFile(sourceRequestURL), (try? Data(contentsOf: sourceRequestURL)) == requestBytes else {
+                throw CollectionStoreError.partialFailure(operation: "verify the source request")
+            }
+            do {
+                try FileManager.default.removeItem(at: sourceRequestURL)
+            } catch {
+                throw CollectionStoreError.partialFailure(operation: "remove the source request")
+            }
+        }
+
+        let completeURL = transactionDirectory.appendingPathComponent(moveCompleteFilename, isDirectory: false)
+        if fileMode(at: completeURL) == nil {
+            do {
+                try AtomicFileWriter.writeNew(moveCompleteMarker, to: completeURL)
+            } catch {
+                throw CollectionStoreError.partialFailure(operation: "complete request-move recovery")
+            }
+        } else if !isRegularFile(completeURL) || (try? Data(contentsOf: completeURL)) != moveCompleteMarker {
+            throw CollectionStoreError.partialFailure(operation: "verify request-move recovery")
+        }
+    }
+
+    private static func applyMoveMetadataImage(before: Data?, after: Data, at url: URL) throws {
+        let currentMode = fileMode(at: url)
+        if currentMode == nil {
+            guard before == nil else {
+                throw CollectionStoreError.partialFailure(operation: "verify request-move metadata")
+            }
+            do {
+                try AtomicFileWriter.writeNew(after, to: url)
+            } catch {
+                throw CollectionStoreError.partialFailure(operation: "write request-move metadata")
+            }
+            return
+        }
+        guard isRegularFile(url), let current = try? Data(contentsOf: url) else {
+            throw CollectionStoreError.partialFailure(operation: "read request-move metadata")
+        }
+        if current == after { return }
+        guard let before, current == before else {
+            throw CollectionStoreError.partialFailure(operation: "verify request-move metadata")
+        }
+        do {
+            try AtomicFileWriter.replace(after, at: url)
+        } catch {
+            throw CollectionStoreError.partialFailure(operation: "write request-move metadata")
+        }
+    }
+
+    private static func cleanupCompletedMove(at transactionDirectory: URL) -> Bool {
+        guard isDirectory(transactionDirectory) else { return false }
+        let knownPayloads = [
+            moveRequestFilename,
+            moveSourceBeforeFilename,
+            moveSourceAfterFilename,
+            moveDestinationBeforeFilename,
+            moveDestinationAfterFilename,
+            moveWorkspaceBeforeFilename,
+            moveWorkspaceAfterFilename,
+        ]
+        for filename in knownPayloads {
+            let url = transactionDirectory.appendingPathComponent(filename, isDirectory: false)
+            guard fileMode(at: url) != nil else { continue }
+            guard isRegularFile(url) else { return false }
+            do {
+                try FileManager.default.removeItem(at: url)
+            } catch {
+                return false
+            }
+        }
+
+        guard
+            let remaining = try? FileManager.default.contentsOfDirectory(
+                at: transactionDirectory, includingPropertiesForKeys: nil, options: [])
+        else {
+            return false
+        }
+        let allowedMarkers = Set([moveIntentFilename, moveCompleteFilename])
+        guard remaining.allSatisfy({ allowedMarkers.contains($0.lastPathComponent) }) else { return false }
+
+        let intentURL = transactionDirectory.appendingPathComponent(moveIntentFilename, isDirectory: false)
+        if fileMode(at: intentURL) != nil {
+            guard isRegularFile(intentURL) else { return false }
+            do { try FileManager.default.removeItem(at: intentURL) } catch { return false }
+        }
+        let completeURL = transactionDirectory.appendingPathComponent(moveCompleteFilename, isDirectory: false)
+        if fileMode(at: completeURL) != nil {
+            guard isRegularFile(completeURL), (try? Data(contentsOf: completeURL)) == moveCompleteMarker else {
+                return false
+            }
+            do { try FileManager.default.removeItem(at: completeURL) } catch { return false }
+        }
+        do {
+            try FileManager.default.removeItem(at: transactionDirectory)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    private static func isSafeRequestFilename(_ filename: String, requestID: UUID) -> Bool {
+        let url = URL(fileURLWithPath: filename)
+        return url.lastPathComponent == filename
+            && url.pathExtension.lowercased() == "json"
+            && UUID(uuidString: url.deletingPathExtension().lastPathComponent) == requestID
+    }
+
+    private static func moveRecoveryIssue(
+        transactionID: UUID,
+        collectionID: UUID? = nil,
+        requestID: UUID? = nil,
+        message: String
+    ) -> StorageIssue {
+        var parts = ["store", "request-move-recovery", canonicalID(transactionID)]
+        if let collectionID { parts.append(canonicalID(collectionID)) }
+        if let requestID { parts.append(canonicalID(requestID)) }
+        return StorageIssue(
+            id: parts.joined(separator: ":"), message: message, collectionID: collectionID, requestID: requestID)
+    }
+
     private static func initializeGlobalsIfMissing(at url: URL) throws {
         guard fileMode(at: url) == nil else { return }
         let options = try httpOptionsJSONValue(HTTPOptions())
@@ -505,6 +1440,7 @@ public actor CollectionStore {
             "formatVersion": .number(Decimal(currentFormatVersion)),
             "variables": .object([:]),
             "httpOptions": options,
+            globalMCPResponseViewingKey: .string(MCPResponseViewPolicy.block.rawValue),
         ])
         do {
             let data = try JSONEncoder.postieEncoder.encode(emptyGlobals)
@@ -519,25 +1455,26 @@ public actor CollectionStore {
         values: VariableValues,
         isReadOnly: Bool,
         options: HTTPOptions,
-        optionsAreReadOnly: Bool
+        optionsAreReadOnly: Bool,
+        mcpResponseViewing: MCPResponseViewPolicy
     ) {
         guard Self.isRegularFile(globalsURL), let data = try? Data(contentsOf: globalsURL) else {
             issues.append(
                 makeIssue(.missingGlobals, message: "The globals document is missing or unreadable and was preserved."))
-            return ([:], true, HTTPOptions(), true)
+            return ([:], true, HTTPOptions(), true, .block)
         }
         guard case .object(let object) = try? JSONDecoder().decode(JSONValue.self, from: data),
             case .number(let version)? = object["formatVersion"]
         else {
             issues.append(makeIssue(.malformedGlobals, message: "The globals document is malformed and was preserved."))
-            return ([:], true, HTTPOptions(), true)
+            return ([:], true, HTTPOptions(), true, .block)
         }
         guard version == Decimal(Self.currentFormatVersion) else {
             issues.append(
                 makeIssue(
                     .unsupportedGlobalsVersion,
                     message: "The globals document uses an unsupported format and was preserved."))
-            return ([:], true, HTTPOptions(), true)
+            return ([:], true, HTTPOptions(), true, .block)
         }
 
         var values: VariableValues = [:]
@@ -545,7 +1482,7 @@ public actor CollectionStore {
         guard let rawVariables = object["variables"] else {
             issues.append(makeIssue(.malformedGlobals, message: "The globals document is malformed and was preserved."))
             variablesAreReadOnly = true
-            return (values, variablesAreReadOnly, HTTPOptions(), true)
+            return (values, variablesAreReadOnly, HTTPOptions(), true, .block)
         }
         do {
             values = try Self.decodeVariables(rawVariables)
@@ -573,7 +1510,27 @@ public actor CollectionStore {
             options = HTTPOptions()
         }
 
-        return (values, variablesAreReadOnly, options, optionsAreReadOnly)
+        let mcpResponseViewing: MCPResponseViewPolicy
+        if let rawPolicy = object[Self.globalMCPResponseViewingKey] {
+            do {
+                let policy = try Self.decodeMCPResponseViewPolicy(rawPolicy)
+                guard policy != .inherit else { throw CollectionStoreError.requestDocumentIsMalformed }
+                mcpResponseViewing = policy
+            } catch {
+                issues.append(
+                    makeIssue(
+                        .malformedGlobals,
+                        detail: Self.globalMCPResponseViewingKey,
+                        message: "The global MCP response-view policy is malformed and was preserved."
+                    ))
+                optionsAreReadOnly = true
+                mcpResponseViewing = .block
+            }
+        } else {
+            mcpResponseViewing = .block
+        }
+
+        return (values, variablesAreReadOnly, options, optionsAreReadOnly, mcpResponseViewing)
     }
 
     private func writableGlobalsObject() throws -> [String: JSONValue] {
@@ -685,6 +1642,24 @@ public actor CollectionStore {
             collectionIsReadOnly = true
         }
 
+        let mcpPolicy: MCPResourcePolicy
+        if let rawPolicy = object["mcpPolicy"] {
+            do {
+                mcpPolicy = try Self.decodeMCPResourcePolicy(rawPolicy)
+            } catch {
+                issues.append(
+                    makeIssue(
+                        .malformedCollectionMCPPolicy, collectionID: id,
+                        message:
+                            "The collection MCP policy is malformed; the collection was loaded read-only and excluded from MCP access."
+                    ))
+                mcpPolicy = MCPResourcePolicy(excluded: true, responseViewing: .block)
+                collectionIsReadOnly = true
+            }
+        } else {
+            mcpPolicy = .init()
+        }
+
         let record = CollectionRecord(object: object, name: displayName, entries: entries)
         let requestFiles: [UUID: [URL]]
         do {
@@ -694,7 +1669,7 @@ public actor CollectionStore {
                 makeIssue(
                     .unreadableCollectionContents, collectionID: id,
                     message: "Collection contents could not be listed; the files were preserved."))
-            return RequestCollection(id: id, name: displayName, isReadOnly: true)
+            return RequestCollection(id: id, name: displayName, isReadOnly: true, mcpPolicy: mcpPolicy)
         }
 
         var indexCounts: [UUID: Int] = [:]
@@ -777,7 +1752,8 @@ public actor CollectionStore {
             isReadOnly: collectionIsReadOnly,
             variables: variables,
             headers: defaults.headers,
-            authentication: defaults.authentication
+            authentication: defaults.authentication,
+            mcpPolicy: mcpPolicy
         )
     }
 
@@ -872,6 +1848,11 @@ public actor CollectionStore {
     }
 
     private func writableCollection(id: UUID) throws -> (URL, CollectionRecord) {
+        let (directory, record, _) = try writableCollectionDocument(id: id)
+        return (directory, record)
+    }
+
+    private func writableCollectionDocument(id: UUID) throws -> (URL, CollectionRecord, Data) {
         let directories: [URL]
         do {
             directories = try collectionDirectories(matching: id)
@@ -896,7 +1877,7 @@ public actor CollectionStore {
 
         do {
             let record = try CollectionRecord.decode(data)
-            return (directory, record)
+            return (directory, record, data)
         } catch {
             throw CollectionStoreError.collectionIsReadOnly
         }
@@ -1015,6 +1996,45 @@ public actor CollectionStore {
         if options.overallTimeout == nil { object["overallTimeout"] = .null }
         if options.maximumResponseBytes == nil { object["maximumResponseBytes"] = .null }
         return .object(object)
+    }
+
+    private static func mcpResponseViewPolicyJSONValue(_ policy: MCPResponseViewPolicy) throws -> JSONValue {
+        try encodeJSONValue(policy)
+    }
+
+    private static func decodeMCPResponseViewPolicy(_ value: JSONValue) throws -> MCPResponseViewPolicy {
+        try decodeJSON(value, as: MCPResponseViewPolicy.self)
+    }
+
+    private static func mcpResourcePolicyJSONValue(_ policy: MCPResourcePolicy) throws -> JSONValue {
+        try encodeJSONValue(policy)
+    }
+
+    private static func decodeMCPResourcePolicy(_ value: JSONValue) throws -> MCPResourcePolicy {
+        guard case .object(let object) = value else {
+            throw DecodingError.dataCorrupted(
+                .init(codingPath: [], debugDescription: "MCP resource policy must be an object."))
+        }
+        if let excluded = object["excluded"] {
+            guard case .bool = excluded else {
+                throw DecodingError.dataCorrupted(
+                    .init(codingPath: [], debugDescription: "MCP resource exclusion must be a Boolean."))
+            }
+        }
+        if let responseViewing = object["responseViewing"] {
+            guard case .string(let rawPolicy) = responseViewing,
+                MCPResponseViewPolicy(rawValue: rawPolicy) != nil
+            else {
+                throw DecodingError.dataCorrupted(
+                    .init(codingPath: [], debugDescription: "MCP response-view policy is invalid."))
+            }
+        }
+        return try decodeJSON(value, as: MCPResourcePolicy.self)
+    }
+
+    private static func encodeJSONValue<Value: Encodable>(_ value: Value) throws -> JSONValue {
+        let data = try JSONEncoder.postieEncoder.encode(value)
+        return try JSONDecoder().decode(JSONValue.self, from: data)
     }
 
     private static func httpOptionsOverridesJSONValue(_ overrides: HTTPOptionsOverrides) throws -> JSONValue {
@@ -1307,6 +2327,10 @@ public actor CollectionStore {
         case missingGlobals = "globals-missing"
         case malformedGlobals = "globals-malformed"
         case unsupportedGlobalsVersion = "globals-version-unsupported"
+        case malformedWorkspaceIndex = "workspace-index-malformed"
+        case unsupportedWorkspaceIndex = "workspace-index-version-unsupported"
+        case requestMoveStaging = "request-move-staging"
+        case requestMoveRecovery = "request-move-recovery"
         case unexpectedCollectionEntry = "unexpected-collection-entry"
         case invalidCollectionDirectory = "invalid-collection-directory"
         case duplicateCollectionDirectory = "duplicate-collection-directory"
@@ -1314,6 +2338,7 @@ public actor CollectionStore {
         case malformedCollectionMetadata = "collection-metadata-malformed"
         case malformedCollectionVariables = "collection-variables-malformed"
         case malformedCollectionSettings = "collection-settings-malformed"
+        case malformedCollectionMCPPolicy = "collection-mcp-policy-malformed"
         case unsupportedCollectionVersion = "collection-version-unsupported"
         case unreadableCollectionContents = "collection-contents-unreadable"
         case malformedIndexEntry = "index-entry-malformed"
@@ -1332,6 +2357,27 @@ public actor CollectionStore {
         case unreadableDeletionStaging = "collection-deletion-staging-unreadable"
     }
 
+    private struct WorkspaceIndexDocument {
+        let index: WorkspaceIndex
+        let object: [String: JSONValue]?
+        let isReadOnly: Bool
+    }
+
+    private struct MoveJournalIntent: Codable, Sendable {
+        let formatVersion: Int
+        let transactionID: UUID
+        let sourceCollectionID: UUID
+        let destinationCollectionID: UUID
+        let requestID: UUID
+        let sourceFilename: String
+        let workspaceIndexExistedBefore: Bool
+    }
+
+    private struct MoveRecoveryResult {
+        let issues: [StorageIssue]
+        let blocksStructuralWrites: Bool
+    }
+
     private struct CollectionRecord {
         var object: [String: JSONValue]
         var name: String
@@ -1342,6 +2388,10 @@ public actor CollectionStore {
                 "formatVersion": .number(Decimal(CollectionStore.currentFormatVersion)),
                 "name": .string(name),
                 "variables": .object([:]),
+                "mcpPolicy": .object([
+                    "excluded": .bool(false),
+                    "responseViewing": .string(MCPResponseViewPolicy.inherit.rawValue),
+                ]),
                 "requests": .array(entries),
             ]
             self.name = name
@@ -1394,6 +2444,13 @@ public actor CollectionStore {
             } catch {
                 throw DocumentFailure.malformed
             }
+            if let mcpPolicy = object["mcpPolicy"] {
+                do {
+                    _ = try CollectionStore.decodeMCPResourcePolicy(mcpPolicy)
+                } catch {
+                    throw DocumentFailure.malformed
+                }
+            }
             return CollectionRecord(object: object, name: name, entries: entries)
         }
     }
@@ -1414,6 +2471,7 @@ public actor CollectionStore {
         var variables: VariableValues?
         var authentication: RequestAuthentication?
         var inheritsCollectionAuthentication: Bool?
+        var mcpPolicy: MCPResourcePolicy?
 
         init(configuration: HTTPRequestConfiguration) {
             self.formatVersion = CollectionStore.currentFormatVersion
@@ -1431,6 +2489,7 @@ public actor CollectionStore {
             self.variables = configuration.variables
             self.authentication = configuration.authentication
             self.inheritsCollectionAuthentication = configuration.inheritsCollectionAuthentication
+            self.mcpPolicy = configuration.mcpPolicy
         }
 
         func configuration(identity: UUID) -> HTTPRequestConfiguration {
@@ -1450,7 +2509,8 @@ public actor CollectionStore {
                 optionOverrides: optionOverrides,
                 variables: variables ?? [:],
                 authentication: authentication ?? RequestAuthentication(),
-                inheritsCollectionAuthentication: inheritsCollectionAuthentication ?? false
+                inheritsCollectionAuthentication: inheritsCollectionAuthentication ?? false,
+                mcpPolicy: mcpPolicy ?? .init()
             )
         }
     }
@@ -1476,6 +2536,13 @@ public actor CollectionStore {
             }
             guard object["id"] == nil else {
                 throw RequestDocumentFailure.malformed
+            }
+            if let rawPolicy = object["mcpPolicy"] {
+                do {
+                    _ = try CollectionStore.decodeMCPResourcePolicy(rawPolicy)
+                } catch {
+                    throw RequestDocumentFailure.malformed
+                }
             }
             let stored: StoredRequest
             do {

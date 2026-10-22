@@ -75,6 +75,7 @@ public struct HTTPRequestConfiguration: Identifiable, Codable, Equatable, Sendab
     public var variables: VariableValues
     public var authentication: RequestAuthentication
     public var inheritsCollectionAuthentication: Bool
+    public var mcpPolicy: MCPResourcePolicy
 
     public init(
         id: UUID = UUID(),
@@ -91,7 +92,8 @@ public struct HTTPRequestConfiguration: Identifiable, Codable, Equatable, Sendab
         optionOverrides: HTTPOptionsOverrides? = nil,
         variables: VariableValues = [:],
         authentication: RequestAuthentication = RequestAuthentication(),
-        inheritsCollectionAuthentication: Bool = false
+        inheritsCollectionAuthentication: Bool = false,
+        mcpPolicy: MCPResourcePolicy = .init()
     ) {
         self.id = id
         self.name = name
@@ -108,6 +110,7 @@ public struct HTTPRequestConfiguration: Identifiable, Codable, Equatable, Sendab
         self.variables = variables
         self.authentication = authentication
         self.inheritsCollectionAuthentication = inheritsCollectionAuthentication
+        self.mcpPolicy = mcpPolicy
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -126,6 +129,7 @@ public struct HTTPRequestConfiguration: Identifiable, Codable, Equatable, Sendab
         case variables
         case authentication
         case inheritsCollectionAuthentication
+        case mcpPolicy
     }
 
     public init(from decoder: Decoder) throws {
@@ -148,6 +152,7 @@ public struct HTTPRequestConfiguration: Identifiable, Codable, Equatable, Sendab
             ?? RequestAuthentication()
         inheritsCollectionAuthentication =
             try container.decodeIfPresent(Bool.self, forKey: .inheritsCollectionAuthentication) ?? false
+        mcpPolicy = try container.decodeIfPresent(MCPResourcePolicy.self, forKey: .mcpPolicy) ?? .init()
     }
 }
 
@@ -169,6 +174,7 @@ public struct RequestCollection: Identifiable, Equatable, Sendable {
     public var variables: VariableValues
     public var headers: [HTTPField]
     public var authentication: RequestAuthentication
+    public var mcpPolicy: MCPResourcePolicy
 
     public init(
         id: UUID = UUID(),
@@ -177,7 +183,8 @@ public struct RequestCollection: Identifiable, Equatable, Sendable {
         isReadOnly: Bool = false,
         variables: VariableValues = [:],
         headers: [HTTPField] = [],
-        authentication: RequestAuthentication = .init()
+        authentication: RequestAuthentication = .init(),
+        mcpPolicy: MCPResourcePolicy = .init()
     ) {
         self.id = id
         self.name = name
@@ -186,6 +193,7 @@ public struct RequestCollection: Identifiable, Equatable, Sendable {
         self.variables = variables
         self.headers = headers
         self.authentication = authentication
+        self.mcpPolicy = mcpPolicy
     }
 }
 
@@ -214,11 +222,15 @@ public struct WorkspaceLoad: Sendable {
     public var globalVariablesAreReadOnly: Bool
     public var globalOptions: HTTPOptions
     public var globalOptionsAreReadOnly: Bool
+    public var workspaceIndex: WorkspaceIndex
+    public var workspaceIndexIsReadOnly: Bool
+    public var globalMCPResponseViewing: MCPResponseViewPolicy
 
     public init(
         collections: [RequestCollection], issues: [StorageIssue] = [], globalVariables: VariableValues = [:],
         globalVariablesAreReadOnly: Bool = false, globalOptions: HTTPOptions = HTTPOptions(),
-        globalOptionsAreReadOnly: Bool = false
+        globalOptionsAreReadOnly: Bool = false, workspaceIndex: WorkspaceIndex = .init(),
+        workspaceIndexIsReadOnly: Bool = false, globalMCPResponseViewing: MCPResponseViewPolicy = .block
     ) {
         self.collections = collections
         self.issues = issues
@@ -226,6 +238,9 @@ public struct WorkspaceLoad: Sendable {
         self.globalVariablesAreReadOnly = globalVariablesAreReadOnly
         self.globalOptions = globalOptions
         self.globalOptionsAreReadOnly = globalOptionsAreReadOnly
+        self.workspaceIndex = workspaceIndex
+        self.workspaceIndexIsReadOnly = workspaceIndexIsReadOnly
+        self.globalMCPResponseViewing = globalMCPResponseViewing
     }
 }
 

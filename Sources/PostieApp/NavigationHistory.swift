@@ -49,6 +49,19 @@ struct NavigationHistory {
         currentIndex = lastIndex - overflow
     }
 
+    mutating func remapRequest(from oldIdentity: RequestIdentity, to newIdentity: RequestIdentity) {
+        locations = locations.map { location in
+            switch location {
+            case let .request(identity, section) where identity == oldIdentity:
+                .request(newIdentity, section: section)
+            case let .requestVariableDefinition(identity, name) where identity == oldIdentity:
+                .requestVariableDefinition(newIdentity, name: name)
+            default:
+                location
+            }
+        }
+    }
+
     mutating func goBack(to availableLocations: Set<NavigationLocation>) -> NavigationLocation? {
         guard let currentIndex, currentIndex > 0 else { return nil }
         for index in (0..<currentIndex).reversed() where availableLocations.contains(locations[index]) {
