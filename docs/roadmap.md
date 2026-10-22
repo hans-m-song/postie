@@ -1,12 +1,145 @@
 # Postie roadmap
 
-Recorded 2026-10-17. M1–M4 are complete locally. M5 remains not started. IDs are stable; do not reuse deleted IDs. Paste cURL is deferred beyond this implementation slice. See implementation-m3-m4.md for decisions, audit dispositions, verification and limits.
+Updated 2026-10-22. This opening status is canonical; the task records below preserve decisions and historical checkpoints. IDs are stable and are not renumbered. Local Markdown remains the agreed tracker; TaskView migration is deferred until tracking is requested again.
 
-This document records the approved high-level breakdown. User agreed on 2026-10-17 to keep local planning for now; TaskView records have not been created. Revisit TaskView migration only when project tracking is requested again.
+Local check-ins on 2026-10-22: 9fb17f6 formatting/Linux CI, 5973276 ordering/MCP/CLI foundation, 85fa94c accepted MCP discovery. Deferred distribution code remains uncommitted; no push/deployment. The isolated foundation passed279 tests and discovery passed27 focused tests after separation. Historical uncommitted-status statements below describe their dated checkpoint.
 
-Latest scope, 2026-10-18: parameter polish, Copy as cURL and native snapshots are selected for the next implementation slices. Snapshots support Rename and Delete; HAR export and Paste cURL remain deferred. See [grouped deferred features](deferred-features.md) for the consolidated backlog and explicit non-goals. Older M5-deferred wording below records prior scope, not cancellation of these selected slices.
+## Immediate follow-ups
 
-## Shared task contract
+The user requested all review findings be queued as immediate follow-ups, with MCP request discovery first, then approved its proposed plan. [Immediate follow-up specifications](immediate-follow-ups.md) records T-103 search/name-based collection selectors (user-accepted 2026-10-22; 27 focused tests and live discovery/schema checks pass), T-104 snapshot header masking, T-105 IPC budgets, T-106 move recovery, T-107 test repairs, T-108 window ownership, T-109 autocomplete accessibility and T-110 elapsed-time presentation. The remaining items are queued, not implemented. This sequence takes priority over the general next-feature candidates below.
+
+## Current status
+
+| Scope | Status |
+|---|---|
+| M1–M4 request execution, persistence, variables/auth and editing | Implemented; extensive local/user verification recorded in the feature guides |
+| T-31 snapshots and T-95 layout | User-verified, committed `b066227`; navigation fix `983c27d`, collapsing/counts `2234b28` |
+| T-100 manual encryption-key import/export | User-verified, committed `661e149` |
+| T-96 collection/request ordering and cross-collection moves | Implemented; basic ordering/moves user-confirmed. Restart/cancellation feedback acceptance remains; intermittent insertion report unreproduced and deferred |
+| T-97 opt-in authenticated local MCP | Implemented; real Codex discovery/start/result, request exclusion and three response modes verified. Inherited unused-secret redaction user-accepted |
+| T-98 existing-instance CLI | Implemented; live read/send/result/cancel and temporary snapshot lifecycle verified; app-closed diagnostic corrected and rechecked |
+| T-99 iCloud data sync | Deferred: no Apple Developer account; no sync backend implemented |
+| Distribution T-86–T-94 | Local configuration exists; OTA/deployment deferred, no deployment claimed |
+| T-101 documentation and Linux CI cleanup | Implemented locally: refreshed docs/logo, normalized Swift formatting, Linux format/syntax/workflow/whitespace checks. All279 existing package tests and local checks/builds/signatures passed; user review and hosted CI remain |
+| T-102 module and blind test review | Completed source/test-only review using swiftui-pro and delegated module ownership; findings and proposed fixes in review-2026-10-21.md. Functional fixes await a scoped follow-up decision |
+
+The broader ordering/MCP/CLI baseline remains uncommitted; `3cca2f1` contains the self-contained frozen unused-secret capture. Distribution work is separate. Keep commits local; do not push without an explicit request.
+
+## Current contracts
+
+- Requests moved between collections keep their own templates/overrides, adopt destination inheritance, and carry snapshot grouping without rewriting captures. Active requests reject moves.
+- MCP is opt-in and remembers enabled state. Collection exclusion blocks children; retained excluded snapshots stay excluded after source deletion.
+- Global, collection and request response policies support Block, redacted body, and explicit unredacted response body/headers/URLs including redirects. The nearest override wins; global default is Block.
+- Redaction uses frozen send-time effective secrets. New sends include unused effective encrypted values in a separate bounded payload; new snapshots encrypt it. Legacy snapshots retain only their recorded inputs.
+- CLI requires a running Postie instance and intentionally bypasses MCP response/access policies. Direct secret-variable reads remain unavailable.
+- Local builds remain sufficient. No deployment, Apple signing/notarization, sync, HAR or headless CLI is implied.
+
+See [automation contracts and verification](automation-implementation.md), [user guide](automation.md), [snapshots](snapshots.md), [CI](ci.md), and [grouped deferred features](deferred-features.md).
+
+## Remaining baseline verification
+
+- New snapshot read through MCP demonstrates unused-secret redaction end to end.
+- Collection exclusion blocks children/snapshots in the real connected client.
+- Ordering and MCP enabled state persist after restarting.
+- MCP request creation/editing and snapshot mutations; shared operations already passed through CLI.
+- User acceptance of remaining settings/drag feedback, then scoped baseline check-in.
+
+Latest cleanup gate: all279 existing package tests passed with zero failures/warnings, plus app/CLI builds/signatures, Linux formatting/parser and local workflow/whitespace checks. Earlier91,154 and38 gates are separate runs, not additive coverage. Real inherited-redaction and CLI app-closed rechecks passed after fixes. [Independent review](review-2026-10-21.md) identified correctness and test-confidence follow-ups that passing tests do not close; prioritize those before committing the remaining baseline.
+
+## Next feature candidates
+
+After closing this baseline: Copy as cURL, request tabs with history integration, then bulk query/header editing. These are priorities to select, not newly authorized implementation. Sync, HAR/OpenAPI/collection interchange, named environments, expanded body modes/protocols, automatic history/replay, memory profiling and distribution remain in the deferred inventory.
+
+## Historical milestone and task records
+
+The following dated sections retain original decisions and verification evidence. Statements such as “pending”, “current”, or “deferred” describe that checkpoint; the status above and linked feature guides supersede them.
+
+## Current distribution decision — 2026-10-19
+
+User explicitly deferred OTA updates and distribution work; local app builds are sufficient for now. T-86 through T-89 remain uncommitted, preserved as deferred work rather than an accepted baseline. T-90 automation remains deferred. Do not publish, deploy, or commit the pending distribution scope without renewed user direction/verification. The last verified local UI changes are already committed as f2fec33. Earlier completion statements below describe local implementation/checks, not current approval to ship this work.
+
+## Current selected product scope — layout switching and snapshots
+
+Completed and user-verified, 2026-10-20: snapshot field labels/names/values support selection and one Copy as JSON action exports actual resolved variable/path/secret values using frozen captured transport rather than current workspace values. No new per-field copy buttons or Finder action. Response-body clipboard preview is limited to 1 MiB with explicit byte counts/truncation, and Base64 for binary content. Nine focused tests passed; independent source review is clear. Local commit b066227 contains this follow-up and the underlying layout/snapshot slice. Historical independent native restart/resize recheck remains unperformed; user acceptance authorises this local check-in.
+
+User selected layout switching and native snapshots on 2026-10-19; request tabs, drag-and-drop ordering and Copy as cURL are deferred from this slice. T-95 implements a remembered global side-by-side/stacked layout preference. T-31 implements explicit completed-exchange snapshots with frozen send-time request inputs, staged file-backed body storage, read-only viewing, rename/delete and source-independent sidebar grouping. No automatic history, HAR, replay or memory optimization expansion.
+
+- [x] T-95 implementation: remembered layout preference/control and live native orientation check (final snapshot resize gate remains below).
+- [x] T-31: capture/storage contracts and focused recovery/ownership checks.
+- [x] T-31: save/view/rename/delete UI and independent source/test verification.
+- [x] User verification and local check-in b066227. Independent native restart/resize automation remains an unclaimed check, not an active implementation task.
+
+Verification on 2026-10-19: 18 focused tests passed (six snapshot storage/capture/lease cases, seven preparation cases, two app lifecycle/key-gating cases, three navigation cases). Independent final source review found no actionable issue. Isolated native checks exercised sending a loopback fixture, live layout switching, save/open/rename, delete confirmation/cancel and persisted snapshot reopening. Restart grouping and snapshot resizing defects found in those checks were fixed and rebuilt; their final native recheck remains pending while macOS automation times out. No release suite, deployment or commit is part of this slice.
+- [x] User verified runnable changes; checked in locally as b066227, no push.
+
+## T-94 — Cache policies and signed feeds (implemented; release suite skipped by user)
+
+Approved 2026-10-19: implement the three improvements from the distribution review. Replace legacy CloudFront forwarding/TTL configuration with cache policies; disable caching for `releases/appcast.xml` and cache immutable ZIP archives for up to one year. Upload ZIPs with matching immutable cache headers. Updater-enabled bundles require signed feeds and pre-extraction archive verification; publication verifies feed signatures before uploading unchanged signed bytes. Ordinary local builds remain updater-disabled. Preserve Sparkle's existing signed-feed failure fallback defaults. No deployment, publication or unrelated signing/CI changes.
+
+- [x] Implement cache policies and immutable archive metadata.
+- [x] Enable signed feeds; add focused synthetic tampering, legacy resume and packaging checks.
+- [ ] Execute focused release suite — skipped at user request; runtime result unverified.
+
+Terraform fmt, isolated backendless init/validate and one temporary mock test passed. Bash syntax, release-test Swift compilation and independent final source review passed. Release execution remains unverified: default Foundation temp writes hit sandbox restrictions; automatic approval review rejected escalation because the harness reads synthetic environment variables. User subsequently requested skipping the test; permission is no longer pending and no execution retry is authorized. No deployment, publication or commit. Shared update hostname/hosting is a future consideration only; user explicitly requested no changes now.
+
+## T-92 — Bounded object version history (verified locally; user verification/deployment pending)
+
+Approved 2026-10-19: retain the current object version and four noncurrent versions. Configure a bucket-wide lifecycle rule to expire additional noncurrent versions once they meet the one-day minimum age. Current objects and uniquely named release archives remain untouched; this is per-object history, not a five-release limit. Depends on bucket versioning. Acceptance: backendless validation and one isolated mock test verify the enabled rule, count, age and absence of current-object expiry. No deployment or commit before user verification.
+
+- [x] Add retention rule and document its semantics.
+- [x] Verify Terraform locally without AWS access.
+
+Disposable-copy backendless initialization, validation and one temporary mock test passed. Formatting/diff checks and independent source review passed. No repository tests added, AWS access, deployment or commit. The subsequent online guidance review is recorded in the deferred local distribution-review.md document; it does not authorize the suggested follow-up changes.
+
+## T-91 — Custom distribution domain (verified locally; user verification/deployment pending)
+
+Approved 2026-10-19: configure `postie.cloud.axatol.xyz` in Terraform, using the existing certificate ARN from SSM `/infrastructure/acm/cloud.axatol.xyz/certificate_arn` in `us-east-1`. Scope includes CloudFront alias, SNI certificate with TLS 1.2 minimum, custom release/feed URLs and Route 53 A/AAAA aliases. User confirmed the existing public `cloud.axatol.xyz` hosted zone. Certificate issuance/validation remains externally managed. Verify with backendless validation and focused mock-provider tests; no AWS reads, deployment or publication. OTA releases and CI automation remain deferred. Commit only after user verification.
+
+- [x] Configure domain, certificate lookup and DNS aliases.
+- [x] Verify local Terraform contracts and record results.
+
+Backendless disposable-copy initialization, validation and two mocked plan tests passed. Formatting/diff checks and independent static review passed. Live hosted-zone and certificate availability remain unverified; no deployment or commit.
+
+## T-89 — Local deployment and releases (code complete locally; deployment pending)
+
+Approved 2026-10-19: deploy Terraform and publish updates locally for now, with future automation retained as a roadmap item. Consolidate hosting into one Terraform root; remove unused GitHub workflows, synchronization, OIDC roles and permission boundaries. Keep reusable Bash/Swift release tooling behind Make targets, so future CI can call the same checked commands. Retain Sparkle integration, AWS profile/backend configuration, default Sydney region, keypair validation and archive-before-feed publication. No real deployment, release, secret access or Git mutation.
+
+- [x] Consolidate local hosting configuration and remove unused CI/IAM setup.
+- [x] Add local Make deployment/release commands and focused verification.
+- [x] Record future automation scope and update operator documentation.
+
+Verified 2026-10-19: AWS-only root fmt/backendless init/validate and three mock hosting contracts pass independently. Six synthetic release cases pass through Make with actual Sparkle tools and stubbed remote/build commands; increasing-build rejection is included. Independent disposable wrapper checks reject four unsafe Git states before Terraform/AWS calls and accept the fetched-origin/main fallback. Make dry runs, Bash syntax, ignored config/plan paths and diff checks pass. Corrected the previously ineffective viewer TLS minimum for CloudFront's default certificate; no custom domain/certificate added. No production defect remains from review. No app tests rerun, live deployment, publication, credentials/key access or state migration. Uncommitted until user verification; T90 retains future automation.
+
+## T-90 — Automate deployment and releases (deferred)
+
+Goal: run the verified local Make interfaces from CI when automation is requested. Scope: thin workflow calling `infra-init`/`infra-plan`/`infra-apply` and `release`, short-lived OIDC AWS access, scoped runtime signing-key access, appropriate plan/release approvals and serialized publication. Constraint: one implementation of packaging/signing/publication, shared by local and CI entry points; preserve increasing build numbers across both paths; do not provision unused credentials or roles now. Dependencies: T-89 local command verification and operator deployment/install validation. Acceptance: a synthetic CI dry run proves the same commands, full tag/main history checks, build ordering and archive-before-feed contract, then an explicitly authorized end-to-end release. Owner: future implementation task; no active blockers or work assigned.
+
+## T-88 — Distribution configuration simplification (code complete locally; deployment pending)
+
+Approved 2026-10-19: fixed project identity, OIDC issuer and resource naming become locals or derived metadata. Default region to `ap-southeast-2`; retain local profile and state bucket/key settings, with OIDC credentials in CI. Remove the CloudFront ID handoff in favor of account-local distributions with `Application=Postie` ownership checks. Remove custom KMS and deferred Apple signing/notarization inputs. Automatically publish generated workflow configuration to GitHub variables; preserve secrets for signing keys/tokens. No deployment or real-secret access.
+
+- [x] Simplify Terraform inputs and bootstrap/distribution dependency flow.
+- [x] Remove unused Apple release tooling and custom KMS scope.
+- [x] Verify focused mock and release behavior tests and update setup documentation.
+
+Verified 2026-10-19: both roots pass formatting, backendless initialization with locked providers, validation and three focused mock tests each. Five existing release-publication scenarios pass after Apple removal. Independent static review found no remaining concrete defect; independent syntax checks passed all three workflow YAML files, 14 embedded shell blocks and release scripts. Boundary/inline/release policy JSON lengths are 4,163 / 2,830 / 1,825 characters, within their limits. Backend/tfvars paths are confirmed ignored. No app tests rerun, live policy simulation, backend access, AWS/GitHub deployment or real credential/secret inspection. Changes remain uncommitted until user verification. T-88 supersedes T-87's ID binding and bootstrap OAC ownership; migration is required if that earlier layout was externally deployed.
+
+## T-87 — Bounded infrastructure bootstrap (code complete locally; deployment pending)
+
+Approved 2026-10-19: define the GitHub deployment role in this repository, look up the existing OIDC provider, and separate manually applied `infra/bootstrap` from automatically applied `infra/distribution`. Restrict deployment to exact Postie resources, ownership tags and a mandatory release-role permissions boundary. Bootstrap owns both roles, their trust/tags/boundaries and origin access control; distribution manages only the release publishing policy. Initial CloudFront creation is manual; bootstrap then binds its exact ID for automatic updates. No deployment, credential inspection or live AWS/GitHub calls.
+
+- [x] Implement bootstrap roles, boundaries, OIDC lookup and scoped backend/secret access.
+- [x] Wire distribution inputs and validation-only bootstrap workflow.
+- [x] Run focused offline checks and independent security review.
+- [x] Document manual initialization, automatic updates and replacement limits.
+
+Verified 2026-10-19: both roots passed formatting, backendless initialization with locked providers and validation. Six focused mocked Terraform tests passed (three bootstrap configurations and three distribution role-contract cases). Independent static security review found no remaining concrete defect; separate synthetic checks confirmed explicit deny preservation and managed/inline size limits, including eight secret references and optional distinct/shared KMS keys. Largest representative infrastructure boundary: 5,371 / 6,144 characters. No live authorization simulation, AWS/GitHub deployment, environment inspection or real-secret access. T-86/T-87 remain uncommitted pending user verification.
+
+## T-86 — Distribution configuration and Sparkle (code complete locally; deployment pending)
+
+Approved 2026-10-19: code/configuration only for Terraform-managed S3/CloudFront, GitHub OIDC release access, AWS Secrets Manager to GitHub secret synchronization, infrastructure-change and tag-release workflows, and Sparkle integration. Assume an AWS account and compatible macOS runner exist. User handles deployment, backend/bootstrap, key creation and real credentials. Support ad-hoc app signing plus Sparkle archive signing without Apple membership; optional Developer ID/notarization when configured. No AWS/GitHub mutations, live secret access or deployment during implementation. Secret synchronization stores secret values in Terraform state; document this explicitly.
+
+Verified: 173 app/core tests, five release-pipeline tests using actual Sparkle tools with synthetic keys and mocked AWS/build commands, backendless Terraform init/validate/fmt, workflow/script syntax, independent source review, native and universal release builds plus nested signature checks. Release tooling and its harness now use Bash/Swift/Make only, per the 2026-10-19 correction; the five cases passed through `make release-test`. Default local build restored without a live feed. Native UI automation was unavailable; live OIDC, hosting, notarization and actual update installation remain deployment checks. See distribution.md and infra/distribution/README.md. No commit until user verification.
 
 ## T-85 — Header wrapping and top-aligned rows (complete locally)
 

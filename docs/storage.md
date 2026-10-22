@@ -1,6 +1,6 @@
 # Local storage design
 
-Updated 2026-10-20. Collection index/per-request layout, three variable scopes, encrypted authentication and native snapshots are implemented. Default root is ~/.config/postie without implicit migration/merge. Native iCloud data sync is selected for research/design (T99); manual local-Keychain import/export (T100) is the current implementation slice, not automatic sync.
+Updated 2026-10-21. Collection index/per-request layout, three variable scopes, encrypted authentication, native snapshots and manual workspace-key transfer are implemented. Default root is ~/.config/postie without implicit migration/merge. Native iCloud sync remains deferred; see icloud-sync-research.md.
 
 ## Layout and identity
 
@@ -20,9 +20,13 @@ Updated 2026-10-20. Collection index/per-request layout, three variable scopes, 
 
 Collection and request IDs are UUIDs. A collection's directory name and a request's filename stem supply identity; JSON does not duplicate those IDs. Display names live in JSON, may repeat, and can change without renaming files. Explicit directory arguments override the default root.
 
+The optional root `workspace-index.json` version 1 stores collection order, per-snapshot grouping overrides and MCP exclusion tombstones. An absent index preserves legacy alphabetical order and captured snapshot grouping. Unknown metadata is preserved; malformed/unsupported indexes become read-only. MCP policies are additive request/collection metadata plus a global response-view default. Listener enablement/token configuration is app-local, outside the workspace.
+
+Basic ordering and cross-collection moves are user-verified; restart/persistence verification remains pending. Moves preserve request UUID and exact file bytes, adopting destination inheritance. A `.moves` recovery journal publishes commit intent before applying destination/source/workspace afterimages; startup replays committed moves. Unresolved committed recovery blocks structural writes. Snapshot capture content/source labels remain unchanged; workspace grouping follows the move. Deletion of excluded sources first records retained snapshot exclusion. Snapshot enumeration issues block source deletion/moves so unknown captures cannot bypass those associations. Existing single-file create/edit/delete behavior below remains applicable.
+
 `globals.json` contains its format version and global variables. Each `collection.json` contains its format version, display name, collection variables, and an ordered `requests` array of request IDs. Each request file contains its format version, display name, method, URL, ordered query/header/path entries, body, authentication configuration, and request variables. Variable maps encode ordinary values as strings and secrets as `{ "version": 1, "combined": "Base64 sealed box" }`. Auth contains kind/username and optional encrypted password/token envelopes. Only the application key is in Keychain. See encryption.md.
 
-Collection settings add ordered `headers` and `authentication` fields, defaulting to empty/None when absent. Request `inheritsCollectionAuthentication` defaultsfalse when reading older files; AppModel explicitly sets it true for newly created requests. Existing explicit auth does not silently change. Collection variables/headers/auth save together in one atomic metadata replacement, preserving current name/index and unrelated metadata. See collection-settings.md for override and disabled-row suppression rules.
+Collection settings add ordered `headers` and `authentication` fields, defaulting to empty/None when absent. Request `inheritsCollectionAuthentication` defaults to false when reading older files; AppModel explicitly sets it true for newly created requests. Existing explicit auth does not silently change. Collection variables/headers/auth save together in one atomic metadata replacement, preserving current name/index and unrelated metadata. See collection-settings.md for override and disabled-row suppression rules.
 
 Absent additive request/collection variable/auth fields default empty/None. Malformed globals load read-only with an issue while unrelated collections remain usable; malformed collection variables make that collection read-only. Owned maps replace deleted/renamed keys rather than recursively resurrecting them. Unrelated unknown metadata is preserved. Marking a variable secret seals it before updating the model and atomically replaces its plaintext representation at save.
 
@@ -40,7 +44,7 @@ Illustrative collection metadata:
 }
 ```
 
-The index is authoritative for membership and request order. Directory enumeration discovers collections and detects unindexed request files. No root collection index or custom collection ordering is initially required; collections sort by display name with ID as tie-breaker. JSON folders are a storage detail, not nested folders in the product.
+Each collection index is authoritative for request membership and order. Directory enumeration discovers collections and detects unindexed request files. The root workspace index supplies explicit collection order; when it is absent, legacy collections sort by display name with ID as tie-breaker. JSON folders are a storage detail, not nested folders in the product.
 
 Explicit exchange snapshots live separately from request configuration and survive source deletion. See snapshots.md for capture identity, immutable values and Keychain questions. They are excluded from request search.
 
@@ -58,7 +62,7 @@ Responses for active/latest completed runs live in app-owned temporary storage, 
 - Malformed/unsupported collection metadata: preserve all files and disable writes to that collection until explicitly recovered. Do not rebuild membership/order silently from directory contents.
 - Unsupported future versions must not be rewritten. Validate index IDs as UUIDs and reject duplicate IDs; IDs never serve as arbitrary paths.
 
-Keep one serialised writer in the app. No multi-process writers, filesystem watcher, automatic merge, sync engine, or transaction journal is required initially. Before T-07 implementation, choose how simultaneous app instances are prevented from overwriting each other's work, define globals-file failure behaviour, and specify safe collection deletion. These remain design decisions.
+Keep one serialised writer in the app. No multi-process writers, filesystem watcher, automatic merge or sync engine is supported. The app refuses a second writer to the same workspace. The journal supports cross-collection recovery; see [automation verification](automation-implementation.md) and the [case-sensitive recovery review finding](review-2026-10-21.md) for its current evidence and limits.
 
 ## Search integration
 

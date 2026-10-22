@@ -1,5 +1,7 @@
 # Snapshot implementation contract
 
+Historical implementation contract: layout/snapshots have since been user-verified, while newer snapshot-redaction live checks remain pending. See the [overview](overview.md) for current status and acceptance evidence.
+
 Selected 2026-10-19: layout switching and manual native snapshots only. Request tabs, reordering, cURL, HAR, automatic history and replay remain deferred. This document specifies the implementation boundary; completion evidence belongs in the roadmap/handoff.
 
 ## Capture

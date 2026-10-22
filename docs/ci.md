@@ -49,3 +49,5 @@ The normalized Swift files passed the pinned Linux formatter and syntax checks i
 All 279 existing macOS package tests passed (Core138, Control19, Automation26, App96), with no failures or warnings. App/CLI release rebuilds and strict signatures passed. Logs: `/Volumes/Data/tmp/postie-cleanup-tests.log`, `postie-cleanup-release.log`, `postie-linux-ci-verification.log`, `postie-linux-syntax-negative.log`, and `postie-linux-ci-final/verification.log`.
 
 No GitHub job or deployment has been triggered by this local work. Module and blind test reviews are tracked separately in [the review report](review-2026-10-21.md); their findings are not disproved by the passing suite.
+
+Check-in separation on 2026-10-22: an isolated index snapshot without deferred Sparkle code passed all279 foundation tests, then27 focused discovery/transport tests. The final committed app/CLI snapshot built in release mode and passed strict signatures. Logs: `/Volumes/Data/tmp/postie-checkin-foundation-tests.log`, `postie-checkin-discovery-tests.log`, and `postie-checkin-build.log`. This verifies the committed source independently of pending distribution changes in the working tree.

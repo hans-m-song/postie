@@ -1,5 +1,7 @@
 # Initial baseline review
 
+Historical checkpoint: this review and its test results describe the 2026-10-17 baseline, not the current implementation. See the [overview](overview.md) for current product status and open acceptance checks.
+
 Started 2026-10-17. User authorised independent general review, correction of substantiated issues, and checking in the baseline. Origin is `https://github.com/hans-m-song/postie.git`; local HEAD does not yet exist and origin advertises no branches. Review scope is the whole implementation, not a diff. Generated bundles, build caches and runtime data are excluded.
 
 ## Checklist

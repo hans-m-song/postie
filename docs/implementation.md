@@ -1,5 +1,7 @@
 # M1/M2 implementation checkpoint
 
+Historical checkpoint: this records M1/M2 implementation and verification as of 2026-10-17. For current product status and open acceptance checks, see the [overview](overview.md).
+
 ## Baseline review completion — 2026-10-17
 
 See [baseline-review.md](baseline-review.md) for the independent security/architecture/UI reviews and dispositions. Corrected body selection/undo across Settings, retained-state collection deletion, unused binary hex allocation and unbounded fixture teardown; added explicit Rename request… action. Final SwiftPM test run passed46 tests with zero failures (Core38/AppModel8), closing the earlier driver-completion limitation below. Release bundle built, signature verified and native rename/Cancel/restart plus editor-selection/undo checked in an isolated workspace. One new functional regression was added; no comprehensive coverage expansion.
@@ -64,7 +66,7 @@ M1 and M2 are complete locally: T-01–T-11, T-29, T-33 and T-34. Text/JSON payl
 - Independent verification passed 36 tests, zero failures: 30 core (12 HTTP integration, 5 preview, 5 preparation, 8 store) and 6 app-model tests. Log: `/Volumes/Data/tmp/postie-verify-2026-10-17/logs/swift-test-frozen-final.log`.
 - Checks cover GET/POST, raw query fidelity, 302/307 method handling, redirects disabled/10-hop cap/cross-origin credential stripping, concurrency/single-flight, cancel/rerun, idle/overall/byte limits, large/chunked/binary responses, bounded previews and owned-session cleanup. Store/model checks cover restart, writer locks, unknown/malformed/future documents, explicit orphan recovery, failed writes/partial deletion, autosave ordering, navigation, overlapping CRUD, failed termination saves and draft retention when membership is unknown.
 - Independent review identified and verified fixes for nullable-cap persistence, transient body cleanup, partial-delete UI state, final effective method, cancelled-state presentation, query encoding, uncertain-membership draft retention and termination draining accepted structural mutations. Final independent source review found no blocking findings.
-- Final debug app rebuilt after fixes; `codesign --verify --strict dist/Postie.app` passed. The ad-hoc bundle occupies approximately 4 MiB on disk. No distribution signature/notarisation or performance benchmark is claimed.
+- At the 2026-10-17 checkpoint, the final debug app rebuilt after fixes and `codesign --verify --strict dist/Postie.app` passed; that build occupied approximately 4 MiB on disk. This is a historical artifact-size observation, not a current measurement. No distribution signature/notarisation or performance benchmark is claimed.
 - Actual native UI exercised in a fresh synthetic loopback workspace: successful GET; collapsed redirects/final expanded; intermediate headers; two concurrent downloads; disabled Send for the running identity; Open Request navigation; Cancel from editor and activity list; accurate zero-active state; last name edit preserved through quit/rebuild/restart. Final build visibly displays `200 OK`. Structure matches the accepted side-by-side/stacked direction, without a claim of pixel parity with generated concepts.
 
 ## Decisions and verification limits for review

@@ -1,6 +1,6 @@
 # Independent adversarial documentation review
 
-Applicability note, 2026-10-17: entries below review historical drafts. Later user direction simplified encryption to at-rest protection without record/field binding and added file-backed large responses, redirect inspection and per-request concurrent execution. Current canonical docs describe these revisions; the earlier review conclusions do not independently validate them. No runtime implementation has been tested.
+Applicability note, 2026-10-17: entries below review historical drafts. Later user direction simplified encryption to at-rest protection without record/field binding and added file-backed large responses, redirect inspection and per-request concurrent execution. Current canonical docs describe these revisions; the earlier review conclusions do not independently validate them. No runtime implementation had been tested at that review checkpoint. See the [overview](overview.md) for current product status and acceptance evidence.
 
 Date: 2026-10-17. Review ID: DOC-REVIEW-01.
 

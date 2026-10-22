@@ -1,5 +1,7 @@
 # M3/M4 implementation
 
+Historical checkpoint: this records M3/M4 completion and verification as of 2026-10-17; later work changed product scope. See the [overview](overview.md) for current status and remaining acceptance checks.
+
 Completed locally 2026-10-17. User requested M3/M4 and URL highlighting of variables and path parameters, aiming at the accepted v3 visual direction. Retained the later full-width toolbar, stacked request sections, Settings, collapsed headers/redirects and one vertical scroll owner per pane. No M5/cURL/snapshots, scripts, dynamic values, sync or protocol expansion.
 
 ## Checklist
