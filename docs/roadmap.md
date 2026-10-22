@@ -2,7 +2,11 @@
 
 Updated 2026-10-22. This opening status is canonical; the task records below preserve decisions and historical checkpoints. IDs are stable and are not renumbered. Local Markdown remains the agreed tracker; TaskView migration is deferred until tracking is requested again.
 
-Local check-ins on 2026-10-22: 9fb17f6 formatting/Linux CI, 5973276 ordering/MCP/CLI foundation, 85fa94c accepted MCP discovery. Deferred distribution code remains uncommitted; no push/deployment. The isolated foundation passed279 tests and discovery passed27 focused tests after separation. Historical uncommitted-status statements below describe their dated checkpoint.
+Local check-ins on 2026-10-22: 9fb17f6 formatting/Linux CI, 5973276 ordering/MCP/CLI foundation, 85fa94c accepted MCP discovery, db42d35 documentation. Deferred distribution work is preserved on deferred/ota-updates at 88ebb7a, outside main; no push/deployment. Local settings/state remain untracked and locally ignored. The isolated foundation passed279 tests and discovery passed27 focused tests after separation. Historical uncommitted-status statements below describe their dated checkpoint.
+
+## Selected next work
+
+User selected T-111 HTML/XML Pretty source views and syntax highlighting next, including CSS/JS/JSON blocks in HTML. Native PDF preview T-112, rendered HTML T-113 (external requests off by default, opt-in resources; JavaScript execution out of scope), and arbitrary uploads T-114 are separate slices in the [body-format plan](body-format-plan.md). No new format implementation yet; plan confirmation pending. This user selection supersedes the previous next-task order; review fixes remain queued.
 
 ## Immediate follow-ups
 
@@ -23,7 +27,7 @@ The user requested all review findings be queued as immediate follow-ups, with M
 | T-101 documentation and Linux CI cleanup | Implemented locally: refreshed docs/logo, normalized Swift formatting, Linux format/syntax/workflow/whitespace checks. All279 existing package tests and local checks/builds/signatures passed; user review and hosted CI remain |
 | T-102 module and blind test review | Completed source/test-only review using swiftui-pro and delegated module ownership; findings and proposed fixes in review-2026-10-21.md. Functional fixes await a scoped follow-up decision |
 
-The broader ordering/MCP/CLI baseline remains uncommitted; `3cca2f1` contains the self-contained frozen unused-secret capture. Distribution work is separate. Keep commits local; do not push without an explicit request.
+The ordering/MCP/CLI baseline is committed as 5973276; `3cca2f1` contains the earlier frozen unused-secret capture. Distribution work is isolated on deferred/ota-updates. Keep commits local; do not push without an explicit request.
 
 ## Current contracts
 

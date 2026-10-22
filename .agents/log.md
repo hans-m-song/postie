@@ -1,5 +1,11 @@
 # Decision log
 
+## 2026-10-22 — Deferred OTA branch and body formats
+
+User requested moving OTA work to its own branch. Preserved28 enumerated source/docs/packaging files as88ebb7a on deferred/ota-updates and returned to main. No local Terraform settings/state or credentials committed/read. Locally ignored .codex/.vscode and Terraform cache/state/settings through .git/info/exclude without reading contents. Main source worktree clean after relocation; no push/deployment/release test.
+
+User selected HTML/XML body support next, clarified first slice is Pretty source view plus highlighting, including embedded CSS/JS/JSON highlighting rather than execution. Native PDFKit approach accepted; arbitrary uploads and rendered HTML proposed separately. Rendered HTML must block external requests by default with resource opt-in; JavaScript execution explicitly out of scope. Recorded T-111–T-114 plan, pending confirmation; no feature code or new acceptance claimed.
+
 ## 2026-10-22 — Immediate review follow-ups and MCP discovery proposal
 
 User instructed splitting the accepted work into separate commits. 9fb17f6 normalizes only committed Swift sources and adds Linux quality gates; 5973276 adds ordering/MCP/CLI foundation with no discovery/Sparkle code; 85fa94c adds discovery/named selectors and five focused tests. Used index-only snapshots so working source and deferred distribution remain preserved. Independent staging reviewer found no boundary defects. All279 foundation tests passed in exported snapshot, then27 discovery/transport tests passed with no warnings; strict formatting passed. Logs /Volumes/Data/tmp/postie-checkin-foundation-tests.log and postie-checkin-discovery-tests.log. No real sends/runtime configuration/Keychain/environment access, push or deployment.
