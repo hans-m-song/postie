@@ -4,6 +4,81 @@ import PostieCore
 @testable import PostieAutomation
 
 final class AutomationContractTests: XCTestCase {
+    func testMCPCollectionSelectorsUseNamesAndDiscoveryArgumentsAreOptional() throws {
+        let requiredCollection: [AutomationOperation] = [
+            .requestsGet, .requestsCreate, .requestsUpdate, .requestsStart,
+        ]
+        let optionalCollection: [AutomationOperation] = [.requestsList, .variablesList, .variablesGet, .snapshotsList]
+        for definition in AutomationToolCatalog.definitions {
+            let schema = try XCTUnwrap(definition.inputSchema.objectValue)
+            let properties = try XCTUnwrap(schema["properties"]?.objectValue)
+            let required = Set(try XCTUnwrap(schema["required"]?.arrayValue).compactMap(\.stringValue))
+            XCTAssertNil(properties["collectionID"], definition.operation.rawValue)
+            if requiredCollection.contains(definition.operation) || optionalCollection.contains(definition.operation) {
+                XCTAssertEqual(properties["collectionName"]?.objectValue?["type"], .string("string"))
+                XCTAssertEqual(required.contains("collectionName"), requiredCollection.contains(definition.operation))
+            } else {
+                XCTAssertNil(properties["collectionName"])
+            }
+            if definition.operation == .requestsList {
+                XCTAssertEqual(properties["query"]?.objectValue?["type"], .string("string"))
+                XCTAssertTrue(required.isEmpty)
+                XCTAssertEqual(Set(properties.keys), ["collectionName", "query"])
+            }
+            if [.requestsGet, .requestsUpdate, .requestsStart].contains(definition.operation) {
+                XCTAssertTrue(required.contains("requestID"))
+            }
+            if [.runsGet, .runsCancel, .snapshotsCreate].contains(definition.operation) {
+                XCTAssertTrue(required.contains("runID"))
+            }
+            if [.snapshotsGet, .snapshotsRename, .snapshotsDelete].contains(definition.operation) {
+                XCTAssertTrue(required.contains("snapshotID"))
+            }
+            XCTAssertEqual(schema["additionalProperties"], .bool(false))
+        }
+    }
+
+    func testRequestDiscoveryMatchesOnlyUnresolvedNamesAndSavedPaths() {
+        let cases: [(url: String, pathQuery: String, excludedQueries: [String])] = [
+            (
+                "https://user-secret:password-secret@authority-secret.invalid/v1/People?token=query-secret#fragment-secret",
+                "PEOPLE", ["user-secret", "password-secret", "authority-secret", "query-secret", "fragment-secret"]
+            ),
+            (
+                "{{baseURL}}/v1/People/{{person}}?token=query-secret#fragment-secret",
+                "{{PERSON}}", ["baseURL", "query-secret", "fragment-secret"]
+            ),
+            ("{{origin}}:8080/api", "/API", ["origin", "8080"]),
+            ("{{origin}}.authority-secret.invalid/api", "/api", ["origin", "authority-secret"]),
+            ("{{scheme}}://{{authority}}/route", "/route", ["scheme", "authority"]),
+            ("//authority-secret.invalid/route", "/route", ["authority-secret"]),
+            ("https://example.invalid/caf%C3%A9", "caf%c3%a9", ["café"]),
+            ("/redirect/http://nested.invalid/route", "/redirect/http://", []),
+        ]
+        for entry in cases {
+            let request = HTTPRequestConfiguration(
+                name: "Profile lookup", url: entry.url,
+                query: [HTTPField(name: "query-table", value: "query-table-secret")],
+                headers: [HTTPField(name: "X-Key", value: "header-secret")], body: "body-secret")
+            XCTAssertTrue(RequestDiscovery.matches(request, query: entry.pathQuery), entry.url)
+            XCTAssertTrue(RequestDiscovery.matches(request, query: "  PROFILE  "), entry.url)
+            XCTAssertTrue(RequestDiscovery.matches(request, query: ""), entry.url)
+            XCTAssertTrue(RequestDiscovery.matches(request, query: " \n"), entry.url)
+            for query in entry.excludedQueries + ["query-table-secret", "header-secret", "body-secret", "missing"] {
+                XCTAssertFalse(RequestDiscovery.matches(request, query: query), "\(entry.url): \(query)")
+            }
+        }
+        let substringRequest = HTTPRequestConfiguration(name: "Profile lookup", url: "{{baseURL}}/v1/People/{{person}}")
+        XCTAssertTrue(RequestDiscovery.matches(substringRequest, query: "rofil"))
+        XCTAssertTrue(RequestDiscovery.matches(substringRequest, query: "eopl"))
+        for url in ["https://authority-secret.invalid?token=query-secret", "{{baseURL}}", "{{origin}}:8080"] {
+            let request = HTTPRequestConfiguration(name: "Neutral", url: url)
+            for query in ["authority-secret", "query-secret", "baseURL", "origin", "8080"] {
+                XCTAssertFalse(RequestDiscovery.matches(request, query: query), "\(url): \(query)")
+            }
+        }
+    }
+
     func testArgumentsRejectPrivilegeSwitches() throws {
         for field in ["raw", "channel", "mcpPolicy", "excluded", "responseViewing"] {
             XCTAssertThrowsError(try AutomationArguments([field: .bool(true)], allowed: ["requestID"]))

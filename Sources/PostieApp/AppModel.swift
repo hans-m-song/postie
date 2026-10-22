@@ -97,8 +97,9 @@ extension AppModel {
 
         case .requestsList:
             let arguments = try AutomationArguments(
-                command.arguments, allowed: ["collectionID"])
-            let collectionID = try arguments.uuid("collectionID", required: false)
+                command.arguments, allowed: ["collectionID", "collectionName", "query"])
+            let collectionID = try automationCollectionID(arguments, channel: channel, required: false)
+            let query = try arguments.string("query", required: false) ?? ""
             let visibleCollections: [RequestCollection]
             if let collectionID {
                 visibleCollections = [try requireCollection(collectionID, channel: channel)]
@@ -113,6 +114,7 @@ extension AppModel {
                         let identity = RequestIdentity(collectionID: collection.id, requestID: loadedRequest.id)
                         let request = drafts[identity] ?? loadedRequest
                         if isMCP(channel), request.mcpPolicy.excluded { return nil }
+                        guard RequestDiscovery.matches(request, query: query) else { return nil }
                         return requestSummaryJSON(request, in: collection, channel: channel)
                     }
                 })
@@ -124,8 +126,8 @@ extension AppModel {
 
         case .requestsCreate:
             let arguments = try AutomationArguments(
-                command.arguments, allowed: ["collectionID", "request"])
-            guard let collectionID = try arguments.uuid("collectionID"),
+                command.arguments, allowed: ["collectionID", "collectionName", "request"])
+            guard let collectionID = try automationCollectionID(arguments, channel: channel),
                 let patch = arguments.value("request")
             else {
                 throw AutomationFailure(.invalidArguments, "Missing request fields.")
@@ -134,8 +136,8 @@ extension AppModel {
 
         case .requestsUpdate:
             let arguments = try AutomationArguments(
-                command.arguments, allowed: ["collectionID", "requestID", "request"])
-            guard let collectionID = try arguments.uuid("collectionID"),
+                command.arguments, allowed: ["collectionID", "collectionName", "requestID", "request"])
+            guard let collectionID = try automationCollectionID(arguments, channel: channel),
                 let requestID = try arguments.uuid("requestID"),
                 let patch = arguments.value("request")
             else {
@@ -182,13 +184,13 @@ extension AppModel {
 
         case .variablesList:
             let arguments = try AutomationArguments(
-                command.arguments, allowed: ["collectionID", "requestID"])
+                command.arguments, allowed: ["collectionID", "collectionName", "requestID"])
             let scope = try variableScope(arguments, channel: channel)
             return variableListJSON(scope)
 
         case .variablesGet:
             let arguments = try AutomationArguments(
-                command.arguments, allowed: ["collectionID", "requestID", "name"])
+                command.arguments, allowed: ["collectionID", "collectionName", "requestID", "name"])
             guard let name = try arguments.string("name") else {
                 throw AutomationFailure(.invalidArguments, "Missing name.")
             }
@@ -208,7 +210,7 @@ extension AppModel {
 
         case .snapshotsList:
             let arguments = try AutomationArguments(
-                command.arguments, allowed: ["collectionID", "requestID"])
+                command.arguments, allowed: ["collectionID", "collectionName", "requestID"])
             try requireMCPWorkspaceIndex(channel)
             let scope = try optionalRequestScope(arguments, channel: channel)
             let matching = snapshots.filter { snapshot in
@@ -260,13 +262,46 @@ extension AppModel {
         _ values: [String: AutomationJSON],
         channel: AutomationChannel
     ) throws -> RequestIdentity {
-        let arguments = try AutomationArguments(values, allowed: ["collectionID", "requestID"])
-        guard let collectionID = try arguments.uuid("collectionID"),
+        let arguments = try AutomationArguments(values, allowed: ["collectionID", "collectionName", "requestID"])
+        guard let collectionID = try automationCollectionID(arguments, channel: channel),
             let requestID = try arguments.uuid("requestID")
         else {
             throw AutomationFailure(.invalidArguments, "Missing request identity.")
         }
         return RequestIdentity(collectionID: collectionID, requestID: requestID)
+    }
+
+    private func automationCollectionID(
+        _ arguments: AutomationArguments,
+        channel: AutomationChannel,
+        required: Bool = true
+    ) throws -> UUID? {
+        let id = try arguments.uuid("collectionID", required: false)
+        let name = try arguments.string("collectionName", required: false)
+        guard id == nil || name == nil else {
+            throw AutomationFailure(.invalidArguments, "Supply either collectionName or collectionID, not both.")
+        }
+        if let id { return try requireCollection(id, channel: channel).id }
+        guard let name else {
+            if required { throw AutomationFailure(.invalidArguments, "Missing collectionName.") }
+            return nil
+        }
+        let normalizedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedName.isEmpty else {
+            throw AutomationFailure(.invalidArguments, "Invalid collectionName.")
+        }
+        let matches = collections.filter { collection in
+            (!isMCP(channel) || !collection.mcpPolicy.excluded)
+                && collection.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                    .compare(normalizedName, options: .caseInsensitive) == .orderedSame
+        }
+        guard !matches.isEmpty else {
+            throw AutomationFailure(.notFound, "The collection was not found.")
+        }
+        guard matches.count == 1 else {
+            throw AutomationFailure(.conflict, "The collection name is ambiguous. Use a unique collection name.")
+        }
+        return matches[0].id
     }
 
     private func requireCollection(_ id: UUID, channel: AutomationChannel) throws -> RequestCollection {
@@ -345,6 +380,7 @@ extension AppModel {
     ) -> AutomationJSON {
         .object([
             "collectionID": .string(collection.id.uuidString),
+            "collectionName": .string(collection.name),
             "requestID": .string(request.id.uuidString),
             "name": .string(request.name),
             "method": .string(request.method),
@@ -602,10 +638,10 @@ extension AppModel {
         _ arguments: AutomationArguments,
         channel: AutomationChannel
     ) throws -> AutomationVariableScope? {
-        let collectionID = try arguments.uuid("collectionID", required: false)
+        let collectionID = try automationCollectionID(arguments, channel: channel, required: false)
         let requestID = try arguments.uuid("requestID", required: false)
         guard requestID == nil || collectionID != nil else {
-            throw AutomationFailure(.invalidArguments, "requestID requires collectionID.")
+            throw AutomationFailure(.invalidArguments, "requestID requires collectionName or collectionID.")
         }
         guard let collectionID else { return nil }
         _ = try requireCollection(collectionID, channel: channel)
@@ -621,10 +657,10 @@ extension AppModel {
         _ arguments: AutomationArguments,
         channel: AutomationChannel
     ) throws -> (collectionID: UUID, identity: RequestIdentity?)? {
-        let collectionID = try arguments.uuid("collectionID", required: false)
+        let collectionID = try automationCollectionID(arguments, channel: channel, required: false)
         let requestID = try arguments.uuid("requestID", required: false)
         guard requestID == nil || collectionID != nil else {
-            throw AutomationFailure(.invalidArguments, "requestID requires collectionID.")
+            throw AutomationFailure(.invalidArguments, "requestID requires collectionName or collectionID.")
         }
         guard let collectionID else { return nil }
         _ = try requireCollection(collectionID, channel: channel)

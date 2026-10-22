@@ -15,20 +15,20 @@ public enum AutomationToolCatalog {
         case .collectionsList:
             fields = []; required = []; description = "List accessible collections."
         case .requestsList:
-            fields = ["collectionID"]; required = [];
+            fields = ["collectionName", "query"]; required = [];
             description =
-                "List accessible requests, optionally within one collection."
+                "List accessible requests, optionally by collection name and a case-insensitive substring of the request name or saved URL path."
         case .requestsGet:
-            fields = ["collectionID", "requestID"]; required = fields;
+            fields = ["collectionName", "requestID"]; required = fields;
             description = "Read a request template without revealing encrypted secrets."
         case .requestsCreate:
-            fields = ["collectionID", "request"]; required = fields;
+            fields = ["collectionName", "request"]; required = fields;
             description = "Create a request from explicit editable fields."
         case .requestsUpdate:
-            fields = ["collectionID", "requestID", "request"]; required = fields;
+            fields = ["collectionName", "requestID", "request"]; required = fields;
             description = "Patch explicit request fields, preserving omitted settings and access policy."
         case .requestsStart:
-            fields = ["collectionID", "requestID"]; required = fields;
+            fields = ["collectionName", "requestID"]; required = fields;
             description = "Start a request and return its run handle immediately."
         case .runsList:
             fields = []; required = []; description = "List accessible ongoing runs, including runs started in the app."
@@ -38,13 +38,13 @@ public enum AutomationToolCatalog {
         case .runsCancel:
             fields = ["runID"]; required = fields; description = "Cancel exactly the specified ongoing run."
         case .variablesList:
-            fields = ["collectionID", "requestID"]; required = [];
+            fields = ["collectionName", "requestID"]; required = [];
             description = "List variable names and nonsecret values at global, collection, or request scope."
         case .variablesGet:
-            fields = ["collectionID", "requestID", "name"]; required = ["name"];
+            fields = ["collectionName", "requestID", "name"]; required = ["name"];
             description = "Read one nonsecret variable. Secret values cannot be read directly."
         case .snapshotsList:
-            fields = ["collectionID", "requestID"]; required = []; description = "List accessible saved snapshots."
+            fields = ["collectionName", "requestID"]; required = []; description = "List accessible saved snapshots."
         case .snapshotsGet:
             fields = ["snapshotID"]; required = fields;
             description = "Read a saved snapshot under its current response-view policy."

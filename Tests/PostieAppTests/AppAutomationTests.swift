@@ -7,6 +7,197 @@ import PostieAutomation
 
 @MainActor
 final class AppAutomationTests: XCTestCase {
+    func testRequestDiscoveryPreservesOrderingExclusionsAndUnresolvedTemplates() async throws {
+        let root = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let keyStore = AutomationTestKeyStore()
+        let model = makeModel(root: root, vault: SecretVault(keyStore: keyStore, allowsKeyCreation: true))
+        try await waitUntil { model.canEditVariables(.global) }
+        await model.createCollection(name: "Catalog")
+        let catalog = try XCTUnwrap(model.collections.first)
+        await model.createRequest(in: catalog.id, name: "Selected")
+        let selectedIdentity = try XCTUnwrap(model.selectedIdentity)
+        await model.createCollection(name: "Other")
+        await model.createCollection(name: "Private")
+        let privateCollection = try XCTUnwrap(model.collections.first(where: { $0.name == "Private" }))
+
+        func create(_ name: String, collectionName: String, url: String) async throws -> UUID {
+            let reply = await model.automationReply(
+                AutomationCommand(
+                    operation: .requestsCreate,
+                    arguments: [
+                        "collectionName": .string(collectionName),
+                        "request": .object(["name": .string(name), "url": .string(url)]),
+                    ]), channel: .mcp)
+            XCTAssertNil(reply.error)
+            XCTAssertNotNil(reply.result?.objectValue?["collectionName"]?.stringValue)
+            return try XCTUnwrap(reply.result?.objectValue?["requestID"]?.stringValue.flatMap(UUID.init(uuidString:)))
+        }
+        let profile = try await create(
+            "Profile lookup", collectionName: " cAtALog ", url: "{{baseURL}}/v1/people/{{person}}")
+        let other = try await create("Other lookup", collectionName: "Other", url: "https://example.invalid/people")
+        let hidden = try await create(
+            "Hidden profile", collectionName: "Catalog", url: "https://example.invalid/people")
+        _ = try await create("Private profile", collectionName: "Private", url: "https://example.invalid/people")
+        model.updateRequestMCPPolicy(.init(excluded: true), for: .init(collectionID: catalog.id, requestID: hidden))
+        await model.updateCollectionMCPPolicy(.init(excluded: true), for: privateCollection.id)
+        try model.setPlainVariable(
+            name: "baseURL", value: "https://resolved-origin.invalid/resolved-path", owner: .global)
+        try await model.setVariable(name: "person", value: "resolved-secret-person", isSecret: true, owner: .global)
+        try await model.flushPendingSaves()
+        let keyLoadsBeforeDiscovery = keyStore.loadCount
+        let selectedCollectionID = model.selectedCollectionID
+        let selectedSnapshotID = model.selectedSnapshotID
+
+        func list(_ arguments: [String: AutomationJSON] = [:]) async throws -> [AutomationJSON] {
+            let reply = await model.automationReply(
+                AutomationCommand(operation: .requestsList, arguments: arguments), channel: .mcp)
+            XCTAssertNil(reply.error)
+            return try XCTUnwrap(reply.result?.arrayValue)
+        }
+        let all = try await list()
+        XCTAssertEqual(
+            all.compactMap { $0.objectValue?["requestID"]?.stringValue },
+            [selectedIdentity.requestID, profile, other].map(\.uuidString))
+        let empty = try await list(["query": .string(" \n")])
+        XCTAssertEqual(empty, all)
+        let path = try await list(["query": .string("PEOPLE")])
+        XCTAssertEqual(
+            path.compactMap { $0.objectValue?["requestID"]?.stringValue }, [profile, other].map(\.uuidString))
+        let scoped = try await list(["collectionName": .string(" CATALOG "), "query": .string("pRoFiLe")])
+        XCTAssertEqual(scoped.compactMap { $0.objectValue?["requestID"]?.stringValue }, [profile.uuidString])
+        XCTAssertEqual(scoped.first?.objectValue?["collectionName"], .string("Catalog"))
+        XCTAssertEqual(scoped.first?.objectValue?["url"], .string("{{baseURL}}/v1/people/{{person}}"))
+        for query in [
+            "missing", "Hidden", "Private", "resolved-origin", "resolved-path", "resolved-secret-person", "baseURL",
+        ] {
+            let matches = try await list(["query": .string(query)])
+            XCTAssertTrue(matches.isEmpty, query)
+        }
+        XCTAssertEqual(keyStore.loadCount, keyLoadsBeforeDiscovery)
+        XCTAssertEqual(model.selectedIdentity, selectedIdentity)
+        XCTAssertEqual(model.selectedCollectionID, selectedCollectionID)
+        XCTAssertEqual(model.selectedSnapshotID, selectedSnapshotID)
+        XCTAssertTrue(model.activeRuns.isEmpty)
+        let terminated = await model.prepareForTermination()
+        XCTAssertTrue(terminated)
+    }
+
+    func testCollectionNameResolutionRejectsVisibleDuplicatesAndPreservesIDPolicyChecks() async throws {
+        let root = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = makeModel(root: root)
+        try await waitUntil { model.canEditVariables(.global) }
+        await model.createCollection(name: "Catalog")
+        let first = try XCTUnwrap(model.collections.first)
+        await model.createRequest(in: first.id, name: "Visible request")
+        let identity = try XCTUnwrap(model.selectedIdentity)
+        await model.createCollection(name: "cAtAlOg")
+        let second = try XCTUnwrap(model.collections.first(where: { $0.id != first.id }))
+        try await model.flushPendingSaves()
+        let byName = AutomationCommand(operation: .requestsList, arguments: ["collectionName": .string(" catalog ")])
+        let ambiguous = await model.automationReply(byName, channel: .mcp)
+        XCTAssertEqual(ambiguous.error?.code, .conflict)
+        XCTAssertTrue(ambiguous.error?.message.contains("ambiguous") == true)
+        await model.updateCollectionMCPPolicy(.init(excluded: true), for: second.id)
+        let visible = await model.automationReply(byName, channel: .mcp)
+        XCTAssertNil(visible.error)
+        XCTAssertEqual(
+            visible.result?.arrayValue?.compactMap { $0.objectValue?["requestID"]?.stringValue },
+            [identity.requestID.uuidString])
+        let cliAmbiguous = await model.automationReply(byName, channel: .cli)
+        XCTAssertEqual(cliAmbiguous.error?.code, .conflict)
+        for channel in [AutomationChannel.cli, .mcp] {
+            let byID = await model.automationReply(
+                AutomationCommand(
+                    operation: .requestsGet,
+                    arguments: [
+                        "collectionID": .string(first.id.uuidString),
+                        "requestID": .string(identity.requestID.uuidString),
+                    ]), channel: channel)
+            XCTAssertNil(byID.error)
+        }
+        let excludedID = await model.automationReply(
+            AutomationCommand(operation: .requestsList, arguments: ["collectionID": .string(second.id.uuidString)]),
+            channel: .mcp)
+        XCTAssertEqual(excludedID.error?.code, .forbidden)
+        let both = await model.automationReply(
+            AutomationCommand(
+                operation: .requestsList,
+                arguments: [
+                    "collectionName": .string("Catalog"), "collectionID": .string(first.id.uuidString),
+                ]), channel: .mcp)
+        XCTAssertEqual(both.error?.code, .invalidArguments)
+        let invalidArguments: [[String: AutomationJSON]] = [
+            ["collectionName": .string(" \n")], ["collectionName": .bool(true)], ["query": .bool(true)],
+        ]
+        for arguments in invalidArguments {
+            let invalid = await model.automationReply(
+                AutomationCommand(operation: .requestsList, arguments: arguments), channel: .mcp)
+            XCTAssertEqual(invalid.error?.code, .invalidArguments)
+        }
+        await model.updateCollectionMCPPolicy(.init(excluded: true), for: first.id)
+        let hidden = await model.automationReply(byName, channel: .mcp)
+        let absent = await model.automationReply(
+            AutomationCommand(operation: .requestsList, arguments: ["collectionName": .string("missing")]),
+            channel: .mcp)
+        XCTAssertEqual(hidden.error, absent.error)
+        XCTAssertEqual(hidden.error?.code, .notFound)
+        let terminated = await model.prepareForTermination()
+        XCTAssertTrue(terminated)
+    }
+
+    func testCollectionNamesResolveRequestEditsVariableScopesAndSnapshotScopes() async throws {
+        let root = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = makeModel(root: root)
+        try await waitUntil { model.canEditVariables(.global) }
+        await model.createCollection(name: "Catalog")
+        let collection = try XCTUnwrap(model.collections.first)
+        await model.createRequest(in: collection.id, name: "Before")
+        let identity = try XCTUnwrap(model.selectedIdentity)
+        try model.setPlainVariable(name: "collectionValue", value: "collection", owner: .collection(collection.id))
+        try model.setPlainVariable(name: "requestValue", value: "request", owner: .request(identity))
+        try await model.flushPendingSaves()
+        let selector: [String: AutomationJSON] = [
+            "collectionName": .string("CATALOG"), "requestID": .string(identity.requestID.uuidString),
+        ]
+        let updated = await model.automationReply(
+            AutomationCommand(
+                operation: .requestsUpdate,
+                arguments: selector.merging(["request": .object(["name": .string("After")])]) { _, new in new }),
+            channel: .mcp)
+        XCTAssertNil(updated.error)
+        let read = await model.automationReply(
+            AutomationCommand(operation: .requestsGet, arguments: selector), channel: .mcp)
+        XCTAssertEqual(read.result?.objectValue?["name"], .string("After"))
+        let collectionVariables = await model.automationReply(
+            AutomationCommand(operation: .variablesList, arguments: ["collectionName": .string("Catalog")]),
+            channel: .mcp)
+        XCTAssertNil(collectionVariables.error)
+        XCTAssertEqual(
+            collectionVariables.result?.arrayValue?.compactMap { $0.objectValue?["name"]?.stringValue },
+            ["collectionValue"])
+        let requestVariable = await model.automationReply(
+            AutomationCommand(
+                operation: .variablesGet,
+                arguments: selector.merging(["name": .string("requestValue")]) { _, new in new }), channel: .mcp)
+        XCTAssertEqual(requestVariable.result?.objectValue?["value"], .string("request"))
+        for arguments in [["collectionName": AutomationJSON.string("Catalog")], selector] {
+            let snapshots = await model.automationReply(
+                AutomationCommand(operation: .snapshotsList, arguments: arguments), channel: .mcp)
+            XCTAssertNil(snapshots.error)
+            XCTAssertEqual(snapshots.result?.arrayValue, [])
+        }
+        model.updateRequestMCPPolicy(.init(excluded: true), for: identity)
+        let excludedStart = await model.automationReply(
+            AutomationCommand(operation: .requestsStart, arguments: selector), channel: .mcp)
+        XCTAssertEqual(excludedStart.error?.code, .forbidden)
+        XCTAssertTrue(model.activeRuns.isEmpty)
+        let terminated = await model.prepareForTermination()
+        XCTAssertTrue(terminated)
+    }
+
     func testRequestAutomationPreservesPolicyAndSecretsWithoutChangingSelection() async throws {
         let root = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -790,10 +981,18 @@ final class AppAutomationTests: XCTestCase {
 private final class AutomationTestKeyStore: ApplicationKeyStore, @unchecked Sendable {
     private let lock = NSLock()
     private var key: Data?
+    private var loads = 0
+
+    var loadCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return loads
+    }
 
     func loadKey() throws -> Data? {
         lock.lock()
         defer { lock.unlock() }
+        loads += 1
         return key
     }
 
