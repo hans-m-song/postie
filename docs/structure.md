@@ -57,6 +57,12 @@ Sources/PostieCore/
   RequestPreparer.swift         Scoped substitution, auth and URLRequest construction
   SecretVault.swift             AES-GCM and narrowly scoped Keychain key storage
   JSONPresentation.swift        Bounded read-only JSON formatting
+  BodyMediaType.swift           Shared response MIME classification
+  MarkupScanner.swift           Bounded shared UTF-16 markup scanner
+  MarkupLexing.swift             HTML/XML and embedded-language token classification
+  MarkupPresentation.swift      Conservative read-only markup formatting
+  UploadModels.swift            File references, multipart configuration and frozen metadata
+  UploadBody.swift              Original-file identity checks, replayable streams and hashes
   HTTPExecutionManager.swift    URLSession, redirects, cancellation, body ownership
   ResponseBodyReader.swift      Bounded text/binary previews
   CollectionStore.swift         JSON, index, atomic writes, lock and recovery
@@ -96,11 +102,25 @@ Sources/PostieApp/
   SnapshotSidebar.swift         Snapshot grouping and historical source placeholders
   SnapshotDetailView.swift      Read-only captured request/response presentation
   SnapshotJSON.swift            Resolved-value clipboard export with bounded body preview
+  BodyTextPresentation.swift    Shared Raw/Pretty selection and bounded formatting lifecycle
+  BodySourceTextDisplay.swift   Shared wrapped or horizontally scrolling native source display
+  ResponseBodyPresentation.swift Shared text/PDF/rendered capabilities and source identity
+  ResponseBodyViewport.swift    Stable content-coordinate remaining-pane preview sizing
+  ExternalResponseBodyExport.swift Bounded captured-file export and injected external-app routing
+  ResponseBodyResource.swift    Native-consumer invalidation before body lease release
+  ResponseBodySource.swift      Live/history/snapshot body-owner identities
+  ResponseBodyAccess.swift      Shared unavailable-body access error
+  PDFBodyPreview.swift          Native PDFKit loading, size gate and transient password
+  HTMLBodyPreview.swift         Nonpersistent WebKit captured-source rendering
+  HTMLBodyPreviewPolicy.swift   Resource rules, CSP and safe base-URL policy
+  UploadBodyEditor.swift        Original-file references and multipart authoring
+  UploadMetadataView.swift      Informational frozen upload metadata/text presentation
   SessionExecutionStore.swift   Session-only per-run capture retention and body leases
   SessionHistoryView.swift      Stable execution list and selected inspector
   SessionHistoryDetailView.swift Frozen request/response presentation
-  SessionHistoryResponseBodyView.swift Lease-scoped bounded preview and JSON Pretty
+  SessionHistoryResponseBodyView.swift Retained-run access to shared Text/PDF/Rendered presentation
 Tests/PostieCoreTests/          HTTP, preparation, bodies and storage
+Sources/PostieAutomation/UploadRequestPatch.swift Strict file-reference/multipart automation configuration
 Tests/PostieAppTests/           AppModel save, CRUD and recovery
 Sources/PostieHTTPFixture/      Synthetic Swift loopback fixture executable
 Makefile                       App packaging, functional tests and fixture targets

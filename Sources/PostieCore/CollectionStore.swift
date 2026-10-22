@@ -2218,6 +2218,8 @@ public actor CollectionStore {
             switch key {
             case "variables":
                 merged[key] = mergeOwnedVariables(oldObject[key] ?? .object([:]), with: newValue)
+            case "bodyKind", "rawFile", "multipartParts":
+                merged[key] = newValue
             case "authentication":
                 merged[key] = mergeAuthentication(oldObject[key] ?? .object([:]), with: newValue)
             default:
@@ -2228,6 +2230,7 @@ public actor CollectionStore {
                 }
             }
         }
+        if newObject["rawFile"] == nil { merged.removeValue(forKey: "rawFile") }
         if newObject["optionOverrides"] == nil {
             merged.removeValue(forKey: "optionOverrides")
         }
@@ -2466,6 +2469,9 @@ public actor CollectionStore {
         var body: String
         var bodyEnabled: Bool
         var bodySyntax: BodySyntax
+        var bodyKind: RequestBodyKind?
+        var rawFile: HTTPFileReference?
+        var multipartParts: [HTTPMultipartPart]?
         var options: HTTPOptions
         var optionOverrides: HTTPOptionsOverrides?
         var variables: VariableValues?
@@ -2474,7 +2480,9 @@ public actor CollectionStore {
         var mcpPolicy: MCPResourcePolicy?
 
         init(configuration: HTTPRequestConfiguration) {
-            self.formatVersion = CollectionStore.currentFormatVersion
+            self.formatVersion =
+                configuration.bodyKind != .text || configuration.rawFile != nil || !configuration.multipartParts.isEmpty
+                ? 2 : 1
             self.name = configuration.name
             self.method = configuration.method
             self.url = configuration.url
@@ -2484,6 +2492,9 @@ public actor CollectionStore {
             self.body = configuration.body
             self.bodyEnabled = configuration.bodyEnabled
             self.bodySyntax = configuration.bodySyntax
+            self.bodyKind = configuration.bodyKind
+            self.rawFile = configuration.rawFile
+            self.multipartParts = configuration.multipartParts
             self.options = configuration.options
             self.optionOverrides = configuration.optionOverrides
             self.variables = configuration.variables
@@ -2505,6 +2516,9 @@ public actor CollectionStore {
                 body: body,
                 bodyEnabled: bodyEnabled,
                 bodySyntax: bodySyntax,
+                bodyKind: bodyKind ?? .text,
+                rawFile: rawFile,
+                multipartParts: multipartParts ?? [],
                 options: options,
                 optionOverrides: optionOverrides,
                 variables: variables ?? [:],
@@ -2531,7 +2545,7 @@ public actor CollectionStore {
             else {
                 throw RequestDocumentFailure.malformed
             }
-            guard version == Decimal(CollectionStore.currentFormatVersion) else {
+            guard version == 1 || version == 2 else {
                 throw RequestDocumentFailure.unsupported
             }
             guard object["id"] == nil else {
@@ -2550,7 +2564,13 @@ public actor CollectionStore {
             } catch {
                 throw RequestDocumentFailure.malformed
             }
-            guard stored.formatVersion == CollectionStore.currentFormatVersion else {
+            guard stored.formatVersion == 1 || stored.formatVersion == 2 else {
+                throw RequestDocumentFailure.unsupported
+            }
+            let hasUpload =
+                stored.bodyKind.map { $0 != .text } == true || stored.rawFile != nil
+                || !(stored.multipartParts ?? []).isEmpty
+            guard version != 1 || !hasUpload, version != 2 || stored.bodyKind != nil else {
                 throw RequestDocumentFailure.unsupported
             }
             return ParsedRequest(jsonValue: raw, configuration: stored.configuration(identity: identity))

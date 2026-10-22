@@ -41,7 +41,7 @@ struct ResponseView: View {
             Divider()
                 .frame(maxWidth: .infinity)
 
-            ScrollView {
+            ResponseBodyViewportScrollView(contentPadding: 16, previewBottomInset: 11) {
                 VStack(alignment: .leading, spacing: 14) {
                     if model.canFollowRedirect(identity) {
                         HStack {
@@ -92,10 +92,7 @@ struct ResponseView: View {
                         .frame(maxWidth: .infinity, minHeight: 280)
                     }
                 }
-                .padding(16)
-                .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
             }
-            .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .background(.background)
@@ -427,36 +424,6 @@ private struct ResponseBodyPreview: View {
     @EnvironmentObject private var model: AppModel
     let identity: RequestIdentity
     let latest: AppModel.LatestResponse
-    @State private var syntax: BodySyntax
-    @State private var pretty: Bool
-    @State private var formatted: String?
-    @State private var formatError: String?
-    @State private var isFormatting = false
-
-    init(identity: RequestIdentity, latest: AppModel.LatestResponse) {
-        self.identity = identity
-        self.latest = latest
-
-        let initialSyntax = Self.syntax(for: latest.response.responseHeaders)
-        _syntax = State(initialValue: initialSyntax)
-        _pretty = State(initialValue: initialSyntax == .json && latest.preview?.isBinary != true)
-    }
-
-    private var shouldFormatJSON: Bool {
-        pretty && syntax == .json && latest.preview?.isBinary == false
-    }
-
-    private var isPrettyJSON: Bool {
-        shouldFormatJSON && formatted != nil
-    }
-
-    private func highlightedText(for preview: BodyPreview) -> HighlightedResponseText {
-        HighlightedResponseText(
-            text: displayedText(preview),
-            syntax: syntax,
-            wrapsToWidth: !isPrettyJSON
-        )
-    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -468,117 +435,17 @@ private struct ResponseBodyPreview: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-
-            HStack {
-                Picker("Response syntax", selection: $syntax) {
-                    Text("None").tag(BodySyntax.none)
-                    Text("JSON").tag(BodySyntax.json)
+            ResponseBodyPresentation(
+                source: .live(latest.response),
+                preview: latest.preview,
+                previewError: latest.previewError,
+                isLoadingPreview: latest.isLoadingPreview,
+                truncationMessage: "Preview limited to the first 1 MiB. The saved response file is complete.",
+                onRetry: { model.retryPreview(for: identity) },
+                withBodyURL: { operation in
+                    try await model.withResponseBody(for: latest.response, operation: operation)
                 }
-                .labelsHidden()
-                .pickerStyle(.menu)
-                .frame(width: 86)
-                Picker("Response presentation", selection: $pretty) {
-                    Text("Raw").tag(false)
-                    Text("Pretty").tag(true)
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(width: 120)
-                .disabled(syntax != .json || latest.preview?.isBinary != false)
-            }
-            .fixedSize(horizontal: false, vertical: true)
-
-            if isFormatting { ProgressView("Formatting JSON…").controlSize(.small) }
-            if let formatError {
-                Text(formatError).font(.caption).foregroundStyle(.secondary)
-            }
-
-            if latest.isLoadingPreview {
-                ProgressView("Loading bounded preview…")
-                    .frame(maxWidth: .infinity, minHeight: 100)
-            } else if let error = latest.previewError {
-                HStack {
-                    Text("Preview could not be loaded: \(error)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Button("Retry") { model.retryPreview(for: identity) }
-                }
-            } else if let preview = latest.preview {
-                if preview.isBinary {
-                    Label("Binary body; text preview is unavailable.", systemImage: "doc.zipper")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, minHeight: 90)
-                } else {
-                    Group {
-                        if isPrettyJSON {
-                            ScrollView(.horizontal) {
-                                highlightedText(for: preview)
-                                    .fixedSize(horizontal: true, vertical: true)
-                                    .padding(10)
-                            }
-                        } else {
-                            highlightedText(for: preview)
-                                .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-                                .padding(10)
-                        }
-                    }
-                    .frame(minWidth: 0, maxWidth: .infinity)
-                    .background(.background, in: RoundedRectangle(cornerRadius: 7))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 7).stroke(.quaternary, lineWidth: 1)
-                    }
-                    if preview.isTruncated && !(pretty && formatted != nil) {
-                        Label(
-                            "Preview limited to the first 1 MiB. The saved response file is complete.",
-                            systemImage: "info.circle"
-                        )
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    }
-                }
-            } else {
-                ProgressView("Loading bounded preview…")
-                    .frame(maxWidth: .infinity, minHeight: 100)
-            }
+            )
         }
-        .task(id: shouldFormatJSON) {
-            formatted = nil
-            formatError = nil
-            guard shouldFormatJSON else { isFormatting = false; return }
-            isFormatting = true
-            let url = latest.response.bodyFileURL
-            let result = await Task.detached(priority: .userInitiated) {
-                Result { try JSONPresentation.pretty(at: url) }
-            }.value
-            guard !Task.isCancelled else { return }
-            isFormatting = false
-            switch result {
-            case let .success(text): formatted = text
-            case let .failure(error): formatError = error.localizedDescription
-            }
-        }
-        .onChange(of: latest.preview?.isBinary) { _, isBinary in
-            if isBinary == true { pretty = false }
-        }
-    }
-
-    private static func syntax(for headers: [HTTPField]) -> BodySyntax {
-        let contentType = headers.first {
-            $0.name.caseInsensitiveCompare("Content-Type") == .orderedSame
-        }?.value
-        let mediaType =
-            contentType?
-            .split(separator: ";", maxSplits: 1, omittingEmptySubsequences: false)
-            .first?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased() ?? ""
-
-        return mediaType == "application/json" || mediaType.hasSuffix("+json") ? .json : .none
-    }
-
-    private func displayedText(_ preview: BodyPreview) -> String {
-        let text = pretty && syntax == .json ? (formatted ?? preview.text) : preview.text
-        return text.isEmpty ? "(empty body)" : text
     }
 }

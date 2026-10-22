@@ -173,6 +173,20 @@ final class SessionExecutionStore: ObservableObject {
         }
     }
 
+    func acquireBodyResource(for token: UUID) async throws -> ResponseBodyResource {
+        guard !isClosed, let entry = entry(for: token), let response = entry.response,
+            let owner = ownerLeases[token], let manager
+        else { throw ResponseBodyAccessError.unavailable }
+        let lease = try await manager.acquireBodyLease(for: response, sharing: owner)
+        guard !isClosed, self.entry(for: token)?.response?.runID == response.runID else {
+            await manager.releaseBodyLease(lease)
+            throw ResponseBodyAccessError.unavailable
+        }
+        return ResponseBodyResource(url: lease.bodyURL, origin: .history(token)) {
+            await manager.releaseBodyLease(lease)
+        }
+    }
+
     func clear() async {
         isClosed = true
         let leases = Array(ownerLeases.values)
@@ -278,6 +292,12 @@ private struct SessionCaptureByteCount {
         add(request.query)
         add(request.headers)
         add(request.body)
+        if let file = request.rawFile { add(file) }
+        for part in request.multipartParts {
+            add(part.name)
+            add(part.text)
+            if let file = part.file { add(file) }
+        }
         for (name, value) in request.variables {
             add(name)
             switch value {
@@ -299,6 +319,11 @@ private struct SessionCaptureByteCount {
         add(capture.template.query)
         add(capture.template.headers)
         add(capture.template.body)
+        add(capture.template.uploadBody)
+        for part in capture.template.multipartTemplateParts ?? [] {
+            add(part.name)
+            add(part.text ?? "")
+        }
         for (name, input) in capture.referencedInputs {
             add(name)
             add(input.value)
@@ -311,6 +336,7 @@ private struct SessionCaptureByteCount {
         add(capture.submitted.url.absoluteString)
         add(capture.submitted.headers)
         add(capture.submitted.body ?? "")
+        add(capture.submitted.uploadBody)
         add(capture.submitted.headerSources.keys)
         add(capture.submitted.sensitiveNames)
         add(capture.submitted.secretNames)
@@ -330,5 +356,26 @@ private struct SessionCaptureByteCount {
         add(redirect.requestHeaderSources.keys)
         add(redirect.sensitiveRequestHeaderNames)
         add(redirect.secretRequestHeaderNames)
+    }
+
+    mutating func add(_ file: HTTPFileReference) {
+        add(file.path)
+        add(file.filename ?? "")
+        add(file.contentType ?? "")
+    }
+
+    mutating func add(_ upload: SnapshotUploadBody?) {
+        guard let upload else { return }
+        add(upload.contentType)
+        for part in upload.parts ?? [] {
+            add(part.name)
+            add(part.text ?? "")
+        }
+        for file in upload.files {
+            add(file.partName ?? "")
+            add(file.filename)
+            add(file.contentType)
+            add(file.sha256 ?? "")
+        }
     }
 }

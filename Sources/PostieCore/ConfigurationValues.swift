@@ -122,6 +122,7 @@ public enum HTTPHeaderSource: String, Codable, Equatable, Sendable {
 public struct PreparedHTTPRequest: Sendable {
     public let configuration: HTTPRequestConfiguration
     public let request: URLRequest
+    public let uploadBody: PreparedUploadBody?
     public let referencedInputs: [String: ResolvedVariable]
     public let snapshotCapture: SnapshotPreparationCapture?
     public let sensitiveRequestHeaderNames: Set<String>
@@ -135,9 +136,11 @@ public struct PreparedHTTPRequest: Sendable {
         sensitiveRequestHeaderNames: Set<String> = [],
         secretRequestHeaderNames: Set<String> = [],
         requestHeaderSources: [String: HTTPHeaderSource] = [:],
-        snapshotCapture: SnapshotPreparationCapture? = nil
+        snapshotCapture: SnapshotPreparationCapture? = nil,
+        uploadBody: PreparedUploadBody? = nil
     ) {
         self.snapshotCapture = snapshotCapture
+        self.uploadBody = uploadBody
         self.configuration = configuration
         self.request = request
         self.referencedInputs = referencedInputs

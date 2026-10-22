@@ -950,6 +950,187 @@ final class AppAutomationTests: XCTestCase {
         XCTAssertTrue(terminated)
     }
 
+    func testUploadRequestsCreateUpdateAndRunThroughMCPAndCLI() async throws {
+        let fixture = try AutomationHTTPFixture()
+        let root = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let source = root.appendingPathComponent("synthetic-upload.bin")
+        let sourceBytes = Data("raw source: café 🌍\r\n{{literal bytes}}".utf8)
+        try sourceBytes.write(to: source)
+
+        let model = makeModel(
+            root: root, vault: SecretVault(keyStore: AutomationTestKeyStore(), allowsKeyCreation: true))
+        try await waitUntil { model.canEditVariables(.global) }
+        await model.createCollection(name: "Upload automation")
+        let collection = try XCTUnwrap(model.collections.first)
+        await model.saveGlobalMCPResponseViewing(.allow)
+
+        let boundary = "automation-fixture-boundary"
+        let textValue = "multipart field: café\r\nline two"
+        let expectedMultipart =
+            Data(
+                ("--\(boundary)\r\nContent-Disposition: form-data; name=\"note\"\r\n\r\n\(textValue)\r\n"
+                    + "--\(boundary)\r\nContent-Disposition: form-data; name=\"document\"; filename=\"synthetic-upload.bin\"\r\n"
+                    + "Content-Type: application/octet-stream\r\n\r\n").utf8)
+            + sourceBytes + Data("\r\n--\(boundary)--\r\n".utf8)
+
+        for (index, channel) in [AutomationChannel.mcp, .cli].enumerated() {
+            let counter = "automation-upload-\(index)-\(UUID().uuidString)"
+            let uploadURL = fixture.baseURL + "/upload-echo?upload_counter=\(counter)"
+            let created = await model.automationReply(
+                AutomationCommand(
+                    operation: .requestsCreate,
+                    arguments: [
+                        "collectionID": .string(collection.id.uuidString),
+                        "request": .object([
+                            "name": .string("Raw upload \(index)"),
+                            "method": .string("POST"),
+                            "url": .string(uploadURL),
+                            "bodyEnabled": .bool(true),
+                            "bodyKind": .string("rawFile"),
+                            "rawFile": .object(["path": .string(source.path)]),
+                        ]),
+                    ]),
+                channel: channel
+            )
+            XCTAssertNil(created.error)
+            let requestID = try XCTUnwrap(
+                created.result?.objectValue?["requestID"]?.stringValue.flatMap(UUID.init(uuidString:)))
+            let identity = RequestIdentity(collectionID: collection.id, requestID: requestID)
+
+            let rawRun = try await runAutomationRequest(
+                requestID: requestID, collectionID: collection.id, identity: identity,
+                channel: channel, model: model)
+            try assertAutomationResponse(rawRun, echoes: sourceBytes)
+
+            let updated = await model.automationReply(
+                AutomationCommand(
+                    operation: .requestsUpdate,
+                    arguments: [
+                        "collectionID": .string(collection.id.uuidString),
+                        "requestID": .string(requestID.uuidString),
+                        "request": .object([
+                            "bodyEnabled": .bool(true),
+                            "bodyKind": .string("multipart"),
+                            "rawFile": .null,
+                            "headers": .array([
+                                .object([
+                                    "name": .string("Content-Type"),
+                                    "value": .string("multipart/form-data; boundary=\(boundary)"),
+                                ])
+                            ]),
+                            "multipartParts": .array([
+                                .object([
+                                    "name": .string("note"),
+                                    "kind": .string("text"),
+                                    "text": .string(textValue),
+                                ]),
+                                .object([
+                                    "name": .string("document"),
+                                    "kind": .string("file"),
+                                    "file": .object(["path": .string(source.path)]),
+                                ]),
+                            ]),
+                        ]),
+                    ]),
+                channel: channel
+            )
+            XCTAssertNil(updated.error)
+
+            let multipartRun = try await runAutomationRequest(
+                requestID: requestID, collectionID: collection.id, identity: identity,
+                channel: channel, model: model)
+            try assertAutomationResponse(multipartRun, echoes: expectedMultipart)
+
+            let missingPath = root.appendingPathComponent("missing-\(index).bin")
+            XCTAssertFalse(FileManager.default.fileExists(atPath: missingPath.path))
+            let missing = await model.automationReply(
+                AutomationCommand(
+                    operation: .requestsCreate,
+                    arguments: [
+                        "collectionID": .string(collection.id.uuidString),
+                        "request": .object([
+                            "name": .string("Missing upload \(index)"),
+                            "method": .string("POST"),
+                            "url": .string(uploadURL),
+                            "bodyEnabled": .bool(true),
+                            "bodyKind": .string("rawFile"),
+                            "rawFile": .object(["path": .string(missingPath.path)]),
+                        ]),
+                    ]),
+                channel: channel
+            )
+            XCTAssertNil(missing.error)
+            let missingRequestID = try XCTUnwrap(
+                missing.result?.objectValue?["requestID"]?.stringValue.flatMap(UUID.init(uuidString:)))
+            let missingIdentity = RequestIdentity(collectionID: collection.id, requestID: missingRequestID)
+            let failedRun = try await runAutomationRequest(
+                requestID: missingRequestID, collectionID: collection.id, identity: missingIdentity,
+                channel: channel, model: model)
+            XCTAssertEqual(failedRun.objectValue?["state"], .string("failed"))
+            XCTAssertNotNil(failedRun.objectValue?["error"])
+            XCTAssertNil(failedRun.objectValue?["response"])
+            let uploadCount = try await fixtureUploadCount(counter, fixture: fixture)
+            XCTAssertEqual(uploadCount, 2)
+        }
+
+        let terminated = await model.prepareForTermination()
+        XCTAssertTrue(terminated)
+    }
+
+    private func runAutomationRequest(
+        requestID: UUID,
+        collectionID: UUID,
+        identity: RequestIdentity,
+        channel: AutomationChannel,
+        model: AppModel
+    ) async throws -> AutomationJSON {
+        let start = await model.automationReply(
+            AutomationCommand(
+                operation: .requestsStart,
+                arguments: [
+                    "collectionID": .string(collectionID.uuidString),
+                    "requestID": .string(requestID.uuidString),
+                ]),
+            channel: channel
+        )
+        XCTAssertNil(start.error)
+        let runID = try XCTUnwrap(start.result?.objectValue?["runID"]?.stringValue.flatMap(UUID.init(uuidString:)))
+        try await waitUntil { model.activeRuns[identity] == nil }
+
+        let result = await model.automationReply(
+            AutomationCommand(operation: .runsGet, arguments: ["runID": .string(runID.uuidString)]),
+            channel: channel
+        )
+        XCTAssertNil(result.error)
+        return try XCTUnwrap(result.result)
+    }
+
+    private func assertAutomationResponse(
+        _ run: AutomationJSON,
+        echoes expectedBytes: Data,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws {
+        let runObject = try XCTUnwrap(run.objectValue, file: file, line: line)
+        XCTAssertEqual(runObject["state"], .string("completed"), file: file, line: line)
+        let response = try XCTUnwrap(runObject["response"]?.objectValue, file: file, line: line)
+        XCTAssertEqual(response["statusCode"], .number(Decimal(200)), file: file, line: line)
+        XCTAssertEqual(response["bodyWithheld"], .bool(false), file: file, line: line)
+        let body = try XCTUnwrap(response["body"]?.objectValue, file: file, line: line)
+        XCTAssertEqual(body["encoding"], .string("utf-8"), file: file, line: line)
+        let content = try XCTUnwrap(body["content"]?.stringValue, file: file, line: line)
+        XCTAssertEqual(Data(content.utf8), expectedBytes, file: file, line: line)
+    }
+
+    private func fixtureUploadCount(_ counter: String, fixture: AutomationHTTPFixture) async throws -> Int {
+        let url = try XCTUnwrap(URL(string: fixture.baseURL + "/upload-count?upload_counter=\(counter)"))
+        let (data, response) = try await URLSession.shared.data(from: url)
+        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+        return try XCTUnwrap(Int(String(decoding: data, as: UTF8.self)))
+    }
+
     private func makeModel(root: URL, vault: SecretVault? = nil) -> AppModel {
         AppModel(
             arguments: [

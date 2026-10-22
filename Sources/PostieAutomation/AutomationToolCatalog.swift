@@ -1,4 +1,5 @@
 import Foundation
+import PostieCore
 
 public struct AutomationToolDefinition: Sendable {
     public let operation: AutomationOperation
@@ -82,13 +83,39 @@ public enum AutomationToolCatalog {
         let optionalNumber: AutomationJSON = .object([
             "type": .array([.string("number"), .string("null")]), "exclusiveMinimum": .number(0),
         ])
+        let file: AutomationJSON = .object([
+            "type": .array([.string("object"), .string("null")]),
+            "additionalProperties": .bool(false),
+            "properties": .object(["path": string, "filename": string, "contentType": string]),
+            "required": .array([.string("path")]),
+        ])
+        let multipartPart: AutomationJSON = .object([
+            "type": .string("object"), "additionalProperties": .bool(false),
+            "properties": .object([
+                "name": string,
+                "kind": .object(["type": .string("string"), "enum": .array([.string("text"), .string("file")])]),
+                "text": string, "file": file, "isEnabled": boolean,
+            ]),
+            "required": .array([.string("name"), .string("kind")]),
+        ])
         return .object([
             "type": .string("object"), "additionalProperties": .bool(false),
             "properties": .object([
                 "name": string, "method": string, "url": string,
                 "pathParameters": rows, "query": rows, "headers": rows,
                 "body": string, "bodyEnabled": boolean,
-                "bodySyntax": .object(["type": .string("string"), "enum": .array([.string("none"), .string("json")])]),
+                "bodyKind": .object([
+                    "type": .string("string"),
+                    "enum": .array(RequestBodyKind.allCases.map { .string($0.rawValue) }),
+                ]),
+                "rawFile": file,
+                "multipartParts": .object([
+                    "type": .string("array"), "items": multipartPart, "maxItems": .number(4096),
+                ]),
+                "bodySyntax": .object([
+                    "type": .string("string"),
+                    "enum": .array(BodySyntax.allCases.map { .string($0.rawValue) }),
+                ]),
                 "inheritsCollectionAuthentication": boolean,
                 "optionOverrides": .object([
                     "type": .string("object"), "additionalProperties": .bool(false),

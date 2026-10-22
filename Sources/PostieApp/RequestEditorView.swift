@@ -582,7 +582,12 @@ struct RequestEditorView: View {
     private var bodySummary: String {
         guard let request = model.request(for: identity) else { return "Disabled" }
         if request.bodyEnabled {
-            return request.bodySyntax == .json ? "JSON" : "Enabled"
+            switch request.bodyKind {
+            case .text:
+                return request.bodySyntax == .none ? "Text" : BodyPresentationPolicy.label(for: request.bodySyntax)
+            case .rawFile: return "File"
+            case .multipart: return "Multipart · \(request.multipartParts.filter(\.isEnabled).count) parts"
+            }
         }
         return request.body.isEmpty ? "Disabled" : "Content saved"
     }
@@ -704,7 +709,13 @@ struct RequestEditorView: View {
         }
         sources += (request.query + request.headers).filter(\.isEnabled).flatMap { [$0.name, $0.value] }
         sources += request.pathParameters.filter { $0.isEnabled && pathNames.contains($0.name) }.map(\.value)
-        if request.bodyEnabled { sources.append(request.body) }
+        if request.bodyEnabled {
+            if request.bodyKind == .text {
+                sources.append(request.body)
+            } else if request.bodyKind == .multipart {
+                sources += request.multipartParts.filter { $0.isEnabled && $0.kind == .text }.map(\.text)
+            }
+        }
         if !request.inheritsCollectionAuthentication && request.authentication.kind == .basic {
             sources.append(request.authentication.username)
         }
@@ -743,30 +754,44 @@ struct RequestEditorView: View {
                 Toggle("Body", isOn: binding(\.bodyEnabled))
                     .font(.headline)
                 Spacer()
-                Picker("Body syntax", selection: binding(\.bodySyntax)) {
-                    Text("None").tag(BodySyntax.none)
-                    Text("JSON").tag(BodySyntax.json)
+                Picker("Body type", selection: binding(\.bodyKind)) {
+                    Text("Text").tag(RequestBodyKind.text)
+                    Text("File").tag(RequestBodyKind.rawFile)
+                    Text("Multipart").tag(RequestBodyKind.multipart)
                 }
-                .pickerStyle(.segmented)
                 .labelsHidden()
-                .frame(width: 150)
-                .disabled(!model.canEdit(identity))
+                .frame(width: 120)
+                if model.request(for: identity)?.bodyKind == .text {
+                    BodySyntaxPicker(selection: binding(\.bodySyntax), title: "Body syntax")
+                        .frame(width: 90)
+                        .disabled(!model.canEdit(identity))
+                }
             }
-            GrowingBodyEditor(
-                text: binding(\.body),
-                isEditable: model.canEdit(identity) && (model.request(for: identity)?.bodyEnabled ?? false),
-                isActive: selectedSection == .request && expansionState.isExpanded(.body),
-                syntax: model.request(for: identity)?.bodySyntax ?? .none,
-                availableVariables: availableVariableNames,
-                completionVariables: model.variableCompletions(for: identity)
-            )
-            .id(identity)
-            .padding(8)
-            .frame(maxWidth: .infinity)
-            .background(.background, in: RoundedRectangle(cornerRadius: 7))
-            .overlay {
-                RoundedRectangle(cornerRadius: 7)
-                    .stroke(.quaternary, lineWidth: 1)
+            if model.request(for: identity)?.bodyKind == .text {
+                GrowingBodyEditor(
+                    text: binding(\.body),
+                    isEditable: model.canEdit(identity) && (model.request(for: identity)?.bodyEnabled ?? false),
+                    isActive: selectedSection == .request && expansionState.isExpanded(.body),
+                    syntax: model.request(for: identity)?.bodySyntax ?? .none,
+                    availableVariables: availableVariableNames,
+                    completionVariables: model.variableCompletions(for: identity)
+                )
+                .id(identity)
+                .padding(8)
+                .frame(maxWidth: .infinity)
+                .background(.background, in: RoundedRectangle(cornerRadius: 7))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 7)
+                        .stroke(.quaternary, lineWidth: 1)
+                }
+            } else {
+                UploadBodyEditor(
+                    kind: model.request(for: identity)?.bodyKind ?? .rawFile,
+                    rawFile: binding(\.rawFile), parts: binding(\.multipartParts),
+                    availableVariables: availableVariableNames,
+                    completionVariables: model.variableCompletions(for: identity)
+                )
+                .disabled(!model.canEdit(identity) || !(model.request(for: identity)?.bodyEnabled ?? false))
             }
         }
     }

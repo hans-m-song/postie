@@ -60,4 +60,10 @@ The transport is stateless Streamable HTTP: POST JSON-RPC with JSON or a request
 
 Create/update accepts a `request` object with name, method, URL, query/path/header rows, body, syntax, request option overrides and authentication. Rows contain `name`, `value` and optional `isEnabled`. Authentication accepts kind, username, header name and newly supplied password/token/API-key values; credentials are encrypted before persistence. Omitted fields retain existing values. URL queries are parsed into the table; an explicitly supplied query array replaces those rows.
 
+Body syntax accepts `none`, `json`, `html` and `xml`. Uploads use `bodyKind` (`text`, `rawFile`, `multipart`), `rawFile` (`path`, optional `filename`/`contentType`, or null to clear), and `multipartParts` (ordered `name`, `kind` text/file, `text` or `file`, optional `isEnabled`). Paths must be absolute local paths; configuration does not read the file. Sending reads the original, without a temporary copy. Missing or detectably changed sources fail explicitly. Multipart text values support variables; paths and file bytes are literal. The same fields apply to MCP and CLI. Response viewing and resource exclusions continue to apply.
+
+```json
+{"bodyEnabled":true,"bodyKind":"multipart","multipartParts":[{"name":"description","kind":"text","text":"{{description}}"},{"name":"document","kind":"file","file":{"path":"/absolute/path/document.pdf","contentType":"application/pdf"}}]}
+```
+
 Run IDs identify the exact preparation/execution attempt. A stale cancellation handle does not cancel a later run. Snapshot creation targets an exact completed run, never whichever newer result happens to be visible. Results are retained according to the app's existing latest-per-request lifecycle rather than an unbounded run history.

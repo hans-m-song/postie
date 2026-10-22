@@ -406,6 +406,17 @@ extension AppModel {
         result["body"] = .string(request.body)
         result["bodyEnabled"] = .bool(request.bodyEnabled)
         result["bodySyntax"] = .string(request.bodySyntax.rawValue)
+        result["bodyKind"] = .string(request.bodyKind.rawValue)
+        result["rawFile"] = request.rawFile.flatMap { try? automationJSON($0) } ?? .null
+        result["multipartParts"] = .array(
+            request.multipartParts.map { part in
+                .object([
+                    "name": .string(part.name), "kind": .string(part.kind.rawValue),
+                    "text": .string(part.text),
+                    "file": part.file.flatMap { try? automationJSON($0) } ?? .null,
+                    "isEnabled": .bool(part.isEnabled),
+                ])
+            })
         result["optionOverrides"] = (try? automationJSON(request.optionOverrides ?? .init())) ?? .object([:])
         result["inheritsCollectionAuthentication"] = .bool(request.inheritsCollectionAuthentication)
         result["authentication"] = .object([
@@ -1030,6 +1041,9 @@ extension AppModel {
                 return
             }
             do {
+                self.deletingBodySnapshotIDs.insert(id)
+                defer { self.deletingBodySnapshotIDs.remove(id) }
+                await self.releaseBodyResources(for: .snapshot(id))
                 try await snapshotStore.delete(id: id)
                 self.markWorkspaceChanged()
                 self.snapshots.removeAll { $0.id == id }
@@ -1266,6 +1280,8 @@ final class AppModel: ObservableObject {
     private var store: CollectionStore?
     private var snapshotStore: SnapshotStore?
     private var executionManager: HTTPExecutionManager?
+    private var responseBodyResources: [UUID: ResponseBodyResource] = [:]
+    private var deletingBodySnapshotIDs: Set<UUID> = []
     private var editVersions: [RequestIdentity: UInt64] = [:]
     private var dirtyDrafts: Set<RequestIdentity> = []
     private var pendingSaveTasks: [RequestIdentity: Task<Void, Never>] = [:]
@@ -2559,6 +2575,7 @@ final class AppModel: ObservableObject {
                 cancelRequest(identity)
             }
             await waitForSnapshotSaves()
+            await releaseBodyResources()
             await sessionHistory.clear()
             await executionManager?.shutdown()
             return true
@@ -2773,6 +2790,69 @@ final class AppModel: ObservableObject {
         try await sessionHistory.withRetainedResponse(for: token, operation: operation)
     }
 
+    func acquireBodyResource(from source: ResponseBodySource) async throws -> ResponseBodyResource {
+        try Task.checkCancellation()
+        guard !isTerminating else { throw ResponseBodyAccessError.unavailable }
+        let resource: ResponseBodyResource
+        switch source {
+        case let .live(response):
+            guard let executionManager else { throw ResponseBodyAccessError.unavailable }
+            let lease = try await executionManager.acquireBodyLease(for: response)
+            resource = ResponseBodyResource(url: lease.bodyURL, origin: .live(response.runID)) {
+                await executionManager.releaseBodyLease(lease)
+            }
+        case let .history(token, response):
+            guard sessionHistory.entry(for: token)?.response?.runID == response.runID else {
+                throw ResponseBodyAccessError.unavailable
+            }
+            resource = try await sessionHistory.acquireBodyResource(for: token)
+        case let .snapshot(id, response):
+            guard !deletingBodySnapshotIDs.contains(id),
+                snapshots.contains(where: { $0.id == id }),
+                let opened = openedSnapshots[id], opened.response.runID == response.runID,
+                opened.response.bodyFileURL == response.bodyFileURL
+            else { throw ResponseBodyAccessError.unavailable }
+            resource = ResponseBodyResource(url: response.bodyFileURL, origin: .snapshot(id))
+        }
+        guard !isTerminating, !Task.isCancelled else {
+            await resource.invalidate()
+            throw ResponseBodyAccessError.unavailable
+        }
+        responseBodyResources[resource.id] = resource
+        return resource
+    }
+
+    func releaseBodyResource(_ id: UUID) async {
+        guard let resource = responseBodyResources.removeValue(forKey: id) else { return }
+        await resource.invalidate()
+    }
+
+    private func releaseBodyResources(for origin: ResponseBodyResource.Origin? = nil) async {
+        let resources = responseBodyResources.values.filter { origin == nil || $0.origin == origin }
+        for resource in resources {
+            responseBodyResources.removeValue(forKey: resource.id)
+            await resource.invalidate()
+        }
+    }
+
+    func withResponseBody<Value: Sendable>(
+        for response: HTTPResponseRecord,
+        operation: @Sendable (URL) async throws -> Value
+    ) async throws -> Value {
+        try Task.checkCancellation()
+        guard !isTerminating, let executionManager else { throw ResponseBodyAccessError.unavailable }
+        let lease = try await executionManager.acquireBodyLease(for: response)
+        do {
+            try Task.checkCancellation()
+            let value = try await operation(lease.bodyURL)
+            await executionManager.releaseBodyLease(lease)
+            return value
+        } catch {
+            await executionManager.releaseBodyLease(lease)
+            throw error
+        }
+    }
+
     func loadPreview(for identity: RequestIdentity) {
         guard var latest = latestResponses[identity],
             latest.preview == nil,
@@ -2873,6 +2953,9 @@ final class AppModel: ObservableObject {
         await withWorkspaceIndexMutation { [weak self] in
             guard let self, !self.isTerminating else { return }
             do {
+                self.deletingBodySnapshotIDs.insert(id)
+                defer { self.deletingBodySnapshotIDs.remove(id) }
+                await self.releaseBodyResources(for: .snapshot(id))
                 try await snapshotStore.delete(id: id)
                 self.markWorkspaceChanged()
                 self.snapshots.removeAll { $0.id == id }

@@ -13,8 +13,10 @@ public enum RequestPatch {
             allowed: [
                 "name", "method", "url", "pathParameters", "query", "headers", "body", "bodyEnabled",
                 "bodySyntax", "optionOverrides", "authentication", "inheritsCollectionAuthentication",
+                "bodyKind", "rawFile", "multipartParts",
             ])
         var request = original
+        try UploadRequestPatch.apply(fields, to: &request)
         if let name = try arguments.string("name", required: false) {
             guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw invalid() }
             request.name = name

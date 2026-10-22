@@ -38,6 +38,8 @@ public struct HTTPField: Identifiable, Codable, Equatable, Sendable {
 public enum BodySyntax: String, Codable, CaseIterable, Sendable {
     case none
     case json
+    case html
+    case xml
 }
 
 public struct HTTPOptions: Codable, Equatable, Sendable {
@@ -70,6 +72,9 @@ public struct HTTPRequestConfiguration: Identifiable, Codable, Equatable, Sendab
     public var body: String
     public var bodyEnabled: Bool
     public var bodySyntax: BodySyntax
+    public var bodyKind: RequestBodyKind
+    public var rawFile: HTTPFileReference?
+    public var multipartParts: [HTTPMultipartPart]
     public var options: HTTPOptions
     public var optionOverrides: HTTPOptionsOverrides?
     public var variables: VariableValues
@@ -88,6 +93,9 @@ public struct HTTPRequestConfiguration: Identifiable, Codable, Equatable, Sendab
         body: String = "",
         bodyEnabled: Bool = false,
         bodySyntax: BodySyntax = .none,
+        bodyKind: RequestBodyKind = .text,
+        rawFile: HTTPFileReference? = nil,
+        multipartParts: [HTTPMultipartPart] = [],
         options: HTTPOptions = HTTPOptions(),
         optionOverrides: HTTPOptionsOverrides? = nil,
         variables: VariableValues = [:],
@@ -105,6 +113,9 @@ public struct HTTPRequestConfiguration: Identifiable, Codable, Equatable, Sendab
         self.body = body
         self.bodyEnabled = bodyEnabled
         self.bodySyntax = bodySyntax
+        self.bodyKind = bodyKind
+        self.rawFile = rawFile
+        self.multipartParts = multipartParts
         self.options = options
         self.optionOverrides = optionOverrides
         self.variables = variables
@@ -124,6 +135,7 @@ public struct HTTPRequestConfiguration: Identifiable, Codable, Equatable, Sendab
         case body
         case bodyEnabled
         case bodySyntax
+        case bodyKind, rawFile, multipartParts
         case options
         case optionOverrides
         case variables
@@ -144,6 +156,9 @@ public struct HTTPRequestConfiguration: Identifiable, Codable, Equatable, Sendab
         body = try container.decode(String.self, forKey: .body)
         bodyEnabled = try container.decode(Bool.self, forKey: .bodyEnabled)
         bodySyntax = try container.decode(BodySyntax.self, forKey: .bodySyntax)
+        bodyKind = try container.decodeIfPresent(RequestBodyKind.self, forKey: .bodyKind) ?? .text
+        rawFile = try container.decodeIfPresent(HTTPFileReference.self, forKey: .rawFile)
+        multipartParts = try container.decodeIfPresent([HTTPMultipartPart].self, forKey: .multipartParts) ?? []
         options = try container.decode(HTTPOptions.self, forKey: .options)
         optionOverrides = try container.decodeIfPresent(HTTPOptionsOverrides.self, forKey: .optionOverrides)
         variables = try container.decodeIfPresent(VariableValues.self, forKey: .variables) ?? [:]

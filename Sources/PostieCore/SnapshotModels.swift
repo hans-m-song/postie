@@ -21,24 +21,46 @@ public struct SnapshotRequestTemplate: Codable, Equatable, Sendable {
     public let body: String
     public let bodyEnabled: Bool
     public let bodySyntax: BodySyntax
+    public let bodyKind: RequestBodyKind?
+    public let uploadBody: SnapshotUploadBody?
+    public let multipartTemplateParts: [SnapshotUploadPart]?
     public let options: HTTPOptions
 
-    public init(configuration: HTTPRequestConfiguration, headers: [HTTPField]? = nil) {
+    public init(
+        configuration: HTTPRequestConfiguration, headers: [HTTPField]? = nil, uploadBody: SnapshotUploadBody? = nil
+    ) {
         method = configuration.method
         url = configuration.url
         pathParameters = configuration.pathParameters
         query = configuration.query
         self.headers = headers ?? configuration.headers
-        body = configuration.body
+        body = configuration.bodyKind == .text ? configuration.body : ""
         bodyEnabled = configuration.bodyEnabled
         bodySyntax = configuration.bodySyntax
+        bodyKind = configuration.bodyKind == .text ? nil : configuration.bodyKind
+        self.uploadBody = uploadBody?.omittingPartValues
+        if configuration.bodyKind == .multipart {
+            var fileIndex = 0
+            multipartTemplateParts = configuration.multipartParts.filter(\.isEnabled).map { part in
+                if part.kind == .file {
+                    defer { fileIndex += 1 }
+                    return SnapshotUploadPart(id: part.id, name: part.name, kind: .file, fileIndex: fileIndex)
+                }
+                return SnapshotUploadPart(id: part.id, name: part.name, kind: .text, text: part.text)
+            }
+        } else {
+            multipartTemplateParts = nil
+        }
         options = configuration.options
     }
 
     public var configuration: HTTPRequestConfiguration {
         HTTPRequestConfiguration(
             method: method, url: url, pathParameters: pathParameters, query: query,
-            headers: headers, body: body, bodyEnabled: bodyEnabled, bodySyntax: bodySyntax, options: options
+            headers: headers, body: body, bodyEnabled: bodyEnabled, bodySyntax: bodySyntax, bodyKind: bodyKind ?? .text,
+            multipartParts: (multipartTemplateParts ?? []).map {
+                HTTPMultipartPart(id: $0.id, name: $0.name, kind: $0.kind, text: $0.text ?? "")
+            }, options: options
         )
     }
 }
@@ -67,12 +89,14 @@ public struct SnapshotTransportRequest: Codable, Equatable, Sendable {
     public let url: URL
     public let headers: [HTTPField]
     public let body: String?
+    public let uploadBody: SnapshotUploadBody?
     public let headerSources: [String: HTTPHeaderSource]
     public let sensitiveNames: Set<String>
     public let secretNames: Set<String>
 
     public init(
         method: String, url: URL, headers: [HTTPField], body: String? = nil,
+        uploadBody: SnapshotUploadBody? = nil,
         headerSources: [String: HTTPHeaderSource] = [:], sensitiveNames: Set<String> = [],
         secretNames: Set<String> = []
     ) {
@@ -80,6 +104,7 @@ public struct SnapshotTransportRequest: Codable, Equatable, Sendable {
         self.url = url
         self.headers = headers
         self.body = body
+        self.uploadBody = uploadBody
         self.headerSources = headerSources
         self.sensitiveNames = sensitiveNames
         self.secretNames = secretNames
@@ -206,5 +231,21 @@ public struct HTTPBodyLease: Sendable {
         self.token = token
         self.runID = runID
         self.bodyURL = bodyURL
+    }
+}
+
+extension SnapshotPreparationCapture {
+    func freezingUpload(_ metadata: SnapshotUploadBody?) -> SnapshotPreparationCapture {
+        guard let metadata else { return self }
+        return SnapshotPreparationCapture(
+            preparationVersion: preparationVersion,
+            template: SnapshotRequestTemplate(
+                configuration: template.configuration, headers: template.headers, uploadBody: metadata),
+            referencedInputs: referencedInputs, authentication: authentication,
+            submitted: SnapshotTransportRequest(
+                method: submitted.method, url: submitted.url, headers: submitted.headers,
+                uploadBody: metadata, headerSources: submitted.headerSources,
+                sensitiveNames: submitted.sensitiveNames, secretNames: submitted.secretNames),
+            redactionInputs: redactionInputs)
     }
 }

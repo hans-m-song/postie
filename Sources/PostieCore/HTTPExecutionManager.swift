@@ -60,6 +60,7 @@ private struct HTTPResponseMetadata: Sendable {
     let redirectLimitReached: Bool
     let redirectRequest: URLRequest?
     let pendingRedirect: HTTPRedirect?
+    let uploadBodyActive: Bool
 }
 
 private enum HTTPDownloadOutcome: Sendable {
@@ -73,6 +74,7 @@ private struct ActiveHTTPRun {
     let identity: RequestIdentity
     let configuration: HTTPRequestConfiguration
     let preparedRequest: URLRequest
+    let uploadBody: PreparedUploadBody?
     let requestHeaderSources: [String: HTTPHeaderSource]
     let sensitiveRequestHeaderNames: Set<String>
     let secretRequestHeaderNames: Set<String>
@@ -82,12 +84,13 @@ private struct ActiveHTTPRun {
     let startedAt: Date
     var cancellation: RunCancellation?
     var session: URLSession?
-    var task: URLSessionDownloadTask?
+    var task: URLSessionTask?
     var delegate: HTTPDownloadDelegate?
 }
 
 private struct RetainedHTTPResponse {
     let snapshotCapture: SnapshotPreparationCapture?
+    let uploadBody: PreparedUploadBody?
     let identity: RequestIdentity
     let bodyURL: URL
     let requestHeaderSources: [String: HTTPHeaderSource]
@@ -318,7 +321,8 @@ public actor HTTPExecutionManager {
             secretRequestHeaderNames: [],
             snapshotCapture: nil,
             redirects: [],
-            followedRedirectCount: 0
+            followedRedirectCount: 0,
+            uploadBody: (preparedRequest.httpBodyStream as? UploadInputStream)?.body
         )
     }
 
@@ -341,7 +345,8 @@ public actor HTTPExecutionManager {
             secretRequestHeaderNames: prepared.secretRequestHeaderNames,
             snapshotCapture: prepared.snapshotCapture,
             redirects: [],
-            followedRedirectCount: 0
+            followedRedirectCount: 0,
+            uploadBody: prepared.uploadBody ?? (prepared.request.httpBodyStream as? UploadInputStream)?.body
         )
     }
 
@@ -395,7 +400,9 @@ public actor HTTPExecutionManager {
             secretRequestHeaderNames: retainedResponse.secretRequestHeaderNames,
             snapshotCapture: retainedResponse.snapshotCapture,
             redirects: response.redirects,
-            followedRedirectCount: response.redirects.count
+            followedRedirectCount: response.redirects.count,
+            uploadBody: capturedRequest.httpMethod?.caseInsensitiveCompare(pendingRedirect.method) == .orderedSame
+                ? retainedResponse.uploadBody : nil
         )
     }
 
@@ -408,7 +415,8 @@ public actor HTTPExecutionManager {
         secretRequestHeaderNames: Set<String>,
         snapshotCapture: SnapshotPreparationCapture?,
         redirects: [HTTPRedirect],
-        followedRedirectCount: Int
+        followedRedirectCount: Int,
+        uploadBody: PreparedUploadBody? = nil
     ) throws -> HTTPRun {
         guard !isShutDown else {
             throw HTTPExecutionError.shutDown
@@ -418,6 +426,8 @@ public actor HTTPExecutionManager {
             throw HTTPExecutionError.alreadyRunning
         }
 
+        var preparedRequest = preparedRequest
+        if let uploadBody { preparedRequest.httpBodyStream = try uploadBody.makeInputStream() }
         let runID = UUID()
         let (events, continuation) = AsyncStream.makeStream(
             of: HTTPExecutionEvent.self,
@@ -429,6 +439,7 @@ public actor HTTPExecutionManager {
             identity: identity,
             configuration: configuration,
             preparedRequest: preparedRequest,
+            uploadBody: uploadBody,
             requestHeaderSources: reconciledHeaderSources(
                 for: preparedRequest,
                 inheriting: requestHeaderSources,
@@ -577,7 +588,9 @@ public actor HTTPExecutionManager {
         return lease
     }
 
-    func retainCompletedResponse(_ response: HTTPResponseRecord, identity: RequestIdentity) throws {
+    func retainCompletedResponse(
+        _ response: HTTPResponseRecord, identity: RequestIdentity, uploadBody: PreparedUploadBody? = nil
+    ) throws {
         let bodyURL = response.bodyFileURL.standardizedFileURL
         guard bodyURL.deletingLastPathComponent() == bodyDirectory else {
             throw HTTPExecutionError.bodyNotOwned
@@ -590,7 +603,7 @@ public actor HTTPExecutionManager {
         }
         retainedBodies.insert(bodyURL)
         retainedResponses[response.runID] = RetainedHTTPResponse(
-            snapshotCapture: response.snapshotCapture, identity: identity, bodyURL: bodyURL,
+            snapshotCapture: response.snapshotCapture, uploadBody: uploadBody, identity: identity, bodyURL: bodyURL,
             requestHeaderSources: response.requestHeaderSources,
             sensitiveRequestHeaderNames: response.sensitiveRequestHeaderNames,
             secretRequestHeaderNames: response.secretRequestHeaderNames
@@ -672,6 +685,7 @@ public actor HTTPExecutionManager {
             runID: runID,
             request: activeRun.configuration,
             preparedRequest: activeRun.preparedRequest,
+            uploadBody: activeRun.uploadBody,
             requestHeaderSources: activeRun.requestHeaderSources,
             sensitiveRequestHeaderNames: activeRun.sensitiveRequestHeaderNames,
             secretRequestHeaderNames: activeRun.secretRequestHeaderNames,
@@ -699,7 +713,12 @@ public actor HTTPExecutionManager {
         delegateQueue.name = "Postie.HTTP.\(runID.uuidString)"
 
         let session = URLSession(configuration: sessionConfiguration, delegate: delegate, delegateQueue: delegateQueue)
-        let task = session.downloadTask(with: activeRun.preparedRequest)
+        let task: URLSessionTask
+        if activeRun.uploadBody != nil {
+            task = session.uploadTask(withStreamedRequest: activeRun.preparedRequest)
+        } else {
+            task = session.downloadTask(with: activeRun.preparedRequest)
+        }
 
         var updatedRun = activeRun
         updatedRun.session = session
@@ -756,11 +775,13 @@ public actor HTTPExecutionManager {
                 sensitiveRequestHeaderNames: activeRun.sensitiveRequestHeaderNames,
                 secretRequestHeaderNames: activeRun.secretRequestHeaderNames,
                 requestHeaderSources: metadata.requestHeaderSources,
-                snapshotCapture: activeRun.snapshotCapture,
+                snapshotCapture: activeRun.snapshotCapture?.freezingUpload(activeRun.uploadBody?.snapshotMetadata),
                 completedAt: Date()
             )
             do {
-                try retainCompletedResponse(response, identity: activeRun.identity)
+                try retainCompletedResponse(
+                    response, identity: activeRun.identity,
+                    uploadBody: metadata.uploadBodyActive ? activeRun.uploadBody : nil)
                 activeRun.continuation.yield(.completed(response))
             } catch {
                 try? FileManager.default.removeItem(at: metadata.bodyFileURL)
@@ -824,7 +845,9 @@ public actor HTTPExecutionManager {
 }
 
 // URLSession invokes each run's mutable delegate state on a serial operation queue.
-private final class HTTPDownloadDelegate: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
+private final class HTTPDownloadDelegate: NSObject, URLSessionDownloadDelegate, URLSessionDataDelegate,
+    @unchecked Sendable
+{
     private let runID: UUID
     private let request: HTTPRequestConfiguration
     private let bodyDirectory: URL
@@ -845,11 +868,17 @@ private final class HTTPDownloadDelegate: NSObject, URLSessionDownloadDelegate, 
     private var responseMetadata: HTTPResponseMetadata?
     private var failureMessage: String?
     private var bodyLimitExceeded = false
+    private let uploadBody: PreparedUploadBody?
+    private var uploadBodyActive: Bool
+    private var uploadStreams: [InputStream] = []
+    private var uploadResponseFile: FileHandle?
+    private var uploadResponseBytes: Int64 = 0
 
     init(
         runID: UUID,
         request: HTTPRequestConfiguration,
         preparedRequest: URLRequest,
+        uploadBody: PreparedUploadBody?,
         requestHeaderSources: [String: HTTPHeaderSource],
         sensitiveRequestHeaderNames: Set<String>,
         secretRequestHeaderNames: Set<String>,
@@ -861,6 +890,9 @@ private final class HTTPDownloadDelegate: NSObject, URLSessionDownloadDelegate, 
         onCompletion: @escaping @Sendable (UUID, HTTPDownloadOutcome) -> Void
     ) {
         self.runID = runID
+        self.uploadBody = uploadBody
+        self.uploadBodyActive = uploadBody != nil
+        if let stream = preparedRequest.httpBodyStream { uploadStreams.append(stream) }
         self.request = request
         self.currentRequest = preparedRequest
         self.currentRequestHeaderSources = reconciledHeaderSources(
@@ -910,6 +942,28 @@ private final class HTTPDownloadDelegate: NSObject, URLSessionDownloadDelegate, 
             redirectedRequest.httpBody == nil
         {
             redirectedRequest.httpBody = currentRequest.httpBody
+        }
+
+        let preservesBody =
+            redirectedRequest.httpMethod?.caseInsensitiveCompare(currentRequest.httpMethod ?? "GET") == .orderedSame
+        if !preservesBody { uploadBodyActive = false }
+        if let uploadBody, uploadBodyActive, request.options.followRedirects, followedRedirectCount < 10 {
+            do {
+                let stream = try uploadBody.makeInputStream()
+                uploadStreams.append(stream)
+                redirectedRequest.httpBodyStream = stream
+            } catch {
+                failureMessage = (error as? LocalizedError)?.errorDescription ?? "The upload source is unavailable."
+                completionHandler(nil)
+                task.cancel()
+                return
+            }
+        } else if !preservesBody || (uploadBody != nil && !uploadBodyActive) {
+            redirectedRequest.httpBody = nil
+            redirectedRequest.httpBodyStream = nil
+            redirectedRequest.setValue(nil, forHTTPHeaderField: "Content-Length")
+            redirectedRequest.setValue(nil, forHTTPHeaderField: "Content-Type")
+            redirectedRequest.setValue(nil, forHTTPHeaderField: "Transfer-Encoding")
         }
 
         if !sameOrigin(previousURL, nextURL) {
@@ -1039,14 +1093,112 @@ private final class HTTPDownloadDelegate: NSObject, URLSessionDownloadDelegate, 
                 duration: max(0, Date().timeIntervalSince(startedAt)),
                 redirectLimitReached: redirectLimitReached,
                 redirectRequest: redirectRequest,
-                pendingRedirect: pendingRedirect
+                pendingRedirect: pendingRedirect,
+                uploadBodyActive: uploadBodyActive
             )
         } catch {
             failureMessage = "The response body could not be saved. Check available storage and folder permissions."
         }
     }
 
+    func urlSession(
+        _ session: URLSession, task: URLSessionTask,
+        needNewBodyStream completionHandler: @escaping (InputStream?) -> Void
+    ) {
+        guard let uploadBody, uploadBodyActive,
+            (task.currentRequest ?? currentRequest).httpMethod?.caseInsensitiveCompare(request.method) == .orderedSame
+        else {
+            completionHandler(nil)
+            return
+        }
+        do {
+            let stream = try uploadBody.makeInputStream()
+            uploadStreams.append(stream)
+            completionHandler(stream)
+        } catch {
+            failureMessage = (error as? LocalizedError)?.errorDescription ?? "The upload source is unavailable."
+            completionHandler(nil)
+            task.cancel()
+        }
+    }
+
+    func urlSession(
+        _ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse,
+        completionHandler: @escaping (URLSession.ResponseDisposition) -> Void
+    ) {
+        guard uploadBody != nil, response is HTTPURLResponse else {
+            failureMessage = "The server returned an invalid HTTP response."
+            completionHandler(.cancel)
+            return
+        }
+        do {
+            let destination = bodyDirectory.appendingPathComponent("response-\(runID.uuidString).body")
+            guard
+                FileManager.default.createFile(
+                    atPath: destination.path, contents: nil, attributes: [.posixPermissions: 0o600])
+            else {
+                throw HTTPExecutionError.bodyStorageUnavailable
+            }
+            bodyFileURL = destination
+            uploadResponseFile = try FileHandle(forWritingTo: destination)
+            completionHandler(.allow)
+        } catch {
+            failureMessage = "The response body could not be saved. Check available storage and folder permissions."
+            completionHandler(.cancel)
+        }
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        guard let uploadResponseFile, !bodyLimitExceeded else { return }
+        let total = uploadResponseBytes.addingReportingOverflow(Int64(data.count))
+        guard !total.overflow, maximumResponseBytes.map({ total.partialValue <= $0 }) ?? true else {
+            bodyLimitExceeded = true
+            dataTask.cancel()
+            return
+        }
+        do {
+            try uploadResponseFile.write(contentsOf: data)
+            uploadResponseBytes = total.partialValue
+            let expected = dataTask.response?.expectedContentLength ?? -1
+            continuation.yield(
+                .progress(
+                    HTTPProgress(receivedBytes: uploadResponseBytes, expectedBytes: expected >= 0 ? expected : nil)))
+        } catch {
+            failureMessage = "The response body could not be saved. Check available storage and folder permissions."
+            dataTask.cancel()
+        }
+    }
+
+    private func finishUploadResponse(_ task: URLSessionTask) {
+        guard let response = task.response as? HTTPURLResponse, let bodyFileURL else {
+            failureMessage = "The server returned an invalid HTTP response."
+            return
+        }
+        if let current = task.currentRequest { currentRequest = current }
+        currentRequestHeaderSources = reconciledHeaderSources(
+            for: currentRequest, inheriting: currentRequestHeaderSources, defaultSource: .automatic)
+        responseMetadata = HTTPResponseMetadata(
+            finalURL: response.url ?? currentRequest.url ?? bodyFileURL,
+            effectiveMethod: currentRequest.httpMethod ?? request.method, statusCode: response.statusCode,
+            requestHeaders: requestHeaders(from: currentRequest), requestHeaderSources: currentRequestHeaderSources,
+            responseHeaders: responseHeaders(from: response), redirects: redirects,
+            bodyFileURL: bodyFileURL, bodyByteCount: uploadResponseBytes,
+            duration: max(0, Date().timeIntervalSince(startedAt)), redirectLimitReached: redirectLimitReached,
+            redirectRequest: redirectRequest, pendingRedirect: pendingRedirect, uploadBodyActive: uploadBodyActive)
+    }
+
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        try? uploadResponseFile?.close()
+        uploadResponseFile = nil
+        if let streamError = uploadStreams.compactMap(\.streamError).first {
+            failureMessage =
+                (streamError as? LocalizedError)?.errorDescription ?? "The upload source could not be read."
+        }
+        uploadStreams.forEach { $0.close() }
+        uploadStreams.removeAll()
+        if error == nil, failureMessage == nil, uploadBody != nil {
+            finishUploadResponse(task)
+        }
         if bodyLimitExceeded {
             onCompletion(runID, .failed("The response exceeded the configured byte limit.", bodyFileURL: bodyFileURL))
             return

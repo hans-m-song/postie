@@ -22,7 +22,7 @@ enum SyntaxHighlighting {
         var highlightsTemplates = true
     }
 
-    enum Color: Sendable {
+    enum Color: Equatable, Sendable {
         case variable
         case pathParameter
         case missing
@@ -31,6 +31,20 @@ enum SyntaxHighlighting {
         case jsonString
         case jsonNumber
         case jsonLiteral
+        case markupTagName
+        case markupTagDelimiter
+        case markupAttributeName
+        case markupString
+        case markupComment
+        case markupEntity
+        case markupDeclaration
+        case markupCDATA
+        case markupKeyword
+        case markupNumber
+        case markupIdentifier
+        case markupPunctuation
+        case markupSelector
+        case markupProperty
 
         @MainActor
         var appKitColor: NSColor {
@@ -41,11 +55,18 @@ enum SyntaxHighlighting {
             case .jsonString: .systemGreen
             case .jsonNumber: .systemOrange
             case .jsonLiteral: .systemIndigo
+            case .markupTagName: .systemBlue
+            case .markupTagDelimiter, .markupComment, .markupPunctuation: .secondaryLabelColor
+            case .markupAttributeName, .markupProperty: .systemTeal
+            case .markupString: .systemGreen
+            case .markupEntity, .markupNumber: .systemOrange
+            case .markupDeclaration, .markupCDATA, .markupKeyword, .markupSelector: .systemPurple
+            case .markupIdentifier: .systemIndigo
             }
         }
     }
 
-    struct Span: Sendable {
+    struct Span: Equatable, Sendable {
         let location: Int
         let length: Int
         let color: Color
@@ -84,6 +105,24 @@ enum SyntaxHighlighting {
             !appendJSONSpans(from: source, to: &spans)
         {
             return .cancelled
+        }
+
+        if request.syntax == .html || request.syntax == .xml {
+            let markupResult = MarkupLexing.tokens(in: request.text, syntax: request.syntax)
+            guard !markupResult.isCancelled else {
+                return .cancelled
+            }
+            guard !markupResult.isPaused else {
+                return .paused
+            }
+            for token in markupResult.tokens {
+                spans.append(
+                    Span(
+                        location: token.location,
+                        length: token.length,
+                        color: color(for: token.kind)
+                    ))
+            }
         }
 
         if request.isURL {
@@ -267,6 +306,25 @@ enum SyntaxHighlighting {
     private static func isJSONDelimiter(_ character: unichar) -> Bool {
         isWhitespace(character) || character == 0x2C || character == 0x3A || character == 0x5D || character == 0x7D
             || character == 0x5B || character == 0x7B
+    }
+
+    private static func color(for kind: MarkupLexing.Kind) -> Color {
+        switch kind {
+        case .tagName: .markupTagName
+        case .tagDelimiter: .markupTagDelimiter
+        case .attributeName: .markupAttributeName
+        case .string: .markupString
+        case .comment: .markupComment
+        case .entity: .markupEntity
+        case .declaration: .markupDeclaration
+        case .cdata: .markupCDATA
+        case .keyword: .markupKeyword
+        case .number: .markupNumber
+        case .identifier: .markupIdentifier
+        case .punctuation: .markupPunctuation
+        case .selector: .markupSelector
+        case .property: .markupProperty
+        }
     }
 
     private final class Cache: @unchecked Sendable {

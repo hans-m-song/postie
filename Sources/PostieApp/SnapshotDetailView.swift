@@ -146,12 +146,14 @@ struct SnapshotDetailView: View {
 
     @ViewBuilder
     private func splitView(_ opened: OpenedSnapshot) -> some View {
-        SnapshotRequestResponseSplit(opened: opened, layout: layout)
+        SnapshotRequestResponseSplit(snapshotID: snapshotID, opened: opened, layout: layout)
     }
 }
 
 @MainActor
 private struct SnapshotRequestResponseSplit: NSViewControllerRepresentable {
+    @EnvironmentObject private var model: AppModel
+    let snapshotID: UUID
     let opened: OpenedSnapshot
     let layout: RequestResponseLayout
 
@@ -170,7 +172,9 @@ private struct SnapshotRequestResponseSplit: NSViewControllerRepresentable {
         requestItem.canCollapse = false
         requestItem.canCollapseFromWindowResize = false
 
-        let responseController = NSHostingController(rootView: SnapshotResponsePane(opened: opened))
+        let responseController = NSHostingController(
+            rootView: SnapshotResponseRoot(model: model, snapshotID: snapshotID, opened: opened)
+        )
         responseController.sizingOptions = []
         let responseItem = NSSplitViewItem(viewController: responseController)
         responseItem.preferredThicknessFraction = 0.5
@@ -188,7 +192,8 @@ private struct SnapshotRequestResponseSplit: NSViewControllerRepresentable {
 
     func updateNSViewController(_ splitController: NSSplitViewController, context: Context) {
         context.coordinator.requestController?.rootView = SnapshotRequestPane(opened: opened)
-        context.coordinator.responseController?.rootView = SnapshotResponsePane(opened: opened)
+        context.coordinator.responseController?.rootView = SnapshotResponseRoot(
+            model: model, snapshotID: snapshotID, opened: opened)
         configure(splitController)
     }
 
@@ -209,7 +214,7 @@ private struct SnapshotRequestResponseSplit: NSViewControllerRepresentable {
     @MainActor
     final class Coordinator {
         fileprivate var requestController: NSHostingController<SnapshotRequestPane>?
-        fileprivate var responseController: NSHostingController<SnapshotResponsePane>?
+        fileprivate var responseController: NSHostingController<SnapshotResponseRoot>?
     }
 }
 
@@ -267,7 +272,9 @@ private struct SnapshotRequestPane: View {
                             sensitiveNames: requestTemplateSensitiveNames,
                             secretNames: requestTemplateSecretNames
                         )
-                        if opened.template.bodyEnabled {
+                        if let upload = opened.template.uploadBody {
+                            UploadMetadataView(upload: upload)
+                        } else if opened.template.bodyEnabled {
                             SnapshotValueLine(
                                 label: "Body syntax", value: opened.template.bodySyntax.rawValue.uppercased())
                             SnapshotLongValue(label: "Body template", value: opened.template.body)
@@ -282,7 +289,7 @@ private struct SnapshotRequestPane: View {
                         SnapshotInformationSection(title: "Submitted request") {
                             SnapshotValueLine(label: "Method", value: submitted.method)
                             SnapshotValueLine(label: "URL", value: submitted.url.absoluteString)
-                            SnapshotTransportBody(requestBody: submitted.body)
+                            SnapshotTransportBody(requestBody: submitted.body, uploadBody: submitted.uploadBody)
                             SnapshotHeaderList(
                                 title: "Submitted headers",
                                 fields: submitted.headers,
@@ -297,7 +304,7 @@ private struct SnapshotRequestPane: View {
                         SnapshotInformationSection(title: "Observed final request") {
                             SnapshotValueLine(label: "Method", value: observed.method)
                             SnapshotValueLine(label: "URL", value: observed.url.absoluteString)
-                            SnapshotTransportBody(requestBody: observed.body)
+                            SnapshotTransportBody(requestBody: observed.body, uploadBody: observed.uploadBody)
                             SnapshotHeaderList(
                                 title: "Final request headers",
                                 fields: observed.headers,
@@ -341,7 +348,19 @@ private struct SnapshotRequestPane: View {
     }
 }
 
+private struct SnapshotResponseRoot: View {
+    let model: AppModel
+    let snapshotID: UUID
+    let opened: OpenedSnapshot
+
+    var body: some View {
+        SnapshotResponsePane(snapshotID: snapshotID, opened: opened)
+            .environmentObject(model)
+    }
+}
+
 private struct SnapshotResponsePane: View {
+    let snapshotID: UUID
     let opened: OpenedSnapshot
     @State private var expandedRedirectIDs: Set<UUID> = []
 
@@ -361,7 +380,7 @@ private struct SnapshotResponsePane: View {
             .padding(.horizontal, 18)
             .padding(.vertical, 14)
             Divider()
-            ScrollView {
+            ResponseBodyViewportScrollView(contentPadding: 16, previewBottomInset: 12) {
                 VStack(alignment: .leading, spacing: 14) {
                     HStack(spacing: 9) {
                         Circle()
@@ -419,11 +438,9 @@ private struct SnapshotResponsePane: View {
                             secretNames: response.secretRequestHeaderNames,
                             sources: response.requestHeaderSources)
                         SnapshotHeaderList(title: "Response headers", fields: response.responseHeaders)
-                        SnapshotResponseBodyPreview(response: response)
+                        SnapshotResponseBodyPreview(snapshotID: snapshotID, response: response)
                     }
                 }
-                .padding(16)
-                .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
                 .textSelection(.enabled)
             }
         }
@@ -491,9 +508,12 @@ private struct SnapshotLongValue: View {
 
 private struct SnapshotTransportBody: View {
     let requestBody: String?
+    let uploadBody: SnapshotUploadBody?
 
     var body: some View {
-        if let requestBody {
+        if let uploadBody {
+            UploadMetadataView(upload: uploadBody)
+        } else if let requestBody {
             SnapshotLongValue(label: "Submitted body", value: requestBody)
         } else {
             SnapshotValueLine(label: "Body", value: "No request body")
@@ -727,26 +747,17 @@ private struct SnapshotRedirectDisclosure: View {
 }
 
 private struct SnapshotResponseBodyPreview: View {
+    @EnvironmentObject private var model: AppModel
+    let snapshotID: UUID
     let response: HTTPResponseRecord
 
     @State private var preview: BodyPreview?
     @State private var previewError: String?
     @State private var isLoadingPreview = true
-    @State private var syntax: BodySyntax
-    @State private var pretty: Bool
-    @State private var formatted: String?
-    @State private var formatError: String?
-    @State private var isFormatting = false
 
-    init(response: HTTPResponseRecord) {
+    init(snapshotID: UUID, response: HTTPResponseRecord) {
+        self.snapshotID = snapshotID
         self.response = response
-        let syntax = Self.syntax(for: response.responseHeaders)
-        _syntax = State(initialValue: syntax)
-        _pretty = State(initialValue: syntax == .json)
-    }
-
-    private var shouldFormatJSON: Bool {
-        pretty && syntax == .json && preview?.isBinary == false
     }
 
     var body: some View {
@@ -759,82 +770,17 @@ private struct SnapshotResponseBodyPreview: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            HStack {
-                Picker("Response syntax", selection: $syntax) {
-                    Text("None").tag(BodySyntax.none)
-                    Text("JSON").tag(BodySyntax.json)
-                }
-                .labelsHidden()
-                .pickerStyle(.menu)
-                .frame(width: 86)
-                Picker("Response presentation", selection: $pretty) {
-                    Text("Raw").tag(false)
-                    Text("Pretty").tag(true)
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(width: 120)
-                .disabled(syntax != .json || preview?.isBinary != false)
-            }
-            .fixedSize(horizontal: false, vertical: true)
-            if isFormatting { ProgressView("Formatting JSON…").controlSize(.small) }
-            if let formatError {
-                Text(formatError).font(.caption).foregroundStyle(.secondary)
-            }
-            if isLoadingPreview {
-                ProgressView("Loading bounded preview…")
-                    .frame(maxWidth: .infinity, minHeight: 100)
-            } else if let previewError {
-                HStack {
-                    Text("Preview could not be loaded: \(previewError)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Button("Retry") { Task { await loadPreview() } }
-                }
-            } else if let preview {
-                if preview.isBinary {
-                    Label("Binary body; text preview is unavailable.", systemImage: "doc.zipper")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, minHeight: 90)
-                } else {
-                    Group {
-                        if shouldFormatJSON, let formatted {
-                            ScrollView(.horizontal) {
-                                HighlightedResponseText(
-                                    text: displayedText(preview, formatted: formatted), syntax: syntax,
-                                    wrapsToWidth: false
-                                )
-                                .fixedSize(horizontal: true, vertical: true)
-                                .padding(10)
-                            }
-                        } else {
-                            HighlightedResponseText(
-                                text: displayedText(preview, formatted: nil), syntax: syntax, wrapsToWidth: true
-                            )
-                            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-                            .padding(10)
-                        }
-                    }
-                    .frame(minWidth: 0, maxWidth: .infinity)
-                    .background(.background, in: RoundedRectangle(cornerRadius: 7))
-                    .overlay { RoundedRectangle(cornerRadius: 7).stroke(.quaternary, lineWidth: 1) }
-                    if preview.isTruncated && formatted == nil {
-                        Label(
-                            "Preview limited to the first 1 MiB. The saved response body is complete.",
-                            systemImage: "info.circle"
-                        )
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    }
-                }
-            }
+            ResponseBodyPresentation(
+                source: .snapshot(snapshotID, response),
+                preview: preview,
+                previewError: previewError,
+                isLoadingPreview: isLoadingPreview,
+                truncationMessage: "Preview limited to the first 1 MiB. The saved response body is complete.",
+                onRetry: { Task { await loadPreview() } },
+                withBodyURL: { operation in try await operation(response.bodyFileURL) }
+            )
         }
         .task(id: response.bodyFileURL) { await loadPreview() }
-        .task(id: shouldFormatJSON) { await formatJSONIfNeeded() }
-        .onChange(of: preview?.isBinary) { _, isBinary in
-            if isBinary == true { pretty = false }
-        }
     }
 
     private func loadPreview() async {
@@ -852,38 +798,6 @@ private struct SnapshotResponseBodyPreview: View {
         }
     }
 
-    private func formatJSONIfNeeded() async {
-        formatted = nil
-        formatError = nil
-        guard shouldFormatJSON else { isFormatting = false; return }
-        isFormatting = true
-        let url = response.bodyFileURL
-        let result = await Task.detached(priority: .userInitiated) {
-            Result { try JSONPresentation.pretty(at: url) }
-        }.value
-        guard !Task.isCancelled else { return }
-        isFormatting = false
-        switch result {
-        case let .success(value): formatted = value
-        case let .failure(error): formatError = error.localizedDescription
-        }
-    }
-
-    private static func syntax(for headers: [HTTPField]) -> BodySyntax {
-        let contentType = headers.first { $0.name.caseInsensitiveCompare("Content-Type") == .orderedSame }?.value
-        let mediaType =
-            contentType?
-            .split(separator: ";", maxSplits: 1, omittingEmptySubsequences: false)
-            .first?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased() ?? ""
-        return mediaType == "application/json" || mediaType.hasSuffix("+json") ? .json : .none
-    }
-
-    private func displayedText(_ preview: BodyPreview, formatted: String?) -> String {
-        let text = pretty && syntax == .json ? (formatted ?? preview.text) : preview.text
-        return text.isEmpty ? "(empty body)" : text
-    }
 }
 
 private func paneHeader(_ title: String, symbol: String) -> some View {

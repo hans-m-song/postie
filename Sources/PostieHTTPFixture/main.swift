@@ -11,6 +11,7 @@ private struct HTTPRequest {
 }
 
 private final class LoopbackHTTPServer {
+    private static let uploadCounters = UploadRequestCounters()
     private let socketDescriptor: Int32
     let port: UInt16
 
@@ -75,6 +76,21 @@ private final class LoopbackHTTPServer {
 
         guard let request = readRequest(from: client) else { return }
         let query = queryValues(request.query)
+
+        if request.path == "/upload-count" {
+            let count = uploadCounters.count(for: query["upload_counter"]?.first ?? "")
+            sendFixtureBytes(
+                client, status: 200, body: Data(String(count).utf8), contentType: "text/plain", headOnly: false)
+            return
+        }
+
+        if request.path == "/upload-echo" {
+            if let key = query["upload_counter"]?.first { uploadCounters.record(key) }
+            sendFixtureBytes(
+                client, status: 200, body: request.body, contentType: "application/octet-stream",
+                headOnly: request.method == "HEAD")
+            return
+        }
 
         if request.path == "/delay" {
             let seconds = boundedDouble(query["seconds"]?.first, default: 1, range: 0...10)
@@ -296,6 +312,23 @@ private final class LoopbackHTTPServer {
             }
             return true
         }
+    }
+}
+
+private final class UploadRequestCounters: @unchecked Sendable {
+    private let lock = NSLock()
+    private var counts: [String: Int] = [:]
+
+    func record(_ key: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        counts[key, default: 0] += 1
+    }
+
+    func count(for key: String) -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return counts[key, default: 0]
     }
 }
 

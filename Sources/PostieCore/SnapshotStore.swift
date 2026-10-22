@@ -160,7 +160,7 @@ public actor SnapshotStore {
         bodyLease: HTTPBodyLease
     ) async throws -> SavedSnapshot {
         try validateName(name)
-        guard let capture = response.snapshotCapture, capture.preparationVersion == 1,
+        guard let capture = response.snapshotCapture, [1, 2].contains(capture.preparationVersion),
             bodyLease.runID == response.runID,
             bodyLease.bodyURL == response.bodyFileURL.standardizedFileURL,
             response.bodyByteCount >= 0,
@@ -175,6 +175,8 @@ public actor SnapshotStore {
             submitted: capture.submitted,
             observedTransport: SnapshotTransportRequest(
                 method: response.effectiveMethod, url: response.finalURL, headers: response.requestHeaders,
+                uploadBody: response.effectiveMethod.caseInsensitiveCompare(capture.submitted.method) == .orderedSame
+                    ? capture.submitted.uploadBody : nil,
                 headerSources: response.requestHeaderSources,
                 sensitiveNames: response.sensitiveRequestHeaderNames, secretNames: response.secretRequestHeaderNames
             ),
@@ -192,7 +194,8 @@ public actor SnapshotStore {
             .appendingPathComponent(id.uuidString, isDirectory: true)
         let destination = directory(for: id)
         let document = SnapshotDocument(
-            version: 1, name: name, capturedAt: response.completedAt, source: source,
+            version: capture.preparationVersion == 2 ? 2 : 1, name: name, capturedAt: response.completedAt,
+            source: source,
             originalRunID: response.runID, template: capture.template,
             preparationVersion: capture.preparationVersion, encryptedContext: envelope,
             response: SnapshotResponseMetadata(
@@ -318,9 +321,9 @@ public actor SnapshotStore {
         else {
             throw SnapshotStoreError.malformedSnapshot
         }
-        guard version == 1 else { throw SnapshotStoreError.unsupportedVersion }
+        guard version == 1 || version == 2 else { throw SnapshotStoreError.unsupportedVersion }
         let document = try JSONDecoder().decode(SnapshotDocument.self, from: data)
-        guard document.preparationVersion == 1 else {
+        guard document.preparationVersion == version, [1, 2].contains(document.preparationVersion) else {
             throw SnapshotStoreError.unsupportedVersion
         }
         guard !document.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -328,6 +331,24 @@ public actor SnapshotStore {
             document.response.duration >= 0, document.capturedAt.timeIntervalSinceReferenceDate.isFinite
         else {
             throw SnapshotStoreError.malformedSnapshot
+        }
+        if let upload = document.template.uploadBody {
+            guard version == 2, document.template.bodyKind == upload.kind,
+                upload.binaryOmitted, upload.kind != .text, upload.byteCount >= 0,
+                upload.files.allSatisfy({ file in
+                    file.byteCount >= 0 && !file.filename.isEmpty && !file.contentType.isEmpty
+                        && (file.sha256.map { hash in
+                            hash.utf8.count == 64
+                                && hash.utf8.allSatisfy { (48...57).contains($0) || (97...102).contains($0) }
+                        } ?? true)
+                })
+            else { throw SnapshotStoreError.malformedSnapshot }
+        }
+        if version == 1,
+            document.template.bodyKind != nil || document.template.uploadBody != nil
+                || document.template.multipartTemplateParts != nil
+        {
+            throw SnapshotStoreError.unsupportedVersion
         }
         try requireBody(entry.appendingPathComponent("response.body"), byteCount: document.response.bodyByteCount)
         return document

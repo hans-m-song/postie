@@ -224,6 +224,10 @@ public enum RequestPreparer {
                 configuration.inheritsCollectionAuthentication ? .collectionAuth : .requestAuth
             requestHeaderSources[structuredHeader.name.lowercased()] = source
         }
+        if request.httpBodyStream is UploadInputStream {
+            if requestHeaderSources["content-type"] == nil { requestHeaderSources["content-type"] = .automatic }
+            if requestHeaderSources["content-length"] == nil { requestHeaderSources["content-length"] = .automatic }
+        }
         let presentHeaderNames = Set((request.allHTTPHeaderFields ?? [:]).keys.map { $0.lowercased() })
         requestHeaderSources = requestHeaderSources.reduce(into: [:]) { result, entry in
             if presentHeaderNames.contains(entry.key) {
@@ -236,8 +240,11 @@ public enum RequestPreparer {
             captureRedactionInputs
             ? try await captureSecretInputs(in: effectiveContext, resolved: resolvedVariables, decryptor: decryptor)
             : nil
+        let uploadBody = (request.httpBodyStream as? UploadInputStream)?.body
         let capture = SnapshotPreparationCapture(
-            template: SnapshotRequestTemplate(configuration: configuration, headers: headers),
+            preparationVersion: configuration.bodyKind == .text ? 1 : 2,
+            template: SnapshotRequestTemplate(
+                configuration: configuration, headers: headers, uploadBody: uploadBody?.snapshotMetadata),
             referencedInputs: resolvedVariables.filter { capturedNames.contains($0.key) }.mapValues {
                 SnapshotInput(value: $0.value, scope: $0.scope, isSecret: $0.isSecret)
             },
@@ -254,6 +261,7 @@ public enum RequestPreparer {
                 headers: (request.allHTTPHeaderFields ?? [:]).map { HTTPField(name: $0.key, value: $0.value) }
                     .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending },
                 body: request.httpBody.map { String(decoding: $0, as: UTF8.self) },
+                uploadBody: uploadBody?.snapshotMetadata,
                 headerSources: requestHeaderSources,
                 sensitiveNames: sensitiveRequestHeaderNames,
                 secretNames: secretRequestHeaderNames
@@ -268,7 +276,8 @@ public enum RequestPreparer {
             sensitiveRequestHeaderNames: sensitiveRequestHeaderNames,
             secretRequestHeaderNames: secretRequestHeaderNames,
             requestHeaderSources: requestHeaderSources,
-            snapshotCapture: capture
+            snapshotCapture: capture,
+            uploadBody: uploadBody
         )
     }
 
@@ -350,7 +359,13 @@ public enum RequestPreparer {
         sources.append(contentsOf: (headers ?? configuration.headers).filter(isActive).flatMap { [$0.name, $0.value] })
 
         if configuration.bodyEnabled {
-            sources.append(configuration.body)
+            switch configuration.bodyKind {
+            case .text: sources.append(configuration.body)
+            case .rawFile: break
+            case .multipart:
+                sources.append(
+                    contentsOf: configuration.multipartParts.filter { $0.isEnabled && $0.kind == .text }.map(\.text))
+            }
         }
 
         let selectedAuthentication = authentication ?? configuration.authentication
@@ -665,9 +680,23 @@ public enum RequestPreparer {
             request.setValue(structuredHeader.value, forHTTPHeaderField: structuredHeader.name)
         }
 
-        if configuration.bodyEnabled {
+        if configuration.bodyEnabled, configuration.bodyKind == .text {
             let body = try substitute(configuration.body, values: variableValues)
             request.httpBody = Data(body.utf8)
+        }
+        if let upload = try PreparedUploadBody.prepare(
+            configuration: configuration, contentType: request.value(forHTTPHeaderField: "Content-Type"),
+            substitute: { try substitute($0, values: variableValues) }
+        ) {
+            if let length = request.value(forHTTPHeaderField: "Content-Length"), Int64(length) != upload.byteCount {
+                throw UploadError.invalidLength
+            }
+            guard request.value(forHTTPHeaderField: "Transfer-Encoding") == nil else { throw UploadError.invalidLength }
+            request.setValue(upload.contentType, forHTTPHeaderField: "Content-Type")
+            if request.value(forHTTPHeaderField: "Content-Length") == nil {
+                request.setValue(String(upload.byteCount), forHTTPHeaderField: "Content-Length")
+            }
+            request.httpBodyStream = try upload.makeInputStream()
         }
 
         return request

@@ -43,6 +43,12 @@ Rename a request by right-clicking its sidebar row and choosing **Rename request
 
 Postie provides a side-by-side or stacked request/response editor, ordered query/path/header/body configuration, concurrent request identities with one in-flight execution each, Cancel/Open Request activity navigation, manual redirect following and header inspection, bounded file-backed responses, and saved flat collections. Execution options live in the request Settings tab. Both bodies grow vertically within their pane's outer scroll area; response previews remain bounded.
 
+Bodies support JSON/HTML/XML highlighting and Pretty views, native PDF previews, and captured HTML rendering with JavaScript disabled and external resources blocked by default. Raw-file and multipart uploads read original files without temporary copies; snapshots keep upload metadata and text fields rather than file bytes. See [body formats](docs/body-format-plan.md) and [automation](docs/automation.md).
+
+PDF and rendered HTML previews fill the available response-pane height. Open in Preview/Open in Browser export captured copies; external HTML follows the browser's JavaScript and network rules.
+
+Raw and Pretty source previews wrap by default. Clear Wrap text to scroll horizontally; changing wrapping does not change the captured text.
+
 The initial baseline received independent security, architecture/performance and UI reviews on 2026-10-17; its 46 functional tests passed at that historical checkpoint. This is not a current test result. See [review findings and verification limits](docs/baseline-review.md).
 
 Postie includes scoped variables, structured authentication, encrypted marked secrets, request search, layout choices, saved snapshots, drag ordering and local MCP/CLI automation. Copy as cURL, Paste cURL, HAR export, sync and multi-tab editing remain deferred. See [deferred features](docs/deferred-features.md), [automation](docs/automation.md), and [roadmap](docs/roadmap.md) for current boundaries. Local build checks do not claim CI or distribution success.

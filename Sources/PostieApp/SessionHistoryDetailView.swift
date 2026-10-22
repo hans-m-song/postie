@@ -119,7 +119,7 @@ struct SessionHistoryDetailView: View {
             historyPaneHeader("Response", symbol: "arrow.down.left")
             Divider()
             if let response = entry.response {
-                ScrollView {
+                ResponseBodyViewportScrollView(contentPadding: 14, previewBottomInset: 12) {
                     VStack(alignment: .leading, spacing: 14) {
                         responseSummary(response)
 
@@ -153,8 +153,6 @@ struct SessionHistoryDetailView: View {
                                 .id(response.runID)
                         }
                     }
-                    .padding(14)
-                    .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
                     .textSelection(.enabled)
                 }
             } else {
@@ -178,7 +176,9 @@ struct SessionHistoryDetailView: View {
                 secretNames: capture.submitted.secretNames,
                 sources: capture.submitted.headerSources
             )
-            if capture.template.bodyEnabled {
+            if let upload = capture.template.uploadBody {
+                UploadMetadataView(upload: upload)
+            } else if capture.template.bodyEnabled {
                 SessionHistoryValueLine(label: "Body syntax", value: capture.template.bodySyntax.rawValue.uppercased())
                 SessionHistoryLongValue(label: "Body template", value: capture.template.body)
             } else {
@@ -195,7 +195,9 @@ struct SessionHistoryDetailView: View {
         SessionHistoryInformationSection(title: "Submitted request") {
             SessionHistoryValueLine(label: "Method", value: capture.submitted.method)
             SessionHistoryValueLine(label: "URL", value: capture.submitted.url.absoluteString)
-            if let body = capture.submitted.body {
+            if let upload = capture.submitted.uploadBody {
+                UploadMetadataView(upload: upload)
+            } else if let body = capture.submitted.body {
                 SessionHistoryLongValue(label: "Submitted body", value: body)
             } else {
                 SessionHistoryValueLine(label: "Body", value: "No request body")
@@ -251,7 +253,12 @@ struct SessionHistoryDetailView: View {
                 secretNames: entry.response?.secretRequestHeaderNames ?? [],
                 sources: entry.response?.requestHeaderSources ?? [:]
             )
-            if request.bodyEnabled {
+            if request.bodyEnabled && request.bodyKind != .text {
+                SessionHistoryValueLine(label: "Body type", value: request.bodyKind.rawValue)
+                Text("Upload files remain at their original locations; no upload bytes are retained in history.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else if request.bodyEnabled {
                 SessionHistoryValueLine(label: "Body syntax", value: request.bodySyntax.rawValue.uppercased())
                 SessionHistoryLongValue(label: "Body template", value: request.body)
             } else {

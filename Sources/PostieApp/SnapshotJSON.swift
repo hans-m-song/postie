@@ -102,7 +102,7 @@ enum SnapshotJSONExporter {
     }
 
     private static func transport(_ request: SnapshotTransportRequest) -> [String: Any] {
-        [
+        var result: [String: Any] = [
             "available": true,
             "method": request.method,
             "url": request.url.absoluteString,
@@ -116,6 +116,33 @@ enum SnapshotJSONExporter {
             },
             "body": request.body as Any? ?? NSNull(),
         ]
+        if let upload = request.uploadBody {
+            result["uploadBody"] = [
+                "kind": upload.kind.rawValue, "contentType": upload.contentType,
+                "byteCount": upload.byteCount, "binaryOmitted": upload.binaryOmitted,
+                "selfContainedReplayAvailable": false,
+                "files": upload.files.map { file -> [String: Any] in
+                    var value: [String: Any] = [
+                        "filename": file.filename, "contentType": file.contentType, "byteCount": file.byteCount,
+                    ]
+                    if let name = file.partName { value["partName"] = name }
+                    if let hash = file.sha256 { value["sha256"] = hash }
+                    return value
+                },
+            ]
+            if let parts = upload.parts, var body = result["uploadBody"] as? [String: Any] {
+                body["parts"] = parts.map { part -> [String: Any] in
+                    var value: [String: Any] = [
+                        "id": part.id.uuidString, "name": part.name, "kind": part.kind.rawValue,
+                    ]
+                    if let text = part.text { value["text"] = text }
+                    if let index = part.fileIndex { value["fileIndex"] = index }
+                    return value
+                }
+                result["uploadBody"] = body
+            }
+        }
+        return result
     }
 
     private static func header(
