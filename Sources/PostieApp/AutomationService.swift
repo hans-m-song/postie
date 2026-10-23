@@ -1,10 +1,8 @@
 import AppKit
 import Combine
 import Foundation
-import Security
-import PostieCore
-import PostieControl
 import PostieAutomation
+import PostieControl
 
 @MainActor
 final class AutomationService: ObservableObject {
@@ -15,31 +13,40 @@ final class AutomationService: ObservableObject {
     @Published private(set) var localStatus = "Stopped"
     @Published private(set) var isChanging = false
     private let preferences: UserDefaults
-    private let keyStore: any ApplicationKeyStore
+    private let tokenProvider: @MainActor @Sendable () async throws -> String
     private let dispatcher: AutomationDispatcher
     private let socketPath: String
+    private let configurationWriter: @MainActor @Sendable (String) -> Void
     private var http: MCPHTTPServer?
-    private var httpPort: Int?
     private var local: LocalIPCServer?
     private var started = false
+    private var generation: UInt64 = 0
+    private var changingGeneration: UInt64?
     private var deferredRestart: Task<Void, Never>?
+    private var localLifecycleTask: Task<Bool, Never>?
+    private var localLifecycleSequence: UInt64 = 0
 
     init(
         preferences: UserDefaults = .standard,
-        keyStore: (any ApplicationKeyStore)? = nil,
+        tokenProvider: (@MainActor @Sendable () async throws -> String)? = nil,
         socketPath: String = LocalIPC.defaultSocketPath,
-        dispatcher: AutomationDispatcher? = nil
+        dispatcher: AutomationDispatcher? = nil,
+        configurationWriter: (@MainActor @Sendable (String) -> Void)? = nil
     ) {
         self.preferences = preferences
-        self.keyStore =
-            keyStore
-            ?? KeychainApplicationKeyStore(
-                service: (Bundle.main.bundleIdentifier ?? "dev.postie") + ".mcp-access", account: "bearer-token-v1"
-            )
+        self.tokenProvider =
+            tokenProvider ?? {
+                try await AppModel.shared.mcpBearerToken()
+            }
         self.socketPath = socketPath
         self.dispatcher =
             dispatcher ?? { command, channel in
                 await AppModel.shared.automationReply(command, channel: channel)
+            }
+        self.configurationWriter =
+            configurationWriter ?? { value in
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(value, forType: .string)
             }
         enabled = preferences.bool(forKey: "automation.mcp.enabled")
         let storedPort = preferences.integer(forKey: "automation.mcp.port")
@@ -48,100 +55,156 @@ final class AutomationService: ObservableObject {
 
     func start() async {
         guard !started else { return }
+        let currentGeneration = advanceGeneration()
         started = true
-        let local = self.local ?? LocalIPCServer(socketPath: socketPath, dispatcher: dispatcher)
-        do { try await local.start(); self.local = local; localStatus = "Available to local CLI" } catch {
+        beginChange(for: currentGeneration)
+
+        let localServer = local ?? LocalIPCServer(socketPath: socketPath, dispatcher: dispatcher)
+        local = localServer
+        let localStartTask = enqueueLocalLifecycle { [weak self] in
+            guard let self, self.isCurrent(currentGeneration) else { return false }
+            do {
+                try await localServer.start()
+                return true
+            } catch {
+                return false
+            }
+        }
+        let localStarted = await localStartTask.value
+        guard isCurrent(currentGeneration) else { return }
+        if localStarted {
+            localStatus = "Available to local CLI"
+        } else {
             localStatus = "Local CLI unavailable: private socket could not be opened."
         }
-        if enabled, let http, httpPort == port {
-            do { try await http.start(); status = "Listening on http://127.0.0.1:\(port)/mcp" } catch {
-                await restartHTTP()
-            }
-        } else if enabled {
-            await restartHTTP()
-        }
+
+        finishChange(for: currentGeneration)
+        await restartHTTP(for: currentGeneration)
     }
 
     func setEnabled(_ enabled: Bool) async {
         guard !isChanging else { return }
         self.enabled = enabled
         preferences.set(enabled, forKey: "automation.mcp.enabled")
-        await restartHTTP()
+        let currentGeneration = advanceGeneration()
+        await restartHTTP(for: currentGeneration)
     }
 
     func setPort(_ port: Int) async {
         guard !isChanging, (1024...65535).contains(port) else { return }
         self.port = port
         preferences.set(port, forKey: "automation.mcp.port")
-        await restartHTTP()
+        let currentGeneration = advanceGeneration()
+        await restartHTTP(for: currentGeneration)
     }
 
-    private func token() throws -> String {
-        if let key = try keyStore.loadKey() {
-            guard key.count == 32 else { throw LocalIPCError.unavailable }
-            return key.base64EncodedString()
-        }
-        var bytes = [UInt8](repeating: 0, count: 32)
-        guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else {
-            throw LocalIPCError.unavailable
-        }
-        let key = try keyStore.createKey(Data(bytes))
-        guard key.count == 32 else { throw LocalIPCError.unavailable }
-        return key.base64EncodedString()
-    }
+    private func restartHTTP(for currentGeneration: UInt64) async {
+        guard isCurrentGeneration(currentGeneration) else { return }
+        beginChange(for: currentGeneration)
+        defer { finishChange(for: currentGeneration) }
 
-    private func restartHTTP() async {
-        isChanging = true
-        defer { isChanging = false }
-        if let http, !(await http.stop()) {
-            status = "MCP is draining accepted operations."
-            scheduleRestartAfterDrain()
+        let requestedPort = port
+        if let previousServer = http {
+            guard await previousServer.stop() else {
+                guard isCurrentGeneration(currentGeneration) else { return }
+                status = "MCP is draining accepted operations."
+                scheduleRestartAfterDrain(for: currentGeneration)
+                return
+            }
+            if http === previousServer {
+                http = nil
+            }
+        }
+
+        guard isCurrentGeneration(currentGeneration), port == requestedPort else { return }
+        guard enabled, started else { status = "Disabled"; return }
+
+        let token: String
+        do {
+            token = try await tokenProvider()
+        } catch {
+            guard isActive(currentGeneration), port == requestedPort else { return }
+            status = "MCP unavailable: check the port and access token, then retry."
             return
         }
-        http = nil
-        httpPort = nil
-        guard enabled, started else { status = "Disabled"; return }
+
+        guard isActive(currentGeneration), port == requestedPort else { return }
+        let server = MCPHTTPServer(port: requestedPort, token: token, dispatcher: dispatcher)
+        http = server
         do {
-            let server = MCPHTTPServer(port: port, token: try token(), dispatcher: dispatcher)
             try await server.start()
-            http = server
-            httpPort = port
-            status = "Listening on http://127.0.0.1:\(port)/mcp"
-        } catch { status = "MCP unavailable: check the port and Keychain access, then retry." }
+        } catch {
+            if http === server {
+                http = nil
+            }
+            guard isActive(currentGeneration), port == requestedPort else { return }
+            status = "MCP unavailable: check the port and access token, then retry."
+            return
+        }
+
+        guard isActive(currentGeneration), port == requestedPort else {
+            let stopped = await server.stop()
+            if stopped, http === server {
+                http = nil
+            }
+            return
+        }
+
+        status = "Listening on http://127.0.0.1:\(requestedPort)/mcp"
     }
 
-    private func scheduleRestartAfterDrain() {
+    private func scheduleRestartAfterDrain(for currentGeneration: UInt64) {
         guard deferredRestart == nil else { return }
-        deferredRestart = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(1))
-            guard !Task.isCancelled, let self else { return }
+        deferredRestart = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(for: .seconds(1))
+            } catch {
+                return
+            }
+            guard let self, !Task.isCancelled,
+                self.isCurrentGeneration(currentGeneration)
+            else { return }
             self.deferredRestart = nil
-            guard self.started else { return }
-            await self.restartHTTP()
+            await self.restartHTTP(for: currentGeneration)
         }
     }
 
-    func copyCodexConfiguration() {
+    func copyCodexConfiguration() async {
+        guard enabled, !isChanging else { return }
+        let requestGeneration = generation
         do {
+            let token = try await tokenProvider()
+            guard generation == requestGeneration, enabled else { return }
             let value = """
                 [mcp_servers.postie]
                 url = "http://127.0.0.1:\(port)/mcp"
-                http_headers = { Authorization = "Bearer \(try token())" }
+                http_headers = { Authorization = "Bearer \(token)" }
                 """
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(value, forType: .string)
-        } catch { status = "Could not access the MCP token in Keychain." }
+            configurationWriter(value)
+        } catch {
+            guard generation == requestGeneration, enabled else { return }
+            status = "Could not access the MCP access token."
+        }
     }
 
     func stop() async -> Bool {
+        let currentGeneration = advanceGeneration()
         started = false
-        deferredRestart?.cancel()
-        deferredRestart = nil
-        async let stopHTTP = http?.stop() ?? true
-        async let stopLocal = local?.stop() ?? true
+        let httpToStop = http
+        let localToStop = local
+        let localStopTask = localToStop.map { localServer in
+            enqueueLocalLifecycle { await localServer.stop() }
+        }
+        async let stopHTTP = httpToStop?.stop() ?? true
+        async let stopLocal = localStopTask?.value ?? true
         let (httpStopped, localStopped) = await (stopHTTP, stopLocal)
-        if httpStopped { http = nil; httpPort = nil }
-        if localStopped { local = nil }
+        guard isCurrentGeneration(currentGeneration) else { return httpStopped && localStopped }
+        if httpStopped, let httpToStop, http === httpToStop {
+            http = nil
+        }
+        if localStopped, let localToStop, local === localToStop {
+            local = nil
+        }
         guard httpStopped && localStopped else {
             status = "Accepted operations are still finishing. Try quitting again shortly."
             return false
@@ -149,5 +212,58 @@ final class AutomationService: ObservableObject {
         status = "Stopped"
         localStatus = "Stopped"
         return true
+    }
+
+    private func enqueueLocalLifecycle(
+        _ operation: @escaping @MainActor @Sendable () async -> Bool
+    ) -> Task<Bool, Never> {
+        localLifecycleSequence &+= 1
+        let sequence = localLifecycleSequence
+        let previous = localLifecycleTask
+        let task = Task { @MainActor [weak self] in
+            _ = await previous?.value
+            guard let self else { return false }
+            let result = await operation()
+            if self.localLifecycleSequence == sequence {
+                self.localLifecycleTask = nil
+            }
+            return result
+        }
+        localLifecycleTask = task
+        return task
+    }
+
+    @discardableResult
+    private func advanceGeneration() -> UInt64 {
+        generation &+= 1
+        deferredRestart?.cancel()
+        deferredRestart = nil
+        changingGeneration = nil
+        isChanging = false
+        return generation
+    }
+
+    private func beginChange(for generation: UInt64) {
+        guard isCurrentGeneration(generation) else { return }
+        changingGeneration = generation
+        isChanging = true
+    }
+
+    private func finishChange(for generation: UInt64) {
+        guard changingGeneration == generation else { return }
+        changingGeneration = nil
+        isChanging = false
+    }
+
+    private func isCurrentGeneration(_ generation: UInt64) -> Bool {
+        self.generation == generation
+    }
+
+    private func isCurrent(_ generation: UInt64) -> Bool {
+        isCurrentGeneration(generation) && started
+    }
+
+    private func isActive(_ generation: UInt64) -> Bool {
+        isCurrent(generation) && enabled
     }
 }

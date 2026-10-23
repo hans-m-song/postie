@@ -7,6 +7,8 @@ Updated 2026-10-21. Collection index/per-request layout, three variable scopes, 
 ```text
 ~/.config/postie/
   globals.json
+  automation.json       optional encrypted MCP token
+  workspace-index.json  optional ordering/access metadata
   snapshots/
     <snapshot-id>/
       snapshot.json
@@ -20,11 +22,11 @@ Updated 2026-10-21. Collection index/per-request layout, three variable scopes, 
 
 Collection and request IDs are UUIDs. A collection's directory name and a request's filename stem supply identity; JSON does not duplicate those IDs. Display names live in JSON, may repeat, and can change without renaming files. Explicit directory arguments override the default root.
 
-The optional root `workspace-index.json` version 1 stores collection order, per-snapshot grouping overrides and MCP exclusion tombstones. An absent index preserves legacy alphabetical order and captured snapshot grouping. Unknown metadata is preserved; malformed/unsupported indexes become read-only. MCP policies are additive request/collection metadata plus a global response-view default. Listener enablement/token configuration is app-local, outside the workspace.
+The optional root `workspace-index.json` version 1 stores collection order, per-snapshot grouping overrides and MCP exclusion tombstones. An absent index preserves legacy alphabetical order and captured snapshot grouping. Unknown metadata is preserved; malformed/unsupported indexes become read-only. MCP policies are additive request/collection metadata plus a global response-view default. Listener enablement and port are app-local preferences. Root `automation.json` version 1 stores the encrypted MCP bearer token; its private file mode is 0600. Publication is atomic and never overwrites an existing token file. Include this envelope when validating imported keys or deciding whether a new master key may be generated.
 
 Basic ordering and cross-collection moves are user-verified; restart/persistence verification remains pending. Moves preserve request UUID and exact file bytes, adopting destination inheritance. A `.moves` recovery journal publishes commit intent before applying destination/source/workspace afterimages; startup replays committed moves. Unresolved committed recovery blocks structural writes. Snapshot capture content/source labels remain unchanged; workspace grouping follows the move. Deletion of excluded sources first records retained snapshot exclusion. Snapshot enumeration issues block source deletion/moves so unknown captures cannot bypass those associations. Existing single-file create/edit/delete behavior below remains applicable.
 
-`globals.json` contains its format version and global variables. Each `collection.json` contains its format version, display name, collection variables, and an ordered `requests` array of request IDs. Each request file contains its format version, display name, method, URL, ordered query/header/path entries, body, authentication configuration, and request variables. Variable maps encode ordinary values as strings and secrets as `{ "version": 1, "combined": "Base64 sealed box" }`. Auth contains kind/username and optional encrypted password/token envelopes. Only the application key is in Keychain. See encryption.md.
+`globals.json` contains its format version and global variables. Each `collection.json` contains its format version, display name, collection variables, and an ordered `requests` array of request IDs. Each request file contains its format version, display name, method, URL, ordered query/header/path entries, body, authentication configuration, and request variables. Variable maps encode ordinary values as strings and secrets as `{ "version": 1, "combined": "Base64 sealed box" }`. Auth contains kind/username and optional encrypted password/token envelopes. The application key remains in Keychain; an existing legacy MCP token entry is retained unused after migration. See encryption.md.
 
 Collection settings add ordered `headers` and `authentication` fields, defaulting to empty/None when absent. Request `inheritsCollectionAuthentication` defaults to false when reading older files; AppModel explicitly sets it true for newly created requests. Existing explicit auth does not silently change. Collection variables/headers/auth save together in one atomic metadata replacement, preserving current name/index and unrelated metadata. See collection-settings.md for override and disabled-row suppression rules.
 

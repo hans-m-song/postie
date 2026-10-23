@@ -1,6 +1,6 @@
 # Encryption
 
-Updated 2026-10-19. User authorised the straightforward M3 at-rest design; implementation and verification are tracked in implementation-m3-m4.md. No existing-data migration is performed. Snapshot encryption is implemented locally; see snapshot-implementation.md for its versioned contract. See review.md for earlier design history.
+Updated 2026-10-23. User authorised the straightforward M3 at-rest design; implementation and verification are tracked in implementation-m3-m4.md. Snapshot encryption is implemented locally; see snapshot-implementation.md for its versioned contract. T118 adds migration of the legacy MCP token into encrypted workspace storage. See review.md for earlier design history.
 
 ## Purpose and limits
 
@@ -41,6 +41,10 @@ The retained exchange captures URL, ordered query/header and body templates, eff
 - Losing the key makes encrypted values unrecoverable. Copying JSON alone is not a usable backup of secrets. T100 manual workspace-key import/export was implemented and user-verified on 2026-10-20; it does not rotate/reset a key or imply automatic sync. Preserve old keys if a future rotation is introduced.
 
 ## Manual key transfer — T100
+
+The encrypted MCP bearer in `automation.json` uses the exact same vault as variables, authentication and snapshot contexts. Its envelope participates in missing-key protection and import validation, including when it is the workspace's only ciphertext. Its legacy Keychain entry is retained but not consulted after migration. T119 key rotation and re-encryption of all these encrypted records is explicitly deferred; importing a key does not rotate it.
+
+User verification, 2026-10-23: the current build no longer requests separate MCP Keychain access. T118 is accepted for local check-in. This confirms the reported prompt behaviour, not a guarantee that future ad-hoc rebuilds never require workspace-key authorization.
 
 Settings → Encryption Key offers explicit import/export of the existing 32-byte workspace key. Base64 text is the portable representation; import also accepts a raw 32-byte or Base64 key file, bounded to 4 KiB. Candidate validation authenticates existing current/durable encrypted configuration and snapshot context before saving. If there is no encrypted data yet, only key format/length and existing-key compatibility can be verified. A different stored or active cached key is not overwritten; repeated import of the same key is idempotent. Export reads the existing key without creating one, respects Keychain errors and retains transient display/input only. Copy and Save are explicit actions. Exported files are Base64 plaintext with mode 0600 and exclusive creation; pre-existing files are not overwritten. No implicit plaintext key files, autosave or key logging.
 

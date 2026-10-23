@@ -1279,6 +1279,7 @@ final class AppModel: ObservableObject {
     private var preparationTasks: [RequestIdentity: Task<Void, Never>] = [:]
     private var store: CollectionStore?
     private var snapshotStore: SnapshotStore?
+    private var mcpTokenStore: EncryptedMCPTokenStore?
     private var executionManager: HTTPExecutionManager?
     private var responseBodyResources: [UUID: ResponseBodyResource] = [:]
     private var deletingBodySnapshotIDs: Set<UUID> = []
@@ -1302,7 +1303,11 @@ final class AppModel: ObservableObject {
     private var automationRunOutcomeOrder: [RequestIdentity] = []
     private let maximumAutomationRunOutcomes = 256
 
-    init(arguments: [String] = ProcessInfo.processInfo.arguments, secretVault: SecretVault? = nil) {
+    init(
+        arguments: [String] = ProcessInfo.processInfo.arguments,
+        secretVault: SecretVault? = nil,
+        legacyMCPKeyStore: (any ApplicationKeyStore)? = nil
+    ) {
         self.secretVault =
             secretVault
             ?? SecretVault(
@@ -1312,6 +1317,15 @@ final class AppModel: ObservableObject {
         do {
             let directories = try Self.directories(from: arguments)
             store = try CollectionStore(rootURL: directories.data)
+            mcpTokenStore = EncryptedMCPTokenStore(
+                rootURL: directories.data,
+                vault: self.secretVault,
+                legacyKeyStore: legacyMCPKeyStore
+                    ?? KeychainApplicationKeyStore(
+                        service: (Bundle.main.bundleIdentifier ?? "dev.postie") + ".mcp-access",
+                        account: "bearer-token-v1"
+                    )
+            )
             snapshotStore = SnapshotStore(
                 rootURL: directories.data.appendingPathComponent("snapshots", isDirectory: true),
                 vault: self.secretVault
@@ -2984,6 +2998,33 @@ final class AppModel: ObservableObject {
         try await secretVault.exportKey()
     }
 
+    func mcpBearerToken() async throws -> String {
+        await initialWorkspaceLoadTask?.value
+        guard workspaceLoaded, !isTerminating, let mcpTokenStore else {
+            throw AutomationFailure(.unavailable, "The workspace is unavailable.")
+        }
+        let result = AutomationResultBox<String>()
+        await withWorkspaceIndexMutation { [self] in
+            guard workspaceLoaded, !isTerminating else {
+                result.result = .failure(AutomationFailure(.unavailable, "The workspace is unavailable."))
+                return
+            }
+            do {
+                let token = try await mcpTokenStore.token()
+                await secretVault.setAllowsKeyCreation(false)
+                markWorkspaceChanged()
+                guard !isTerminating else { throw CancellationError() }
+                result.result = .success(token)
+            } catch {
+                result.result = .failure(error)
+            }
+        }
+        guard let value = result.result else {
+            throw AutomationFailure(.unavailable, "The MCP access token is unavailable.")
+        }
+        return try value.get()
+    }
+
     func importEncryptionKey(_ key: Data) async throws -> SecretKeyImportResult {
         let envelopes = try await encryptionEnvelopesForKeyImport()
         let result = try await secretVault.importKey(key, validating: envelopes)
@@ -3118,7 +3159,7 @@ final class AppModel: ObservableObject {
     }
 
     private func encryptionEnvelopesForKeyImport() async throws -> [SecretEnvelope] {
-        guard workspaceLoaded, !isTerminating, let store, let snapshotStore else {
+        guard workspaceLoaded, !isTerminating, let store, let snapshotStore, let mcpTokenStore else {
             throw EncryptionKeyTransferError.workspaceUnavailable
         }
 
@@ -3129,6 +3170,12 @@ final class AppModel: ObservableObject {
         let currentStorageIssues = storageIssues
         let currentSnapshotStorageIssues = snapshotStorageIssues
         let currentSnapshotLoadError = snapshotLoadError
+        let tokenEnvelope: SecretEnvelope?
+        do {
+            tokenEnvelope = try await mcpTokenStore.storedEnvelope()
+        } catch {
+            throw EncryptionKeyTransferError.storageNeedsRepair
+        }
         guard !globalVariablesAreReadOnly, !globalOptionsAreReadOnly,
             !currentCollections.contains(where: \.isReadOnly), currentStorageIssues.isEmpty,
             currentSnapshotStorageIssues.isEmpty, currentSnapshotLoadError == nil,
@@ -3156,11 +3203,19 @@ final class AppModel: ObservableObject {
             throw EncryptionKeyTransferError.storageNeedsRepair
         }
 
+        let latestTokenEnvelope: SecretEnvelope?
+        do {
+            latestTokenEnvelope = try await mcpTokenStore.storedEnvelope()
+        } catch {
+            throw EncryptionKeyTransferError.storageNeedsRepair
+        }
+
         guard workspaceLoaded, !isTerminating,
             globalVariables == currentGlobals, collections == currentCollections,
             drafts == currentDrafts, snapshots == currentSnapshots,
             storageIssues == currentStorageIssues, snapshotStorageIssues == currentSnapshotStorageIssues,
             snapshotLoadError == currentSnapshotLoadError,
+            tokenEnvelope == latestTokenEnvelope,
             !globalVariablesAreReadOnly, !globalOptionsAreReadOnly,
             !collections.contains(where: \.isReadOnly), variableSaveErrors.isEmpty,
             scopeSaveErrors.isEmpty, autosaveErrors.isEmpty
@@ -3176,7 +3231,7 @@ final class AppModel: ObservableObject {
         for request in currentDrafts.values {
             envelopes += Self.encryptedEnvelopes(in: request)
         }
-        return envelopes + snapshotEnvelopes
+        return envelopes + snapshotEnvelopes + (tokenEnvelope.map { [$0] } ?? [])
     }
 
     private static func encryptedEnvelopes(in values: VariableValues) -> [SecretEnvelope] {
@@ -3246,6 +3301,16 @@ final class AppModel: ObservableObject {
                     snapshotLoad = nil
                     snapshotError = error.localizedDescription
                 }
+                let tokenKeyStateIsSafe: Bool
+                do {
+                    if let mcpTokenStore {
+                        tokenKeyStateIsSafe = try await mcpTokenStore.storedEnvelope() == nil
+                    } else {
+                        tokenKeyStateIsSafe = false
+                    }
+                } catch {
+                    tokenKeyStateIsSafe = false
+                }
                 guard revision == workspaceRevision else { continue }
                 let available = Dictionary(
                     uniqueKeysWithValues: loaded.collections.flatMap { collection in
@@ -3300,7 +3365,7 @@ final class AppModel: ObservableObject {
                     snapshotError == nil && snapshotLoad?.containsEncryptedData == false
                     && snapshotLoad?.issues.isEmpty == true
                 await secretVault.setAllowsKeyCreation(
-                    !hasCiphertext && snapshotKeyStateIsSafe && loaded.issues.isEmpty
+                    !hasCiphertext && snapshotKeyStateIsSafe && tokenKeyStateIsSafe && loaded.issues.isEmpty
                         && !loaded.globalVariablesAreReadOnly && !loaded.collections.contains(where: \.isReadOnly))
                 guard revision == workspaceRevision else {
                     await secretVault.setAllowsKeyCreation(false)

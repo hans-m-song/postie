@@ -26,8 +26,10 @@ struct AutomationSettingsView: View {
                 }
                 .disabled(service.isChanging || (Int(port).map { !(1024...65535).contains($0) } ?? true))
             }
-            Button("Copy Codex configuration (includes access token)") { service.copyCodexConfiguration() }
-                .disabled(!service.enabled || service.isChanging)
+            Button("Copy Codex configuration (includes access token)") {
+                Task { await service.copyCodexConfiguration() }
+            }
+            .disabled(!service.enabled || service.isChanging)
             Picker(
                 "MCP response viewing",
                 selection: Binding(
