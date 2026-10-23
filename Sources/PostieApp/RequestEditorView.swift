@@ -113,6 +113,7 @@ struct RequestToolbar: View {
                 .disabled(!model.canEdit(identity))
                 .frame(minWidth: 0, maxWidth: .infinity)
                 .layoutPriority(1)
+                CopyCURLButton(identity: identity)
                 Button {
                     model.startRequest(identity)
                 } label: {

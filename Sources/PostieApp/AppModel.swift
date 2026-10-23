@@ -2600,6 +2600,29 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func curlCommand(for identity: RequestIdentity) async throws -> String {
+        guard workspaceLoaded, !isTerminating,
+            let original = request(for: identity),
+            let collection = collection(for: identity)
+        else { throw ConfigurationEditError.unavailable }
+
+        let context = variableContext(for: identity)
+        let defaults = CollectionRequestDefaults(headers: collection.headers, authentication: collection.authentication)
+        let options = requestOptionOverrides(for: identity).resolve(against: globalOptions)
+        var configuration = original
+        configuration.options = options
+        let prepared = try await RequestPreparer.prepare(
+            configuration, context: context, decryptor: secretVault, collection: defaults)
+        try Task.checkCancellation()
+        guard !isTerminating, request(for: identity) == original,
+            variableContext(for: identity) == context,
+            self.collection(for: identity)?.headers == defaults.headers,
+            self.collection(for: identity)?.authentication == defaults.authentication,
+            requestOptionOverrides(for: identity).resolve(against: globalOptions) == options
+        else { throw ConfigurationEditError.unavailable }
+        return try CURLExport.command(for: prepared, configuration: configuration)
+    }
+
     func startRequest(_ identity: RequestIdentity) {
         guard canEdit(identity),
             activeRuns[identity] == nil,

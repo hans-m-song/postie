@@ -7,6 +7,70 @@ import PostieCore
 
 @MainActor
 final class AppModelTests: XCTestCase {
+    func testCURLExportUsesCurrentEffectiveInputsWithoutStartingRequest() async throws {
+        let root = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = try makeModel(root: root, secretVault: SecretVault(keyStore: AppModelKeyStore()))
+        await model.createCollection(name: "Export fixture")
+        let collectionID = try XCTUnwrap(model.collections.first?.id)
+        await model.createRequest(in: collectionID)
+        let identity = try XCTUnwrap(model.selectedIdentity)
+        try model.setPlainVariable(name: "host", value: "export.example.invalid", owner: .global)
+        try await model.setVariable(name: "key", value: "synthetic-export-key", isSecret: true, owner: .global)
+        model.updateCollectionHeaders([HTTPField(name: "X-API-Key", value: "{{key}}")], in: collectionID)
+        model.updateGlobalOptions(HTTPOptions(followRedirects: true, inactivityTimeout: 12, overallTimeout: 24))
+        model.updateDraft(identity) {
+            $0.url = "https://{{host}}/:code"
+            $0.pathParameters = [HTTPField(name: "code", value: "QLD")]
+            $0.headers = [HTTPField(name: "X-Local", value: "current edit")]
+        }
+        model.updateQuery([HTTPField(name: "filter", value: "live")], for: identity)
+        let before = model.request(for: identity)
+        let command = try await model.curlCommand(for: identity)
+        XCTAssertTrue(command.contains("https://export.example.invalid/QLD?filter=live"))
+        XCTAssertTrue(command.contains("synthetic-export-key"))
+        XCTAssertTrue(command.contains("current edit"))
+        XCTAssertTrue(command.contains("--location"))
+        XCTAssertFalse(command.contains("{{"))
+        XCTAssertEqual(model.request(for: identity), before)
+        XCTAssertTrue(model.activeRuns.isEmpty)
+        XCTAssertNil(model.latestResponses[identity])
+        let terminated = await model.prepareForTermination()
+        XCTAssertTrue(terminated)
+    }
+
+    func testCURLExportRejectsUnresolvedInputsAndCancellationWithoutStartingRequest() async throws {
+        let root = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = try makeModel(root: root, secretVault: SecretVault(keyStore: AppModelKeyStore()))
+        await model.createCollection(name: "Export failure fixture")
+        let collectionID = try XCTUnwrap(model.collections.first?.id)
+        await model.createRequest(in: collectionID)
+        let identity = try XCTUnwrap(model.selectedIdentity)
+        model.updateDraft(identity) { $0.url = "https://{{missing}}/" }
+        do {
+            _ = try await model.curlCommand(for: identity)
+            XCTFail("Unresolved inputs must prevent cURL export.")
+        } catch {
+            XCTAssertEqual(error.localizedDescription, "Variable 'missing' is missing.")
+        }
+        model.updateDraft(identity) { $0.url = "https://export.example.invalid/" }
+        let export = Task { @MainActor in
+            withUnsafeCurrentTask { $0?.cancel() }
+            return try await model.curlCommand(for: identity)
+        }
+        do {
+            _ = try await export.value
+            XCTFail("Canceled export must not produce a command.")
+        } catch {
+            XCTAssertTrue(error is CancellationError)
+        }
+        XCTAssertTrue(model.activeRuns.isEmpty)
+        XCTAssertNil(model.latestResponses[identity])
+        let terminated = await model.prepareForTermination()
+        XCTAssertTrue(terminated)
+    }
+
     func testVariableInspectionUsesEffectiveDefinitionAndRejectsStaleNavigation() async throws {
         let root = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
