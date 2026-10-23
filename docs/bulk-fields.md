@@ -1,0 +1,15 @@
+# Bulk query and header fields — T-76
+
+Implemented and user-accepted 2026-10-23, including the title/count-row switcher placement. Individual edge cases retain their documented synthetic rather than native verification.
+
+Each query/header editor offers Table and Bulk views. Bulk edits local fields in a separate draft. Apply replaces the field array through its existing binding; Cancel discards the draft. Query changes therefore use the existing URL synchronization. A changed underlying field array blocks stale Apply and offers reload. Navigating to another owner resets the editor identity. Inherited and authentication headers remain read-only with their existing source/reveal actions.
+
+Header-placement follow-up, 2026-10-23: the compact Table/Bulk picker shares the section title/item-count row rather than occupying a separate content row. Editable query/header accordions, collection headers and captured response/history/snapshot lists use the same mode enum and picker. The picker is a sibling of each collapse button, so changing display mode does not toggle expansion. Fifteen existing parsing/masking regressions, lint, release build and strict signature pass; the user confirmed the revised UI is working.
+
+The text format is one `name: value` per line. `# ` prefixes a disabled row. Empty values, duplicate names, row order, templates and disabled rows survive switching. Backslash escapes preserve literal backslashes, delimiter colons in names, line breaks, tabs and edge whitespace. A literal name starting `# ` is escaped. Invalid escape sequences or missing delimiters produce a line-numbered error without changing the saved model. Existing row identity and query-encoding metadata are reconciled when applying, preserving unchanged raw query spelling and flag parameters.
+
+Read-only bulk alternatives cover live response, redirect, session-history and snapshot request/response header lists, plus captured query lists. They allow text selection; they do not mutate captured data. Sensitive values and secret names are masked until explicit reveal. Reveal state resets when the data/policy changes or the view is left. Snapshot query fields retain their existing sensitivity classification.
+
+Verification boundaries: unit tests target reversible text, malformed input, row reconciliation, query URL preservation and masking. No actual credentials or external endpoints are needed. Native Table/Bulk/Apply/Cancel interactions and user acceptance remain separate from automated checks.
+
+Verification 2026-10-23: the full461-case suite passed459tests with two existing case-sensitive filesystem skips; strict formatting/syntax pass. Source and blind-test reviews corrected CRLF grapheme handling and captured template-header sensitivity mapping. The codec uses Unicode scalars to preserve CRLF; template masking uses captured inputs, never current live variables, and masks values conservatively if context is unavailable. Read-only reveal is bound to the exact field/sensitivity/source context, so new data is masked immediately.

@@ -6,6 +6,7 @@ struct FieldTable: View {
     let title: String
     var showsTitle = true
     @Binding var fields: [HTTPField]
+    @Binding var presentation: HTTPFieldDisplayMode
     let keyPlaceholder: String
     let valuePlaceholder: String
     let availableVariables: Set<String>
@@ -19,6 +20,11 @@ struct FieldTable: View {
     var parameterWrapping = false
     @State private var trailingField = HTTPField()
     @State private var focusedField: FieldFocus?
+    @State private var bulkDraftText = ""
+    @State private var bulkBaselineFields: [HTTPField] = []
+    @State private var bulkDraftInitialized = false
+    @State private var bulkValidationError: String?
+    @State private var bulkConflictMessage: String?
 
     private enum FieldFocus: Hashable {
         case name(UUID)
@@ -28,44 +34,89 @@ struct FieldTable: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
             if showsTitle {
-                Text(title)
-                    .font(.headline)
+                HStack(alignment: .firstTextBaseline) {
+                    Text(title)
+                        .font(.headline)
+
+                    Spacer(minLength: 0)
+
+                    HTTPFieldDisplayPicker(mode: $presentation)
+                }
             }
 
             VStack(spacing: 0) {
-                HStack(spacing: 8) {
-                    Color.clear.frame(width: 26)
-                    Text(keyPlaceholder)
-                        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-                    Divider().frame(height: 19)
-                    Text(valuePlaceholder)
-                        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-                    Color.clear.frame(width: 26)
+                if presentation == .table {
+                    HStack(spacing: 8) {
+                        Color.clear.frame(width: 26)
+                        Text(keyPlaceholder)
+                            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+                        Divider().frame(height: 19)
+                        Text(valuePlaceholder)
+                            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+                        Color.clear.frame(width: 26)
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 7)
+                    .background(.quaternary)
                 }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 7)
-                .background(.quaternary)
 
-                ForEach(inheritedFields) { field in
-                    inheritedRow(field)
+                switch presentation {
+                case .table:
+                    ForEach(inheritedFields) { field in
+                        inheritedRow(field)
+                    }
+                case .bulk:
+                    if !inheritedFields.isEmpty {
+                        ReadOnlyBulkFieldText(
+                            title: "\(inheritedFieldSourceLabel) headers (read only)",
+                            fields: inheritedFields,
+                            onOpenSource: onOpenInheritedSource
+                        )
+                    }
                 }
 
                 ForEach(derivedRows) { row in
                     DerivedHeaderRow(presentation: row, resetKey: derivedRowsResetKey?.uuidString ?? row.id)
                 }
 
-                ForEach(fields + [trailingField]) { field in
-                    editableRow(field, isTrailingField: field.id == trailingField.id)
+                switch presentation {
+                case .table:
+                    ForEach(fields + [trailingField]) { field in
+                        editableRow(field, isTrailingField: field.id == trailingField.id)
+                    }
+                case .bulk:
+                    BulkFieldEditor(
+                        text: $bulkDraftText,
+                        validationError: bulkValidationError,
+                        conflictMessage: bulkConflictMessage,
+                        onApply: applyBulkDraft,
+                        onCancel: cancelBulkDraft,
+                        onReload: reloadBulkDraft
+                    )
                 }
-
             }
             .overlay {
                 RoundedRectangle(cornerRadius: 7)
                     .stroke(.quaternary, lineWidth: 1)
             }
             .clipShape(RoundedRectangle(cornerRadius: 7))
+        }
+        .onAppear {
+            guard !bulkDraftInitialized else { return }
+            resetBulkDraft(to: fields)
+        }
+        .onChange(of: fields) { _, updatedFields in
+            handleExternalFieldChange(updatedFields)
+        }
+        .onChange(of: bulkDraftText) { _, _ in
+            bulkValidationError = nil
+        }
+        .onDisappear {
+            guard bulkDraftText == HTTPFieldBulkText.encode(bulkBaselineFields) else { return }
+            resetBulkDraft(to: fields)
+            presentation = .table
         }
     }
 
@@ -256,6 +307,88 @@ struct FieldTable: View {
                 }
             }
         )
+    }
+
+    private func handleExternalFieldChange(_ updatedFields: [HTTPField]) {
+        guard bulkDraftInitialized else { return }
+        if updatedFields == bulkBaselineFields {
+            bulkConflictMessage = nil
+            return
+        }
+        guard bulkDraftText == HTTPFieldBulkText.encode(bulkBaselineFields) else {
+            bulkConflictMessage = "Fields changed elsewhere. Your draft is preserved, but Apply is paused."
+            return
+        }
+
+        resetBulkDraft(to: updatedFields)
+    }
+
+    private func resetBulkDraft(to updatedFields: [HTTPField]) {
+        bulkBaselineFields = updatedFields
+        bulkDraftText = HTTPFieldBulkText.encode(updatedFields)
+        bulkDraftInitialized = true
+        bulkValidationError = nil
+        bulkConflictMessage = nil
+    }
+
+    private func applyBulkDraft() {
+        guard bulkConflictMessage == nil else { return }
+        guard fields == bulkBaselineFields else {
+            bulkConflictMessage = "Fields changed elsewhere. Your draft is preserved, but Apply is paused."
+            return
+        }
+
+        do {
+            let decodedFields = try HTTPFieldBulkText.decode(bulkDraftText)
+            fields = HTTPFieldBulkText.reconcile(decodedFields, against: bulkBaselineFields)
+            resetBulkDraft(to: fields)
+            presentation = .table
+        } catch let error as LocalizedError {
+            bulkValidationError = error.errorDescription ?? "The bulk field text is invalid."
+        } catch {
+            bulkValidationError = "The bulk field text is invalid."
+        }
+    }
+
+    private func cancelBulkDraft() {
+        resetBulkDraft(to: fields)
+        presentation = .table
+    }
+
+    private func reloadBulkDraft() {
+        resetBulkDraft(to: fields)
+    }
+}
+
+private struct ReadOnlyBulkFieldText: View {
+    let title: String
+    let fields: [HTTPField]
+    let onOpenSource: (() -> Void)?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(title)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Spacer()
+
+                if let onOpenSource {
+                    Button("Open collection headers", action: onOpenSource)
+                        .buttonStyle(.borderless)
+                }
+            }
+
+            Text(HTTPFieldBulkText.encode(fields))
+                .font(.system(.body, design: .monospaced))
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(8)
+                .background(.quaternary)
+                .clipShape(RoundedRectangle(cornerRadius: 5))
+        }
+        .padding(8)
     }
 }
 

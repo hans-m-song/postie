@@ -213,14 +213,10 @@ private struct ResponseExchangeView: View {
 
             DisclosureGroup(isExpanded: $isFinalExpanded) {
                 VStack(alignment: .leading, spacing: 14) {
-                    DisclosureGroup("Request headers (\(response.requestHeaders.count))") {
-                        HeaderTable(
-                            fields: response.requestHeaders, sensitiveNames: response.sensitiveRequestHeaderNames,
-                            secretNames: response.secretRequestHeaderNames, sources: response.requestHeaderSources
-                        )
-                        .padding(.top, 7)
-                    }
-                    .disclosureGroupStyle(PaddedDisclosureGroupStyle())
+                    ExchangeHeaderGroup(
+                        title: "Request headers", fields: response.requestHeaders,
+                        sensitiveNames: response.sensitiveRequestHeaderNames,
+                        secretNames: response.secretRequestHeaderNames, sources: response.requestHeaderSources)
 
                     ExchangeHeaderGroup(title: "Response headers", fields: response.responseHeaders)
 
@@ -349,69 +345,104 @@ private struct ExchangeHeaderGroup: View {
     var secretNames: Set<String> = []
     var sources: [String: HTTPHeaderSource] = [:]
     @State private var isExpanded = false
+    @State private var displayMode: HTTPFieldDisplayMode = .table
 
     var body: some View {
-        DisclosureGroup(isExpanded: $isExpanded) {
-            HeaderTable(fields: fields, sensitiveNames: sensitiveNames, secretNames: secretNames, sources: sources)
-                .padding(.top, 7)
-        } label: {
-            HStack {
-                Text("\(title) (\(fields.count))")
-                    .font(.headline)
-                Spacer(minLength: 0)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.15)) { isExpanded.toggle() }
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 14, height: 20)
+                            .accessibilityHidden(true)
+                        Text("\(title) (\(fields.count))")
+                            .font(.headline)
+                        Spacer(minLength: 0)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityValue(isExpanded ? Text("Expanded") : Text("Collapsed"))
+                .accessibilityHint(isExpanded ? Text("Collapse this section") : Text("Expand this section"))
+                if !fields.isEmpty { HTTPFieldDisplayPicker(mode: $displayMode) }
+            }
+            .padding(.horizontal, 11)
+            .padding(.vertical, 10)
+            if isExpanded {
+                HeaderTable(
+                    fields: fields, mode: $displayMode, sensitiveNames: sensitiveNames,
+                    secretNames: secretNames, sources: sources
+                )
+                .padding(.horizontal, 11)
+                .padding(.bottom, 11)
             }
         }
-        .disclosureGroupStyle(PaddedDisclosureGroupStyle())
+        .background(.background, in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8).stroke(.quaternary, lineWidth: 1)
+        }
     }
 }
 
 private struct HeaderTable: View {
     let fields: [HTTPField]
+    @Binding var mode: HTTPFieldDisplayMode
     var sensitiveNames: Set<String> = []
     var secretNames: Set<String> = []
     var sources: [String: HTTPHeaderSource] = [:]
 
-    private let standardSensitiveNames: Set<String> = ["authorization", "proxy-authorization", "cookie", "set-cookie"]
-
     var body: some View {
-        VStack(spacing: 0) {
-            if !fields.isEmpty {
-                HStack(spacing: 10) {
-                    Text("Name")
-                        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-                    Divider().frame(height: 19)
-                    Text("Value")
-                        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 9)
-                .padding(.vertical, 7)
-                .background(.quaternary)
-            }
-            if fields.isEmpty {
-                Text("No headers exposed by URLSession")
+        ReadOnlyHTTPFieldsView(
+            fields: fields,
+            mode: $mode,
+            sensitiveNames: sensitiveNames,
+            secretNames: secretNames,
+            sources: sources,
+            masksStandardHeaderNames: true,
+            hidesSecretFieldNames: true,
+            sensitiveItemTitle: "headers"
+        ) { effectiveSensitiveNames, normalizedSecretNames in
+            VStack(spacing: 0) {
+                if !fields.isEmpty {
+                    HStack(spacing: 10) {
+                        Text("Name")
+                            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+                        Divider().frame(height: 19)
+                        Text("Value")
+                            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+                    }
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(9)
-            }
-            ForEach(fields) { field in
-                ResponseHeaderRow(
-                    field: field,
-                    isSensitive: sensitiveNames.contains(field.name.lowercased())
-                        || standardSensitiveNames.contains(field.name.lowercased()),
-                    isNameSecret: secretNames.contains(field.name.lowercased()),
-                    source: sources[field.name.lowercased()]
-                )
-                .font(.system(.callout, design: .monospaced))
-                .padding(.horizontal, 9)
-                .padding(.vertical, 7)
-                if field.id != fields.last?.id {
-                    Divider()
+                    .padding(.vertical, 7)
+                    .background(.quaternary)
+                }
+                if fields.isEmpty {
+                    Text("No headers exposed by URLSession")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                ForEach(fields) { field in
+                    ResponseHeaderRow(
+                        field: field,
+                        isSensitive: effectiveSensitiveNames.contains(field.name.lowercased()),
+                        isNameSecret: normalizedSecretNames.contains(field.name.lowercased()),
+                        source: sources[field.name.lowercased()]
+                    )
+                    .font(.system(.callout, design: .monospaced))
+                    .padding(.vertical, 7)
+                    if field.id != fields.last?.id {
+                        Divider()
+                    }
                 }
             }
         }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 7)
         .background(.background, in: RoundedRectangle(cornerRadius: 7))
         .overlay {
             RoundedRectangle(cornerRadius: 7).stroke(.quaternary, lineWidth: 1)

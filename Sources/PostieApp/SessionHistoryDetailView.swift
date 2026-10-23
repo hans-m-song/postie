@@ -164,16 +164,20 @@ struct SessionHistoryDetailView: View {
     }
 
     private func templateSection(_ capture: SnapshotPreparationCapture) -> some View {
-        SessionHistoryInformationSection(title: "Request template") {
+        let sensitivity = CapturedHeaderSensitivity.resolve(
+            fields: capture.template.headers, inputs: capture.referencedInputs,
+            sensitiveNames: capture.submitted.sensitiveNames, secretNames: capture.submitted.secretNames)
+        return SessionHistoryInformationSection(title: "Request template") {
             SessionHistoryValueLine(label: "Method", value: capture.template.method)
             SessionHistoryValueLine(label: "URL template", value: capture.template.url)
             SessionHistoryFieldList(title: "Path parameters", fields: capture.template.pathParameters)
-            SessionHistoryFieldList(title: "Query parameters", fields: capture.template.query)
+            SessionHistoryFieldList(
+                title: "Query parameters", fields: capture.template.query, supportsBulkView: true)
             SessionHistoryHeaderList(
                 title: "Header templates",
                 fields: capture.template.headers,
-                sensitiveNames: capture.submitted.sensitiveNames,
-                secretNames: capture.submitted.secretNames,
+                sensitiveNames: sensitivity.sensitiveNames,
+                secretNames: sensitivity.secretNames,
                 sources: capture.submitted.headerSources
             )
             if let upload = capture.template.uploadBody {
@@ -241,16 +245,20 @@ struct SessionHistoryDetailView: View {
     }
 
     private func requestConfigurationSection(_ request: HTTPRequestConfiguration) -> some View {
-        SessionHistoryInformationSection(title: "Request configuration") {
+        let sensitivity = CapturedHeaderSensitivity.resolve(
+            fields: request.headers, inputs: nil,
+            sensitiveNames: entry.response?.sensitiveRequestHeaderNames ?? [],
+            secretNames: entry.response?.secretRequestHeaderNames ?? [])
+        return SessionHistoryInformationSection(title: "Request configuration") {
             SessionHistoryValueLine(label: "Method", value: request.method)
             SessionHistoryValueLine(label: "URL template", value: request.url)
             SessionHistoryFieldList(title: "Path parameters", fields: request.pathParameters)
-            SessionHistoryFieldList(title: "Query parameters", fields: request.query)
+            SessionHistoryFieldList(title: "Query parameters", fields: request.query, supportsBulkView: true)
             SessionHistoryHeaderList(
                 title: "Headers",
                 fields: request.headers,
-                sensitiveNames: entry.response?.sensitiveRequestHeaderNames ?? [],
-                secretNames: entry.response?.secretRequestHeaderNames ?? [],
+                sensitiveNames: sensitivity.sensitiveNames,
+                secretNames: sensitivity.secretNames,
                 sources: entry.response?.requestHeaderSources ?? [:]
             )
             if request.bodyEnabled && request.bodyKind != .text {
@@ -499,36 +507,56 @@ private struct SessionHistoryTextPreview {
 private struct SessionHistoryFieldList: View {
     let title: String
     let fields: [HTTPField]
+    var supportsBulkView = false
+    @State private var displayMode: HTTPFieldDisplayMode = .table
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("\(title) (\(fields.count))")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            if supportsBulkView && !fields.isEmpty {
+                HStack {
+                    titleLabel
+                    Spacer(minLength: 8)
+                    HTTPFieldDisplayPicker(mode: $displayMode)
+                }
                 .padding(.bottom, 5)
+            } else {
+                titleLabel.padding(.bottom, 5)
+            }
             if fields.isEmpty {
                 Text("None")
                     .font(.callout)
                     .foregroundStyle(.secondary)
+            } else if supportsBulkView {
+                ReadOnlyHTTPFieldsView(fields: fields, mode: $displayMode) { _, _ in fieldRows }
             } else {
-                ForEach(fields) { field in
-                    HStack(alignment: .top, spacing: 8) {
-                        Text(field.name.isEmpty ? "(empty name)" : field.name)
-                            .frame(width: 112, alignment: .leading)
-                        Text(field.value.isEmpty ? "(empty)" : field.value)
-                            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-                        if !field.isEnabled {
-                            Text("Disabled")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .font(.system(.callout, design: .monospaced))
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.vertical, 5)
-                    if field.id != fields.last?.id { Divider() }
+                fieldRows
+            }
+        }
+    }
+
+    private var titleLabel: some View {
+        Text("\(title) (\(fields.count))")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+    }
+
+    private var fieldRows: some View {
+        ForEach(fields) { field in
+            HStack(alignment: .top, spacing: 8) {
+                Text(field.name.isEmpty ? "(empty name)" : field.name)
+                    .frame(width: 112, alignment: .leading)
+                Text(field.value.isEmpty ? "(empty)" : field.value)
+                    .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+                if !field.isEnabled {
+                    Text("Disabled")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                 }
             }
+            .font(.system(.callout, design: .monospaced))
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.vertical, 5)
+            if field.id != fields.last?.id { Divider() }
         }
     }
 }
@@ -539,36 +567,55 @@ private struct SessionHistoryHeaderList: View {
     var sensitiveNames: Set<String> = []
     var secretNames: Set<String> = []
     var sources: [String: HTTPHeaderSource] = [:]
-
-    private let standardSensitiveNames: Set<String> = [
-        "authorization", "proxy-authorization", "cookie", "cookie2", "set-cookie",
-    ]
+    @State private var displayMode: HTTPFieldDisplayMode = .table
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("\(title) (\(fields.count))")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            if fields.isEmpty {
+                titleLabel.padding(.bottom, 5)
+            } else {
+                HStack {
+                    titleLabel
+                    Spacer(minLength: 8)
+                    HTTPFieldDisplayPicker(mode: $displayMode)
+                }
                 .padding(.bottom, 5)
+            }
             if fields.isEmpty {
                 Text("No headers recorded")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(fields) { field in
-                    ResponseHeaderRow(
-                        field: field,
-                        isSensitive: standardSensitiveNames.contains(field.name.lowercased())
-                            || sensitiveNames.contains(field.name.lowercased()),
-                        isNameSecret: secretNames.contains(field.name.lowercased()),
-                        source: sources[field.name.lowercased()]
-                    )
-                    .font(.system(.callout, design: .monospaced))
-                    .padding(.vertical, 7)
-                    if field.id != fields.last?.id { Divider() }
+                ReadOnlyHTTPFieldsView(
+                    fields: fields,
+                    mode: $displayMode,
+                    sensitiveNames: sensitiveNames,
+                    secretNames: secretNames,
+                    sources: sources,
+                    masksStandardHeaderNames: true,
+                    hidesSecretFieldNames: true,
+                    sensitiveItemTitle: "headers"
+                ) { effectiveSensitiveNames, normalizedSecretNames in
+                    ForEach(fields) { field in
+                        ResponseHeaderRow(
+                            field: field,
+                            isSensitive: effectiveSensitiveNames.contains(field.name.lowercased()),
+                            isNameSecret: normalizedSecretNames.contains(field.name.lowercased()),
+                            source: sources[field.name.lowercased()]
+                        )
+                        .font(.system(.callout, design: .monospaced))
+                        .padding(.vertical, 7)
+                        if field.id != fields.last?.id { Divider() }
+                    }
                 }
             }
         }
+    }
+
+    private var titleLabel: some View {
+        Text("\(title) (\(fields.count))")
+            .font(.caption)
+            .foregroundStyle(.secondary)
     }
 }
 

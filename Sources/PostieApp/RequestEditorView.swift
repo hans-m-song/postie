@@ -165,6 +165,8 @@ struct RequestEditorView: View {
     let identity: RequestIdentity
     @State private var referencedVariableNames: [String] = []
     @State private var authenticationHeaderResetID = UUID()
+    @State private var queryFieldDisplayMode = HTTPFieldDisplayMode.table
+    @State private var headerFieldDisplayMode = HTTPFieldDisplayMode.table
 
     private var selectedSection: RequestEditorSection { model.requestEditorSection(for: identity) }
 
@@ -216,6 +218,8 @@ struct RequestEditorView: View {
         .onChange(of: identity) { oldIdentity, _ in
             discardSecretEdits(for: oldIdentity)
             referencedVariableNames = []
+            queryFieldDisplayMode = .table
+            headerFieldDisplayMode = .table
         }
         .onChange(of: authenticationHeaderResetKey) { _, _ in
             authenticationHeaderResetID = UUID()
@@ -327,12 +331,17 @@ struct RequestEditorView: View {
     private func requestTabContent(using proxy: ScrollViewProxy) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             accordion(
-                .query, title: "Query", summary: rowCount(model.request(for: identity)?.query.count ?? 0), using: proxy
+                .query,
+                title: "Query",
+                summary: rowCount(model.request(for: identity)?.query.count ?? 0),
+                displayMode: $queryFieldDisplayMode,
+                using: proxy
             ) {
                 FieldTable(
                     title: "Query parameters",
                     showsTitle: false,
                     fields: queryFieldsBinding,
+                    presentation: $queryFieldDisplayMode,
                     keyPlaceholder: "Name",
                     valuePlaceholder: "Value",
                     availableVariables: availableVariableNames,
@@ -357,6 +366,7 @@ struct RequestEditorView: View {
                 title: "Headers",
                 summary: headerSummary,
                 retainsContent: false,
+                displayMode: $headerFieldDisplayMode,
                 using: proxy
             ) {
                 if selectedSection == .request {
@@ -364,6 +374,7 @@ struct RequestEditorView: View {
                         title: "Request headers",
                         showsTitle: false,
                         fields: fieldsBinding(\.headers),
+                        presentation: $headerFieldDisplayMode,
                         keyPlaceholder: "Header",
                         valuePlaceholder: "Value",
                         availableVariables: availableVariableNames,
@@ -527,35 +538,43 @@ struct RequestEditorView: View {
         title: String,
         summary: String,
         retainsContent: Bool = true,
+        displayMode: Binding<HTTPFieldDisplayMode>? = nil,
         using proxy: ScrollViewProxy,
         @ViewBuilder content: () -> Content
     ) -> some View {
         let isExpanded = expansionState.isExpanded(section)
         VStack(spacing: 0) {
-            Button {
-                toggleAccordion(section, using: proxy)
-            } label: {
-                HStack(spacing: 9) {
-                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 12)
-                    Text(title)
-                        .font(.headline)
-                    Spacer(minLength: 12)
-                    Text(summary)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
+            HStack(spacing: 10) {
+                Button {
+                    toggleAccordion(section, using: proxy)
+                } label: {
+                    HStack(spacing: 9) {
+                        Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 12)
+                        Text(title)
+                            .font(.headline)
+                        Spacer(minLength: 12)
+                        Text(summary)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                    .padding(.vertical, 4)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
                 }
-                .padding(.vertical, 4)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
+                .buttonStyle(.plain)
+                .accessibilityHint(isExpanded ? "Collapse section" : "Expand section")
+                .id(section)
+
+                if let displayMode {
+                    HTTPFieldDisplayPicker(mode: displayMode)
+                        .disabled(!model.canEdit(identity))
+                }
             }
-            .buttonStyle(.plain)
-            .accessibilityHint(isExpanded ? "Collapse section" : "Expand section")
-            .id(section)
 
             if retainsContent || isExpanded {
                 content()

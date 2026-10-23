@@ -4,6 +4,7 @@ import PostieCore
 struct CollectionEditorView: View {
     @EnvironmentObject private var model: AppModel
     let collectionID: UUID
+    @State private var headerFieldDisplayMode = HTTPFieldDisplayMode.table
     private var section: CollectionEditorSection { model.collectionEditorSection }
 
     private var owner: VariableOwner { .collection(collectionID) }
@@ -56,9 +57,13 @@ struct CollectionEditorView: View {
                                     fields: Binding(
                                         get: { model.collection(id: collectionID)?.headers ?? [] },
                                         set: { model.updateCollectionHeaders($0, in: collectionID) }
-                                    ), keyPlaceholder: "Header", valuePlaceholder: "Value",
+                                    ),
+                                    presentation: $headerFieldDisplayMode,
+                                    keyPlaceholder: "Header", valuePlaceholder: "Value",
                                     availableVariables: availableVariables,
-                                    completionVariables: model.variableCompletions(for: owner), parameterWrapping: true),
+                                    completionVariables: model.variableCompletions(for: owner), parameterWrapping: true
+                                )
+                                .id(collectionID),
                                 active: section == .headers)
                             retained(
                                 AuthenticationEditor(collectionID: collectionID), active: section == .authentication)
@@ -85,6 +90,9 @@ struct CollectionEditorView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(.background)
+        .onChange(of: collectionID) { _, _ in
+            headerFieldDisplayMode = .table
+        }
         .onDisappear {
             model.discardAuthenticationSecretEdit(field: .password, owner: owner)
             model.discardAuthenticationSecretEdit(field: .token, owner: owner)
