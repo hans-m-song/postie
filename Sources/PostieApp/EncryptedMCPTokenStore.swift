@@ -111,7 +111,10 @@ actor EncryptedMCPTokenStore {
     }
 
     private static func validate(_ envelope: SecretEnvelope) throws {
-        guard envelope.version == 1 else {
+        guard
+            (envelope.version == 1 && envelope.keyID == nil)
+                || (envelope.version == 2 && envelope.keyID != nil)
+        else {
             throw SecretVaultError.unsupportedEnvelopeVersion
         }
         guard

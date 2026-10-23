@@ -355,7 +355,10 @@ public actor SnapshotStore {
     }
 
     private func validate(_ envelope: SecretEnvelope) throws {
-        guard envelope.version == 1 else { throw SnapshotStoreError.unsupportedVersion }
+        guard
+            (envelope.version == 1 && envelope.keyID == nil)
+                || (envelope.version == 2 && envelope.keyID != nil)
+        else { throw SnapshotStoreError.unsupportedVersion }
         guard let combined = Data(base64Encoded: envelope.combined),
             combined.base64EncodedString() == envelope.combined,
             combined.count >= 12 + 16

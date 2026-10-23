@@ -6,6 +6,8 @@ import UniformTypeIdentifiers
 struct EncryptionSettingsView: View {
     @EnvironmentObject private var model: AppModel
     @State private var activeSheet: TransferSheet?
+    @State private var confirmsRotation = false
+    @State private var rotationStatus: String?
 
     private enum TransferSheet: String, Identifiable {
         case importKey
@@ -31,7 +33,34 @@ struct EncryptionSettingsView: View {
                 Button("Export Key…") {
                     activeSheet = .exportKey
                 }
+                Button("Rotate Key…") { confirmsRotation = true }
+                    .disabled(!model.canRotateEncryptionKey)
             }
+            if model.isRotatingEncryptionKey {
+                ProgressView("Re-encrypting workspace…")
+            }
+            if let rotationStatus {
+                Text(rotationStatus)
+                    .font(.caption)
+                    .textSelection(.enabled)
+            }
+        }
+        .confirmationDialog("Rotate workspace encryption key?", isPresented: $confirmsRotation) {
+            Button("Rotate Key") {
+                rotationStatus = nil
+                Task {
+                    do {
+                        try await model.rotateEncryptionKey()
+                        rotationStatus = "The workspace key was rotated. Export the new key for future backups."
+                    } catch {
+                        rotationStatus = error.localizedDescription
+                    }
+                }
+            }
+        } message: {
+            Text(
+                "Encrypted variables, authentication, snapshot context and the MCP token will be re-encrypted. Previous keys are retained for old backups. Wait for active requests to finish before rotating."
+            )
         }
         .sheet(item: $activeSheet) { sheet in
             Group {

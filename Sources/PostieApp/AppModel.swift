@@ -66,7 +66,7 @@ private enum SnapshotSaveFailure: LocalizedError {
 
 extension AppModel {
     func automationReply(_ command: AutomationCommand, channel: AutomationChannel) async -> AutomationReply {
-        guard !isTerminating, workspaceLoaded else {
+        guard !workspaceMutationIsBlocked, workspaceLoaded else {
             return AutomationReply(
                 id: command.id, error: AutomationFailure(.unavailable, "The workspace is unavailable."))
         }
@@ -488,7 +488,7 @@ extension AppModel {
     }
 
     private func canContinueAutomationRequestUpdate(_ identity: RequestIdentity) -> Bool {
-        guard !isTerminating,
+        guard !workspaceMutationIsBlocked,
             let collection = collection(for: identity), !collection.isReadOnly,
             drafts[identity] != nil,
             activeRuns[identity] == nil,
@@ -944,7 +944,7 @@ extension AppModel {
         else {
             throw AutomationFailure(.conflict, "The request cannot save a snapshot in its current state.")
         }
-        guard !isTerminating, snapshotStore != nil, executionManager != nil else {
+        guard !workspaceMutationIsBlocked, snapshotStore != nil, executionManager != nil else {
             throw AutomationFailure(.unavailable, "Snapshot storage is unavailable.")
         }
         let normalizedName = name ?? Self.defaultSnapshotName(source: capturedSource, completedAt: response.completedAt)
@@ -1006,7 +1006,7 @@ extension AppModel {
         if isMCP(channel), snapshotIsMCPExcluded(snapshot) {
             throw AutomationFailure(.forbidden, "The snapshot is excluded from MCP access.")
         }
-        guard !isTerminating, let snapshotStore else {
+        guard !workspaceMutationIsBlocked, let snapshotStore else {
             throw AutomationFailure(.unavailable, "Snapshot storage is unavailable.")
         }
         guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
@@ -1030,7 +1030,7 @@ extension AppModel {
         if isMCP(channel), snapshotIsMCPExcluded(snapshot) {
             throw AutomationFailure(.forbidden, "The snapshot is excluded from MCP access.")
         }
-        guard !isTerminating, let snapshotStore else {
+        guard !workspaceMutationIsBlocked, let snapshotStore else {
             throw AutomationFailure(.unavailable, "Snapshot storage is unavailable.")
         }
 
@@ -1236,6 +1236,15 @@ final class AppModel: ObservableObject {
     @Published private(set) var now = Date()
     @Published private(set) var startupError: String?
     @Published private(set) var isTerminating = false
+    @Published private var keyRotationIsRunning = false
+    @Published private var encryptionLoadCount = 0
+    @Published private(set) var encryptionRecoveryRequired = false
+
+    var isRotatingEncryptionKey: Bool { keyRotationIsRunning || encryptionLoadCount > 0 }
+
+    var workspaceMutationIsBlocked: Bool {
+        isTerminating || isRotatingEncryptionKey || encryptionRecoveryRequired
+    }
     @Published private(set) var deletingCollections: Set<UUID> = []
     @Published private(set) var deletingRequests: Set<RequestIdentity> = []
     @Published private(set) var reconcilingRequests: Set<RequestIdentity> = []
@@ -1265,6 +1274,8 @@ final class AppModel: ObservableObject {
     }
 
     private let secretVault: SecretVault
+    private var keyRotation: WorkspaceKeyRotation?
+    private var keyPreparationTask: Task<Void, Error>?
     private var workspaceLoaded = false
     private var initialWorkspaceLoadTask: Task<Void, Never>?
     private var dirtyVariableOwners: Set<VariableOwner> = []
@@ -1306,7 +1317,8 @@ final class AppModel: ObservableObject {
     init(
         arguments: [String] = ProcessInfo.processInfo.arguments,
         secretVault: SecretVault? = nil,
-        legacyMCPKeyStore: (any ApplicationKeyStore)? = nil
+        legacyMCPKeyStore: (any ApplicationKeyStore)? = nil,
+        keyRotationCoordinator: WorkspaceKeyRotation? = nil
     ) {
         self.secretVault =
             secretVault
@@ -1317,6 +1329,8 @@ final class AppModel: ObservableObject {
         do {
             let directories = try Self.directories(from: arguments)
             store = try CollectionStore(rootURL: directories.data)
+            keyRotation =
+                keyRotationCoordinator ?? WorkspaceKeyRotation(rootURL: directories.data, vault: self.secretVault)
             mcpTokenStore = EncryptedMCPTokenStore(
                 rootURL: directories.data,
                 vault: self.secretVault,
@@ -1430,6 +1444,7 @@ final class AppModel: ObservableObject {
         return !collection.isReadOnly && !deletingCollections.contains(identity.collectionID)
             && !deletingRequests.contains(identity) && !reconcilingRequests.contains(identity)
             && !movingRequests.contains(identity) && !automationEditingRequests.contains(identity) && !isTerminating
+            && !isRotatingEncryptionKey && !encryptionRecoveryRequired
     }
 
     private var snapshotInventoryAllowsSourceMutation: Bool {
@@ -1437,7 +1452,7 @@ final class AppModel: ObservableObject {
     }
 
     var canReorderCollections: Bool {
-        workspaceLoaded && !workspaceIndexIsReadOnly && !isTerminating && collections.count > 1
+        workspaceLoaded && !workspaceIndexIsReadOnly && !workspaceMutationIsBlocked && collections.count > 1
     }
 
     func snapshotGrouping(for snapshot: SavedSnapshot) -> SnapshotGrouping {
@@ -1538,7 +1553,7 @@ final class AppModel: ObservableObject {
     }
 
     func selectSnapshot(_ id: UUID) {
-        guard !isTerminating, snapshots.contains(where: { $0.id == id }) else { return }
+        guard !workspaceMutationIsBlocked, snapshots.contains(where: { $0.id == id }) else { return }
         if selectedSnapshotID != id { clearSelectedSnapshotContext() }
         showsGlobalSettings = false
         variableDefinitionRequest = nil
@@ -1562,14 +1577,14 @@ final class AppModel: ObservableObject {
     }
 
     func showRequestSearch(query: String = "") {
-        guard !isTerminating else { return }
+        guard !workspaceMutationIsBlocked else { return }
         workspaceSearchQuery = query
         workspaceSearchFocusRequestID = UUID()
         showsRequestSearch = true
     }
 
     func showWorkspaceVariable(owner: VariableOwner, name: String) {
-        guard !isTerminating else { return }
+        guard !workspaceMutationIsBlocked else { return }
         switch owner {
         case .global:
             guard globalVariables[name] != nil else { return }
@@ -1599,14 +1614,14 @@ final class AppModel: ObservableObject {
     }
 
     func updateGlobalOptions(_ options: HTTPOptions) {
-        guard workspaceLoaded, !globalOptionsAreReadOnly, !isTerminating else { return }
+        guard workspaceLoaded, !globalOptionsAreReadOnly, !workspaceMutationIsBlocked else { return }
         globalOptions = options
         markWorkspaceChanged()
         scheduleVariableSave(.global)
     }
 
     func saveGlobalMCPResponseViewing(_ policy: MCPResponseViewPolicy) async {
-        guard workspaceLoaded, !isTerminating, policy != .inherit, let store else { return }
+        guard workspaceLoaded, !workspaceMutationIsBlocked, policy != .inherit, let store else { return }
         await withAcceptedMutation { [weak self] in
             guard let self, !self.isTerminating else { return }
             do {
@@ -1772,7 +1787,7 @@ final class AppModel: ObservableObject {
     }
 
     func updateCollectionMCPPolicy(_ policy: MCPResourcePolicy, for collectionID: UUID) async {
-        guard !isTerminating,
+        guard !workspaceMutationIsBlocked,
             let store,
             collections.contains(where: { $0.id == collectionID && !$0.isReadOnly })
         else { return }
@@ -1843,7 +1858,7 @@ final class AppModel: ObservableObject {
     }
 
     func canEditVariables(_ owner: VariableOwner) -> Bool {
-        workspaceLoaded && !isTerminating && canCommitVariables(owner)
+        workspaceLoaded && !workspaceMutationIsBlocked && canCommitVariables(owner)
     }
 
     func variableContext(for identity: RequestIdentity) -> VariableContext {
@@ -1855,7 +1870,7 @@ final class AppModel: ObservableObject {
     }
 
     func variableInspection(named name: String, in origin: VariableOwner) -> VariableInspection? {
-        guard !isTerminating, activeVariableOwner == origin else { return nil }
+        guard !workspaceMutationIsBlocked, activeVariableOwner == origin else { return nil }
         let owners: [VariableOwner]
         switch origin {
         case .global: owners = [.global]
@@ -2313,7 +2328,7 @@ final class AppModel: ObservableObject {
 
     func createCollection(name: String) async {
         await initialWorkspaceLoadTask?.value
-        guard !isTerminating, let store else { return }
+        guard !workspaceMutationIsBlocked, let store else { return }
         let normalizedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalizedName.isEmpty else { return }
         guard !workspaceIndexIsReadOnly else {
@@ -2337,7 +2352,7 @@ final class AppModel: ObservableObject {
     }
 
     func renameCollection(id: UUID, name: String) async {
-        guard !isTerminating,
+        guard !workspaceMutationIsBlocked,
             !deletingCollections.contains(id),
             store != nil,
             collections.contains(where: { $0.id == id && !$0.isReadOnly })
@@ -2355,7 +2370,7 @@ final class AppModel: ObservableObject {
             operationError = "Collections cannot be deleted until snapshot storage is fully available."
             return
         }
-        guard !isTerminating,
+        guard !workspaceMutationIsBlocked,
             !deletingCollections.contains(id),
             !deletingRequests.contains(where: { $0.collectionID == id }),
             !automationEditingRequests.contains(where: { $0.collectionID == id }),
@@ -2373,7 +2388,7 @@ final class AppModel: ObservableObject {
     }
 
     func createRequest(in collectionID: UUID, name: String = "New request") async {
-        guard !isTerminating,
+        guard !workspaceMutationIsBlocked,
             !deletingCollections.contains(collectionID),
             collections.contains(where: { $0.id == collectionID && !$0.isReadOnly })
         else { return }
@@ -2398,7 +2413,7 @@ final class AppModel: ObservableObject {
             operationError = "Requests cannot be deleted until snapshot storage is fully available."
             return
         }
-        guard !isTerminating,
+        guard !workspaceMutationIsBlocked,
             !deletingCollections.contains(identity.collectionID),
             !deletingRequests.contains(identity),
             canEdit(identity)
@@ -2411,7 +2426,7 @@ final class AppModel: ObservableObject {
     }
 
     func reorderRequests(_ requestIDs: [UUID], in collectionID: UUID) async {
-        guard !isTerminating,
+        guard !workspaceMutationIsBlocked,
             !deletingCollections.contains(collectionID),
             collections.contains(where: { $0.id == collectionID && !$0.isReadOnly })
         else { return }
@@ -2432,7 +2447,7 @@ final class AppModel: ObservableObject {
         toCollectionID: UUID,
         beforeRequestID: UUID? = nil
     ) async {
-        guard !isTerminating,
+        guard !workspaceMutationIsBlocked,
             !movingRequests.contains(identity),
             !deletingCollections.contains(identity.collectionID),
             !deletingRequests.contains(identity),
@@ -2511,7 +2526,7 @@ final class AppModel: ObservableObject {
         guard issue.canRecover,
             let collectionID = issue.collectionID,
             let requestID = issue.requestID,
-            !isTerminating,
+            !workspaceMutationIsBlocked,
             !deletingCollections.contains(collectionID),
             let store
         else { return }
@@ -2580,11 +2595,11 @@ final class AppModel: ObservableObject {
     }
 
     func prepareForTermination() async -> Bool {
-        guard !isTerminating else { return false }
+        guard !isTerminating, !isRotatingEncryptionKey else { return false }
         isTerminating = true
         do {
             try await drainAcceptedMutations()
-            try await flushPendingSaves()
+            if !encryptionRecoveryRequired { try await flushPendingSaves() }
             for identity in Array(preparationTasks.keys) where activeRuns[identity]?.runID == nil {
                 cancelRequest(identity)
             }
@@ -2614,7 +2629,7 @@ final class AppModel: ObservableObject {
         let prepared = try await RequestPreparer.prepare(
             configuration, context: context, decryptor: secretVault, collection: defaults)
         try Task.checkCancellation()
-        guard !isTerminating, request(for: identity) == original,
+        guard !workspaceMutationIsBlocked, request(for: identity) == original,
             variableContext(for: identity) == context,
             self.collection(for: identity)?.headers == defaults.headers,
             self.collection(for: identity)?.authentication == defaults.authentication,
@@ -2829,7 +2844,7 @@ final class AppModel: ObservableObject {
 
     func acquireBodyResource(from source: ResponseBodySource) async throws -> ResponseBodyResource {
         try Task.checkCancellation()
-        guard !isTerminating else { throw ResponseBodyAccessError.unavailable }
+        guard !workspaceMutationIsBlocked else { throw ResponseBodyAccessError.unavailable }
         let resource: ResponseBodyResource
         switch source {
         case let .live(response):
@@ -2851,7 +2866,7 @@ final class AppModel: ObservableObject {
             else { throw ResponseBodyAccessError.unavailable }
             resource = ResponseBodyResource(url: response.bodyFileURL, origin: .snapshot(id))
         }
-        guard !isTerminating, !Task.isCancelled else {
+        guard !workspaceMutationIsBlocked, !Task.isCancelled else {
             await resource.invalidate()
             throw ResponseBodyAccessError.unavailable
         }
@@ -2877,7 +2892,7 @@ final class AppModel: ObservableObject {
         operation: @Sendable (URL) async throws -> Value
     ) async throws -> Value {
         try Task.checkCancellation()
-        guard !isTerminating, let executionManager else { throw ResponseBodyAccessError.unavailable }
+        guard !workspaceMutationIsBlocked, let executionManager else { throw ResponseBodyAccessError.unavailable }
         let lease = try await executionManager.acquireBodyLease(for: response)
         do {
             try Task.checkCancellation()
@@ -2934,7 +2949,7 @@ final class AppModel: ObservableObject {
     }
 
     func canSaveSnapshot(for identity: RequestIdentity) -> Bool {
-        guard !isTerminating,
+        guard !workspaceMutationIsBlocked,
             snapshotStore != nil,
             executionManager != nil,
             !movingRequests.contains(identity),
@@ -2976,7 +2991,7 @@ final class AppModel: ObservableObject {
     }
 
     func renameSnapshot(id: UUID, name: String) async {
-        guard !isTerminating, let snapshotStore else { return }
+        guard !workspaceMutationIsBlocked, let snapshotStore else { return }
         do {
             let saved = try await snapshotStore.rename(id: id, name: name)
             upsertSnapshot(saved)
@@ -2986,7 +3001,7 @@ final class AppModel: ObservableObject {
     }
 
     func deleteSnapshot(id: UUID) async {
-        guard !isTerminating, let snapshotStore else { return }
+        guard !workspaceMutationIsBlocked, let snapshotStore else { return }
         await withWorkspaceIndexMutation { [weak self] in
             guard let self, !self.isTerminating else { return }
             do {
@@ -3018,17 +3033,64 @@ final class AppModel: ObservableObject {
     }
 
     func exportEncryptionKey() async throws -> Data {
-        try await secretVault.exportKey()
+        await initialWorkspaceLoadTask?.value
+        guard workspaceLoaded, !workspaceMutationIsBlocked, let keyRotation, try await !keyRotation.isPending() else {
+            throw EncryptionKeyTransferError.workspaceUnavailable
+        }
+        return try await secretVault.exportKey()
+    }
+
+    var canRotateEncryptionKey: Bool {
+        workspaceLoaded && !workspaceMutationIsBlocked && activeRuns.isEmpty
+            && preparationTasks.isEmpty && secretCommitTasks.isEmpty && secretCommitErrors.isEmpty
+    }
+
+    func rotateEncryptionKey() async throws {
+        guard canRotateEncryptionKey, let keyRotation else {
+            throw EncryptionKeyTransferError.workspaceUnavailable
+        }
+        keyRotationIsRunning = true
+        defer { keyRotationIsRunning = false }
+        var attemptedRotation = false
+        do {
+            try await flushPendingSaves()
+            await waitForSnapshotSaves()
+            guard activeRuns.isEmpty, preparationTasks.isEmpty, secretCommitTasks.isEmpty else {
+                throw EncryptionKeyTransferError.workspaceChanged
+            }
+            _ = try await encryptionEnvelopesForKeyImport()
+            attemptedRotation = true
+            try await keyRotation.rotate()
+            drafts.removeAll()
+            openedSnapshots.removeAll()
+            snapshotOpenErrors.removeAll()
+            await loadWorkspace()
+            guard workspaceLoaded else { throw EncryptionKeyTransferError.workspaceUnavailable }
+        } catch {
+            if (try? await keyRotation.isPending()) != false {
+                encryptionRecoveryRequired = true
+                workspaceLoaded = false
+                startupError =
+                    "Encryption-key rotation needs recovery. Reopen Postie to resume. "
+                    + error.localizedDescription
+            } else if attemptedRotation {
+                drafts.removeAll()
+                openedSnapshots.removeAll()
+                snapshotOpenErrors.removeAll()
+                await loadWorkspace()
+            }
+            throw error
+        }
     }
 
     func mcpBearerToken() async throws -> String {
         await initialWorkspaceLoadTask?.value
-        guard workspaceLoaded, !isTerminating, let mcpTokenStore else {
+        guard workspaceLoaded, !isTerminating, !isRotatingEncryptionKey, let mcpTokenStore else {
             throw AutomationFailure(.unavailable, "The workspace is unavailable.")
         }
         let result = AutomationResultBox<String>()
         await withWorkspaceIndexMutation { [self] in
-            guard workspaceLoaded, !isTerminating else {
+            guard workspaceLoaded, !isTerminating, !isRotatingEncryptionKey else {
                 result.result = .failure(AutomationFailure(.unavailable, "The workspace is unavailable."))
                 return
             }
@@ -3049,7 +3111,12 @@ final class AppModel: ObservableObject {
     }
 
     func importEncryptionKey(_ key: Data) async throws -> SecretKeyImportResult {
+        await initialWorkspaceLoadTask?.value
+        guard workspaceLoaded, !workspaceMutationIsBlocked, let keyRotation, try await !keyRotation.isPending() else {
+            throw EncryptionKeyTransferError.workspaceUnavailable
+        }
         let envelopes = try await encryptionEnvelopesForKeyImport()
+        guard !isRotatingEncryptionKey else { throw EncryptionKeyTransferError.workspaceChanged }
         let result = try await secretVault.importKey(key, validating: envelopes)
         await refreshSelectedSnapshotAfterKeyImport()
         return result
@@ -3309,8 +3376,21 @@ final class AppModel: ObservableObject {
 
     private func loadWorkspace() async {
         guard let store else { return }
+        encryptionLoadCount += 1
+        defer { encryptionLoadCount -= 1 }
         workspaceLoaded = false
         await secretVault.setAllowsKeyCreation(false)
+        do {
+            if keyPreparationTask == nil {
+                keyPreparationTask = Task { [keyRotation] in try await keyRotation?.prepareWorkspace() }
+            }
+            try await keyPreparationTask?.value
+            encryptionRecoveryRequired = false
+        } catch {
+            encryptionRecoveryRequired = true
+            startupError = "Encryption-key recovery could not finish. " + error.localizedDescription
+            return
+        }
         while true {
             let revision = workspaceRevision
             do {

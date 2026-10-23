@@ -3,10 +3,12 @@ import Foundation
 public struct SecretEnvelope: Codable, Equatable, Sendable {
     public var version: Int
     public var combined: String
+    public var keyID: UUID?
 
-    public init(version: Int = 1, combined: String) {
+    public init(version: Int = 1, combined: String, keyID: UUID? = nil) {
         self.version = version
         self.combined = combined
+        self.keyID = keyID
     }
 }
 
@@ -159,4 +161,20 @@ public protocol SecretValueDecrypting: Sendable {
 public protocol ApplicationKeyStore: Sendable {
     func loadKey() throws -> Data?
     func createKey(_ proposedKey: Data) throws -> Data
+    func loadKey(id: UUID) throws -> Data?
+    func createKey(_ proposedKey: Data, id: UUID) throws -> Data
+}
+
+public enum ApplicationKeyStoreError: Error, Equatable, Sendable {
+    case unsupportedKeyIdentifier
+}
+
+public extension ApplicationKeyStore {
+    func loadKey(id: UUID) throws -> Data? {
+        throw ApplicationKeyStoreError.unsupportedKeyIdentifier
+    }
+
+    func createKey(_ proposedKey: Data, id: UUID) throws -> Data {
+        throw ApplicationKeyStoreError.unsupportedKeyIdentifier
+    }
 }

@@ -188,8 +188,15 @@ final class SecretVaultTests: XCTestCase {
         }
 
         do {
-            _ = try await vault.decrypt(SecretEnvelope(version: 2, combined: envelope.combined))
+            _ = try await vault.decrypt(SecretEnvelope(version: 3, combined: envelope.combined))
             XCTFail("Unknown envelope versions must be rejected")
+        } catch {
+            XCTAssertEqual(error as? SecretVaultError, .unsupportedEnvelopeVersion)
+        }
+
+        do {
+            _ = try await vault.decrypt(SecretEnvelope(version: 2, combined: envelope.combined))
+            XCTFail("A version 2 envelope must identify its key")
         } catch {
             XCTAssertEqual(error as? SecretVaultError, .unsupportedEnvelopeVersion)
         }

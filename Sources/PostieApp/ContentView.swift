@@ -119,7 +119,7 @@ struct ContentView: View {
                 }
             }
         }
-        .disabled(model.isTerminating)
+        .disabled(model.workspaceMutationIsBlocked)
         .sheet(item: $namePrompt) { prompt in
             NameInputSheet(prompt: prompt)
         }
