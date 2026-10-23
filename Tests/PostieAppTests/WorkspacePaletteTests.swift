@@ -196,6 +196,13 @@ final class WorkspacePaletteTests: XCTestCase {
         )
     }
 
+    func testSidebarCommandMatchesPartialCaseInsensitiveSearch() {
+        let results = WorkspacePalette.commands(matching: "sIdeB", collections: [])
+        XCTAssertEqual(results.map(\.command), [.toggleSidebar])
+        XCTAssertEqual(results.first?.detail, "⌘B")
+        XCTAssertEqual(results.first?.isEnabled, true)
+    }
+
     func testCommandFilteringIsCaseInsensitiveAndReadOnlyWorkspaceBlocksCreation() {
         let collectionID = UUID()
         let collection = RequestCollection(id: collectionID, name: "Gateway QA", isReadOnly: false)

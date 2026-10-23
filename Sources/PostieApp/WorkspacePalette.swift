@@ -48,6 +48,7 @@ enum WorkspacePaletteCommand: Hashable, Identifiable {
     case globalVariables
     case createCollection
     case toggleRequestResponseLayout
+    case toggleSidebar
     case setTheme(AppTheme)
     case collectionSettings(UUID)
     case createRequest(UUID)
@@ -183,6 +184,15 @@ enum WorkspacePalette {
                 isEnabled: true
             ),
         ]
+
+        results.append(
+            WorkspacePaletteCommandResult(
+                command: .toggleSidebar,
+                title: "Toggle Sidebar",
+                detail: "⌘B",
+                isEnabled: true
+            )
+        )
 
         for collection in collections {
             let collectionLabel = collectionLabel(collection, among: collections)

@@ -4,6 +4,7 @@ import PostieCore
 struct WorkspaceSwitcherView: View {
     @EnvironmentObject private var model: AppModel
     @AppStorage(AppTheme.preferenceKey) private var theme = AppTheme.system
+    @AppStorage("sidebarVisibility") private var sidebarIsVisible = false
     @AppStorage(RequestResponseLayout.preferenceKey) private var requestResponseLayout =
         RequestResponseLayout.sideBySide
     let opened: () -> Void
@@ -450,6 +451,7 @@ struct WorkspaceSwitcherView: View {
         case .globalVariables: "curlybraces"
         case .createCollection: "folder.badge.plus"
         case .toggleRequestResponseLayout: requestResponseLayout.symbolName
+        case .toggleSidebar: "sidebar.left"
         case .setTheme(.system): "circle.lefthalf.filled"
         case .setTheme(.light): "sun.max"
         case .setTheme(.dark): "moon"
@@ -556,6 +558,9 @@ struct WorkspaceSwitcherView: View {
                 {
                     requestResponseLayout = requestResponseLayout.toggled
                 }, changesDestination: false)
+        case .toggleSidebar:
+            finishPaletteAction(
+                { sidebarIsVisible.toggle() }, changesDestination: false)
         case let .setTheme(selectedTheme):
             finishPaletteAction(
                 {

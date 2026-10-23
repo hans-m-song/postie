@@ -24,6 +24,7 @@ struct PostieApp: App {
     @NSApplicationDelegateAdaptor(PostieAppDelegate.self) private var appDelegate
     @StateObject private var model: AppModel
     @AppStorage(AppTheme.preferenceKey) private var theme = AppTheme.system
+    @AppStorage("sidebarVisibility") private var sidebarIsVisible = false
     @AppStorage(RequestResponseLayout.preferenceKey) private var requestResponseLayout = RequestResponseLayout
         .sideBySide
 
@@ -43,6 +44,11 @@ struct PostieApp: App {
             CommandGroup(replacing: .appSettings) {
                 Button("Settings…") { model.showGlobalSettings() }
                     .keyboardShortcut(",", modifiers: [.command])
+            }
+            CommandGroup(replacing: .sidebar) {
+                Button("Toggle Sidebar") { sidebarIsVisible.toggle() }
+                    .keyboardShortcut("b", modifiers: [.command])
+                    .disabled(model.isTerminating)
             }
             CommandGroup(after: .sidebar) {
                 Button("Back") { model.navigateBack() }
