@@ -144,12 +144,56 @@ final class WorkspacePaletteTests: XCTestCase {
             Array(results.prefix(4).map(\.command)),
             [.settings, .requestHistory, .globalVariables, .createCollection]
         )
+        XCTAssertEqual(
+            Array(results.dropFirst(4).prefix(4).map(\.command)),
+            [
+                .toggleRequestResponseLayout,
+                .setTheme(.system),
+                .setTheme(.light),
+                .setTheme(.dark),
+            ]
+        )
         XCTAssertEqual(Set(results.map(\.id)).count, results.count)
         XCTAssertEqual(collectionSettings.count, 2)
         XCTAssertEqual(Set(collectionSettings.compactMap(\.detail)).count, 2)
         XCTAssertTrue(collectionSettings.allSatisfy { $0.detail?.contains("ID ") == true })
         XCTAssertEqual(createRequests.map(\.isEnabled), [true, false])
         XCTAssertTrue(results.first { $0.command == .createCollection }?.isEnabled == true)
+    }
+
+    func testAppearanceCommandsAreSearchableStableAndIncludedInUnprefixedResults() {
+        let commands = WorkspacePalette.commands(matching: "", collections: [])
+        let repeatCommands = WorkspacePalette.commands(matching: "", collections: [])
+        let appearanceCommands: [WorkspacePaletteCommand] = [
+            .toggleRequestResponseLayout,
+            .setTheme(.system),
+            .setTheme(.light),
+            .setTheme(.dark),
+        ]
+        let appearanceResults = commands.filter { appearanceCommands.contains($0.command) }
+        let repeatAppearanceResults = repeatCommands.filter { appearanceCommands.contains($0.command) }
+        let unprefixedResults = WorkspacePalette.results(
+            for: .all(query: ""),
+            navigation: [],
+            commands: commands,
+            variables: []
+        )
+        let layoutMatch = WorkspacePalette.commands(matching: "resPOnse Lay", collections: [])
+        let darkThemeMatch = WorkspacePalette.commands(matching: "dArK tHeMe", collections: [])
+        let themeMatches = AppTheme.allCases.map { theme in
+            WorkspacePalette.commands(matching: theme.title.lowercased(), collections: []).map(\.command)
+        }
+
+        XCTAssertEqual(appearanceResults.map(\.command), appearanceCommands)
+        XCTAssertEqual(appearanceResults.map(\.id), repeatAppearanceResults.map(\.id))
+        XCTAssertEqual(Set(appearanceResults.map(\.id)).count, appearanceCommands.count)
+        XCTAssertEqual(layoutMatch.map(\.command), [.toggleRequestResponseLayout])
+        XCTAssertEqual(darkThemeMatch.map(\.command), [.setTheme(.dark)])
+        XCTAssertEqual(themeMatches, AppTheme.allCases.map { [.setTheme($0)] })
+        XCTAssertEqual(
+            unprefixedResults.map(\.id),
+            commands.map { .command($0.id) }
+        )
     }
 
     func testCommandFilteringIsCaseInsensitiveAndReadOnlyWorkspaceBlocksCreation() {

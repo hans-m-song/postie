@@ -67,8 +67,8 @@ struct ContentView: View {
                     .onDisappear { presentWorkspaceCreation() }
                 }
             }
-            if !sidebarIsVisible {
-                ToolbarItemGroup(placement: .primaryAction) {
+            ToolbarItemGroup(placement: .primaryAction) {
+                if !sidebarIsVisible {
                     Button {
                         model.showOngoingRequests()
                     } label: {
@@ -97,7 +97,18 @@ struct ContentView: View {
                     }
                     .help("Global Variables")
                     .accessibilityLabel("Global Variables")
+                }
 
+                Button {
+                    requestResponseLayout = requestResponseLayout.toggled
+                } label: {
+                    Image(systemName: requestResponseLayout.symbolName)
+                }
+                .help("Toggle request and response layout")
+                .accessibilityLabel("Toggle request and response layout")
+                .accessibilityValue(requestResponseLayout.title)
+
+                if !sidebarIsVisible {
                     Button {
                         model.showGlobalSettings()
                     } label: {
@@ -106,16 +117,6 @@ struct ContentView: View {
                     .help("Settings")
                     .accessibilityLabel("Settings")
                 }
-            }
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    requestResponseLayout = requestResponseLayout == .sideBySide ? .stacked : .sideBySide
-                } label: {
-                    Image(systemName: requestResponseLayout.symbolName)
-                }
-                .help("Toggle request and response layout")
-                .accessibilityLabel("Toggle request and response layout")
-                .accessibilityValue(requestResponseLayout.title)
             }
         }
         .disabled(model.isTerminating)

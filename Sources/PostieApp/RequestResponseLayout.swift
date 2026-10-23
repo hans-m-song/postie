@@ -8,6 +8,8 @@ enum RequestResponseLayout: String, CaseIterable, Identifiable {
 
     var id: Self { self }
 
+    var toggled: Self { self == .sideBySide ? .stacked : .sideBySide }
+
     var title: String {
         switch self {
         case .sideBySide: "Side by Side"

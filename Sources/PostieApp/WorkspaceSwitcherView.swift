@@ -3,6 +3,9 @@ import PostieCore
 
 struct WorkspaceSwitcherView: View {
     @EnvironmentObject private var model: AppModel
+    @AppStorage(AppTheme.preferenceKey) private var theme = AppTheme.system
+    @AppStorage(RequestResponseLayout.preferenceKey) private var requestResponseLayout =
+        RequestResponseLayout.sideBySide
     let opened: () -> Void
     let createCollection: () -> Void
     let createRequest: (UUID) -> Void
@@ -446,6 +449,10 @@ struct WorkspaceSwitcherView: View {
         case .requestHistory: "clock.arrow.circlepath"
         case .globalVariables: "curlybraces"
         case .createCollection: "folder.badge.plus"
+        case .toggleRequestResponseLayout: requestResponseLayout.symbolName
+        case .setTheme(.system): "circle.lefthalf.filled"
+        case .setTheme(.light): "sun.max"
+        case .setTheme(.dark): "moon"
         case .createRequest(_): "plus"
         }
     }
@@ -544,6 +551,16 @@ struct WorkspaceSwitcherView: View {
         case .createCollection:
             guard !model.workspaceIndexIsReadOnly else { return }
             finishPaletteAction(createCollection)
+        case .toggleRequestResponseLayout:
+            finishPaletteAction(
+                {
+                    requestResponseLayout = requestResponseLayout.toggled
+                }, changesDestination: false)
+        case let .setTheme(selectedTheme):
+            finishPaletteAction(
+                {
+                    theme = selectedTheme
+                }, changesDestination: false)
         case let .collectionSettings(id):
             guard model.collections.contains(where: { $0.id == id }) else { return }
             finishPaletteAction { model.showCollection(id, section: .settings) }
@@ -563,8 +580,8 @@ struct WorkspaceSwitcherView: View {
         }
     }
 
-    private func finishPaletteAction(_ action: () -> Void) {
-        opened()
+    private func finishPaletteAction(_ action: () -> Void, changesDestination: Bool = true) {
+        if changesDestination { opened() }
         action()
         model.showsRequestSearch = false
     }

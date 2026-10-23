@@ -47,6 +47,8 @@ enum WorkspacePaletteCommand: Hashable, Identifiable {
     case requestHistory
     case globalVariables
     case createCollection
+    case toggleRequestResponseLayout
+    case setTheme(AppTheme)
     case collectionSettings(UUID)
     case createRequest(UUID)
 
@@ -155,6 +157,30 @@ enum WorkspacePalette {
                 title: "Create Collection…",
                 detail: nil,
                 isEnabled: !workspaceIndexIsReadOnly
+            ),
+            WorkspacePaletteCommandResult(
+                command: .toggleRequestResponseLayout,
+                title: "Toggle Request / Response Layout",
+                detail: nil,
+                isEnabled: true
+            ),
+            WorkspacePaletteCommandResult(
+                command: .setTheme(.system),
+                title: "Use System Theme",
+                detail: nil,
+                isEnabled: true
+            ),
+            WorkspacePaletteCommandResult(
+                command: .setTheme(.light),
+                title: "Use Light Theme",
+                detail: nil,
+                isEnabled: true
+            ),
+            WorkspacePaletteCommandResult(
+                command: .setTheme(.dark),
+                title: "Use Dark Theme",
+                detail: nil,
+                isEnabled: true
             ),
         ]
 

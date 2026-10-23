@@ -24,6 +24,8 @@ struct PostieApp: App {
     @NSApplicationDelegateAdaptor(PostieAppDelegate.self) private var appDelegate
     @StateObject private var model: AppModel
     @AppStorage(AppTheme.preferenceKey) private var theme = AppTheme.system
+    @AppStorage(RequestResponseLayout.preferenceKey) private var requestResponseLayout = RequestResponseLayout
+        .sideBySide
 
     init() {
         _model = StateObject(wrappedValue: AppModel.shared)
@@ -62,6 +64,20 @@ struct PostieApp: App {
                     .keyboardShortcut("2", modifiers: [.command])
                 Button("Global Variables") { model.showGlobalVariables() }
                     .keyboardShortcut("3", modifiers: [.command])
+                Divider()
+                Button("Toggle Request and Response Layout") {
+                    requestResponseLayout = requestResponseLayout.toggled
+                }
+                .disabled(model.isTerminating)
+                Menu("Theme") {
+                    Picker("Theme", selection: $theme) {
+                        ForEach(AppTheme.allCases, id: \.self) { theme in
+                            Text(theme.title).tag(theme)
+                        }
+                    }
+                    .pickerStyle(.inline)
+                }
+                .disabled(model.isTerminating)
             }
         }
     }
