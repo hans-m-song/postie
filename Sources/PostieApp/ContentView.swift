@@ -107,6 +107,16 @@ struct ContentView: View {
                     .accessibilityLabel("Settings")
                 }
             }
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    requestResponseLayout = requestResponseLayout == .sideBySide ? .stacked : .sideBySide
+                } label: {
+                    Image(systemName: requestResponseLayout.symbolName)
+                }
+                .help("Toggle request and response layout")
+                .accessibilityLabel("Toggle request and response layout")
+                .accessibilityValue(requestResponseLayout.title)
+            }
         }
         .disabled(model.isTerminating)
         .sheet(item: $namePrompt) { prompt in
