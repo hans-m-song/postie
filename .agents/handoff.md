@@ -1,5 +1,10 @@
 # Handoff
 
+2026-10-26 — T128 stable response rendering accepted. The user confirmed that performance is much better and the appearance looks good. Check in the response viewport, deferred stable highlighting, response-only input guards, regression tests and research/architecture notes as an isolated scope. Existing HAR import and audit changes remain separate.
+
+Validation: 13 focused cases; four benchmark shapes in two temporary cases; independent source review; full suite 548 cases with 546 passed, two existing filesystem skips and zero failures; lint, release build and strict signatures passed. No functional changes since those gates. The local bundle was refreshed without restarting Postie. Known limit remains: a 950 kB single line takes roughly 5.3 seconds for native initial layout even without highlighting. Further handling needs a separate design decision; user acceptance is for the current trial, not a claim that every large-file case is resolved.
+
+
 ## Latest checkpoint — 2026-10-22
 
 Active follow-up: user confirmed PDF/HTML sizing and external opening work and authorized check-in, then T104–T110 security/reliability/UI fixes with current-source re-review. User selected one main window for T108. Current-source reviews confirm findings persist; the snapshot encryption test explanation needs correction because encryption precedes body validation, though its catch-all assertion still needs repair. Main owns integration/docs/build lock. Fresh baseline `make test` passed all 393 tests (Core164/Control19/Automation32/App178); lint and whitespace checks passed. Logs: /Volumes/Data/tmp/postie-followup-baseline-tests.log and postie-followup-baseline-lint.log. Initial sandbox manifest-write restriction was resolved by approved scoped test execution. No follow-up source changes yet. A synthetic casing probe found /Volumes/Data/tmp case-insensitive; T106 needs an isolated case-sensitive test volume.

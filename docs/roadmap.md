@@ -1,10 +1,12 @@
 # Postie roadmap
 
-Updated 2026-10-22. This opening status is canonical; the task records below preserve decisions and historical checkpoints. IDs are stable and are not renumbered. Local Markdown remains the agreed tracker; TaskView migration is deferred until tracking is requested again.
+Updated 2026-10-26. This opening status is canonical; the task records below preserve decisions and historical checkpoints. IDs are stable and are not renumbered. Local Markdown remains the agreed tracker; TaskView migration is deferred until tracking is requested again.
 
 Local check-ins on 2026-10-22: 9fb17f6 formatting/Linux CI, 5973276 ordering/MCP/CLI foundation, 85fa94c accepted MCP discovery, db42d35 documentation. Deferred distribution work is preserved on deferred/ota-updates at 88ebb7a, outside main; no push/deployment. Local settings/state remain untracked and locally ignored. The isolated foundation passed279 tests and discovery passed27 focused tests after separation. Historical uncommitted-status statements below describe their dated checkpoint.
 
 ## Selected next work
+
+T128 stable-highlighting trial accepted, 2026-10-26: user confirmed much better performance and good appearance. Native viewport layout, background tokenization and deferred stable colours pass 13 focused cases, two benchmark cases/four shapes, independent review, full548 cases/546 passed/two existing skips, lint/release/strict signatures. Response-only safeguards pause highlighting above 1 MiB or a 20,000 UTF-16-unit line. Check in this accepted scope separately from HAR/audit work. Remaining limit: a 950 kB single line still takes about 5.3 seconds for native initial layout even with highlighting disabled; further handling needs a separate design decision. See response-performance.md and response-rendering-research.md.
 
 User confirmed PDF/HTML sizing and external opening on 2026-10-22 and requested check-in of the current body-support work. Fresh full baseline: 393 tests passed (Core164/Control19/Automation32/App178), strict lint and whitespace checks passed. This supersedes the remaining preview acceptance caveats below; large/password-protected PDFs and real upload workflows are not claimed individually user-tested. Embedded CSS/JS formatting remains deferred. Next selected work is T104–T110; user chose one main window for T108.
 

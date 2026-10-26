@@ -7,26 +7,13 @@ struct BodySourceTextDisplay: View {
     let syntax: BodySyntax
     let wrapsText: Bool
 
-    @ViewBuilder
     var body: some View {
-        if wrapsText {
-            highlightedText(wrapsToWidth: true)
-                .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-                .padding(10)
-        } else {
-            ScrollView(.horizontal) {
-                highlightedText(wrapsToWidth: false)
-                    .fixedSize(horizontal: true, vertical: true)
-                    .padding(10)
-            }
-        }
-    }
-
-    private func highlightedText(wrapsToWidth: Bool) -> some View {
         HighlightedResponseText(
             text: text.isEmpty ? "(empty body)" : text,
             syntax: syntax,
-            wrapsToWidth: wrapsToWidth
+            wrapsToWidth: wrapsText
         )
+        .frame(minWidth: 0, maxWidth: .infinity)
+        .responseBodyViewportFilling()
     }
 }

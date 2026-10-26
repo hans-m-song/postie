@@ -13,6 +13,7 @@ final class BodySourceTextDisplayTests: XCTestCase {
 
         let wrappedContentView = try XCTUnwrap(wrappedWindow.contentView)
         let wrappedTextView = try XCTUnwrap(findTextView(in: wrappedContentView))
+        XCTAssertNotNil(wrappedTextView.textLayoutManager)
         XCTAssertGreaterThan(lineCount(in: wrappedTextView), 1)
 
         let unwrappedWindow = makeWindow(wrapsText: false)
@@ -21,6 +22,7 @@ final class BodySourceTextDisplayTests: XCTestCase {
 
         let unwrappedContentView = try XCTUnwrap(unwrappedWindow.contentView)
         let unwrappedTextView = try XCTUnwrap(findTextView(in: unwrappedContentView))
+        XCTAssertNotNil(unwrappedTextView.textLayoutManager)
         XCTAssertEqual(lineCount(in: unwrappedTextView), 1)
 
         let overflowingScrollView = try XCTUnwrap(findOverflowingScrollView(in: unwrappedContentView))
@@ -52,24 +54,20 @@ final class BodySourceTextDisplayTests: XCTestCase {
     }
 
     private func lineCount(in textView: NSTextView) -> Int {
-        guard let layoutManager = textView.layoutManager, let textContainer = textView.textContainer else {
+        guard let textLayoutManager = textView.textLayoutManager else {
             return 0
         }
 
-        layoutManager.ensureLayout(for: textContainer)
         var count = 0
-        layoutManager.enumerateLineFragments(
-            forGlyphRange: NSRange(location: 0, length: layoutManager.numberOfGlyphs)
-        ) { _, _, _, _, _ in
-            count += 1
+        _ = textLayoutManager.enumerateTextLayoutFragments(from: nil, options: [.ensuresLayout]) { fragment in
+            count += fragment.textLineFragments.count
+            return true
         }
         return count
     }
 
     private func findTextView(in view: NSView) -> NSTextView? {
-        if let hostView = view as? NativeHighlightingHostView {
-            return hostView.textView
-        }
+        if let textView = view as? NSTextView { return textView }
 
         for subview in view.subviews {
             if let textView = findTextView(in: subview) {

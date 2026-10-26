@@ -1,5 +1,7 @@
 # Postie structure
 
+T128 response text rendering, 2026-10-26: the shared body display uses a bounded native TextKit 2 viewport. `ResponseTextViewport` coordinates background preparation and generation checks; `ResponseTextInputPolicy` checks response byte/line limits off-main; `ResponseTextViewportHostView` owns native scrolling/wrapping and reports interaction pauses; `ResponseTextHighlightingState` applies stable text-storage foreground attributes in bounded yielding batches and cancels obsolete work. Scrolling does not mutate installed syntax colours. The previous viewport span index and range-eviction machinery have been removed. Existing `NativeHighlightingHostView` and shared editor highlighting remain unchanged. See [response-performance.md](response-performance.md).
+
 The [2026-10-21 module and blind test review](review-2026-10-21.md) maps current responsibilities and specific boundary issues. [Linux CI](ci.md) describes formatting/parser/workflow checks; macOS remains required for application builds and functional execution.
 
 Updated 2026-10-22. One SwiftPM package; PostieCore remains dependency-free. Layout/snapshots and manual key transfer are user-verified in local commits b066227 and 661e149. Ordering/MCP/CLI passed selected checks; user-verified operations and remaining checks are recorded in [automation](automation.md). OTA/distribution tooling is isolated on deferred/ota-updates, outside main.
@@ -86,7 +88,11 @@ Sources/PostieApp/
   VariableCompletion.swift     Bounded token matching and ordinary-value previews
   VariableCompletionPopover.swift Native completion list and positioning
   VariableInspection.swift     Scoped token inspector, explicit reveal and navigation
-  HighlightedResponseText.swift Selectable natural-size response text
+  HighlightedResponseText.swift Shared selectable response viewport entry point
+  ResponseTextViewport.swift    Native bridge and cancellable background preparation
+  ResponseTextInputPolicy.swift Off-main response highlighting byte/line guards
+  ResponseTextViewportHostView.swift Native scrolling, wrapping and interaction pauses
+  ResponseTextHighlightingState.swift Stable foreground attributes in yielding batches
   AuthenticationEditor.swift    Explicit transient secret editing
   VariableEditorView.swift      Scoped plain/secret variable editing
   VariableOwner.swift           App scope identity
